@@ -25,11 +25,11 @@ npm install --save rouge
 To use it, simply require the package:
 
 ```javascript
-import rouge from 'rouge';  // ES2015+
+import rouge from 'rouge'; // ES2015+
 
 // OR
 
-const rouge = require('rouge');  // CommonJS
+const rouge = require('rouge'); // CommonJS
 ```
 
 A small but growing number of tests exist. To run them:
@@ -72,11 +72,7 @@ import { n as rougeN } from 'rouge';
 import { jackKnife } from 'rouge/utils';
 
 const ref = 'police killed the gunman';
-const cands = [
-  'police kill the gunman',
-  'the gunman kill police',
-  'the gunman police killed',
-];
+const cands = ['police kill the gunman', 'the gunman kill police', 'the gunman police killed'];
 
 // Standard evaluation taking the arithmetic mean
 jackKnife(cands, ref, rougeN);
@@ -112,7 +108,7 @@ Before opening any issue, please search for existing issues and read the [Issue 
 
 ## Contributing
 
-Please submit all pull requests against *-wip branches. All code should pass ESLint validation. Note that files in `/lib` are written in TypeScript syntax and transpiled to corresponding files in `/dist`. Gulp build pipelines exist and should be used.
+Please submit all pull requests against \*-wip branches. All code should pass ESLint validation. Note that files in `/lib` are written in TypeScript syntax and transpiled to corresponding files in `/dist`. Gulp build pipelines exist and should be used.
 
 The amount of data available for writing tests is unfortunately woefully inadequate. We've tried to be as thorough as possible, but that eliminates neither the possibility of nor existence of errors. The gold standard is the DUC data-set, but that too is form-walled and legal-release-walled, which is infuriating. If you have data in the form of a candidate summary, reference(s), and a verified ROUGE score you do not mind sharing, we would love to add that to the test harness.
 

@@ -1,0 +1,17 @@
+# Ignore artifacts:
+dist
+build
+coverage
+
+# Ignore all HTML files:
+*.html
+
+# Ignore node_modules
+node_modules
+
+# Ignore package-lock.json
+package-lock.json
+
+# Ignore compiled JavaScript files if you're using TypeScript
+*.js
+*.js.map

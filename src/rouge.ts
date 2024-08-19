@@ -1,13 +1,3 @@
-/**
-* @flow
-* @license
-* @Author: Lim Mingjie, Kenneth
-* @Date:   2016-01-20T18:56:14-05:00
-* @Email:  me@kenlimmj.com
-* @Last modified by:   Astrianna
-* @Last modified time: 2016-02-27T19:50:25-05:00
-*/
-
 import * as utils from './utils';
 export * from './utils';
 
@@ -36,23 +26,26 @@ export function n(
   cand: string,
   ref: string,
   opts: {
-    n: number,
-    nGram: ((tokens: Array<string>, n: number) => Array<string>),
-    tokenizer: ((input: string) => Array<string>)
+    n?: number;
+    nGram?: (tokens: string[], n: number) => string[];
+    tokenizer?: (input: string) => string[];
   }
 ): number {
   if (cand.length === 0) throw new RangeError('Candidate cannot be an empty string');
   if (ref.length === 0) throw new RangeError('Reference cannot be an empty string');
 
   // Merge user-provided configuration with defaults
-  opts = Object.assign({
-    n: 1,
-    nGram: utils.nGram,
-    tokenizer: utils.treeBankTokenize,
-  }, opts);
+  const options = Object.assign(
+    {
+      n: 1,
+      nGram: utils.nGram,
+      tokenizer: utils.treeBankTokenize,
+    },
+    opts
+  );
 
-  const candGrams = opts.nGram(opts.tokenizer(cand), opts.n);
-  const refGrams = opts.nGram(opts.tokenizer(ref), opts.n);
+  const candGrams = options.nGram(options.tokenizer(cand), options.n);
+  const refGrams = options.nGram(options.tokenizer(ref), options.n);
 
   const match = utils.intersection(candGrams, refGrams);
   return match.length / refGrams.length;
@@ -84,23 +77,26 @@ export function s(
   cand: string,
   ref: string,
   opts: {
-    beta: number,
-    skipBigram: ((tokens: Array<string>) => Array<string>),
-    tokenizer: ((input: string) => Array<string>)
+    beta?: number;
+    skipBigram?: (tokens: string[]) => string[];
+    tokenizer?: (input: string) => string[];
   }
 ): number {
   if (cand.length === 0) throw new RangeError('Candidate cannot be an empty string');
   if (ref.length === 0) throw new RangeError('Reference cannot be an empty string');
 
   // Merge user-provided configuration with defaults
-  opts = Object.assign({
-    beta: 0.5,
-    skipBigram: utils.skipBigram,
-    tokenizer: utils.treeBankTokenize,
-  }, opts);
+  const options = Object.assign(
+    {
+      beta: 0.5,
+      skipBigram: utils.skipBigram,
+      tokenizer: utils.treeBankTokenize,
+    },
+    opts
+  );
 
-  const candGrams = opts.skipBigram(opts.tokenizer(cand));
-  const refGrams = opts.skipBigram(opts.tokenizer(ref));
+  const candGrams = options.skipBigram(options.tokenizer(cand));
+  const refGrams = options.skipBigram(options.tokenizer(ref));
 
   const skip2 = utils.intersection(candGrams, refGrams).length;
 
@@ -110,7 +106,7 @@ export function s(
     const skip2Recall = skip2 / refGrams.length;
     const skip2Prec = skip2 / candGrams.length;
 
-    return utils.fMeasure(skip2Prec, skip2Recall, opts.beta);
+    return utils.fMeasure(skip2Prec, skip2Recall, options.beta);
   }
 }
 
@@ -141,42 +137,45 @@ export function l(
   cand: string,
   ref: string,
   opts: {
-    beta: number,
-    lcs: ((a: Array<string>, b: Array<string>) => Array<string>),
-    segmenter: ((input: string) => Array<string>),
-    tokenizer: ((input: string) => Array<string>)
+    beta?: number;
+    lcs?: (a: string[], b: string[]) => string[];
+    segmenter?: (input: string) => string[];
+    tokenizer?: (input: string) => string[];
   }
 ): number {
   if (cand.length === 0) throw new RangeError('Candidate cannot be an empty string');
   if (ref.length === 0) throw new RangeError('Reference cannot be an empty string');
 
   // Merge user-provided configuration with defaults
-  opts = Object.assign({
-    beta: 0.5,
-    lcs: utils.lcs,
-    segmenter: utils.sentenceSegment,
-    tokenizer: utils.treeBankTokenize,
-  }, opts);
+  const options = Object.assign(
+    {
+      beta: 0.5,
+      lcs: utils.lcs,
+      segmenter: utils.sentenceSegment,
+      tokenizer: utils.treeBankTokenize,
+    },
+    opts
+  );
 
-  const candSents = opts.segmenter(cand);
-  const refSents = opts.segmenter(ref);
+  const candSents = options.segmenter(cand);
+  const refSents = options.segmenter(ref);
 
-  const candWords = opts.tokenizer(cand);
-  const refWords = opts.tokenizer(ref);
+  const candWords = options.tokenizer(cand);
+  const refWords = options.tokenizer(ref);
 
-  const lcsAcc = refSents.map(r => {
-    const rTokens = opts.tokenizer(r);
-    const lcsUnion = new Set(...candSents.map(c => opts.lcs(opts.tokenizer(c), rTokens)));
+  const lcsAcc = refSents.map((r) => {
+    const rTokens = options.tokenizer(r);
+    const lcsUnion = new Set(...candSents.map((c) => options.lcs(options.tokenizer(c), rTokens)));
 
     return lcsUnion.size;
   });
 
   // Sum the array as quickly as we can
   let lcsSum = 0;
-  while (lcsAcc.length) lcsSum += lcsAcc.pop();
+  while (lcsAcc.length) lcsSum += lcsAcc.pop() || 0;
 
   const lcsRecall = lcsSum / candWords.length;
   const lcsPrec = lcsSum / refWords.length;
 
-  return utils.fMeasure(lcsPrec, lcsRecall, opts.beta);
+  return utils.fMeasure(lcsPrec, lcsRecall, options.beta);
 }

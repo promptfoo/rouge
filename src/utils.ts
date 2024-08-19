@@ -1,18 +1,4 @@
-/**
-* @flow
-* @license
-* @Author: Lim Mingjie, Kenneth
-* @Date:   2016-01-20T18:56:22-05:00
-* @Email:  me@kenlimmj.com
-* @Last modified by:   Astrianna
-* @Last modified time: 2016-02-27T21:34:23-05:00
-*/
-
-import {
-  GATE_SUBSTITUTIONS,
-  GATE_EXCEPTIONS,
-  TREEBANK_CONTRACTIONS,
-} from './constants';
+import { GATE_SUBSTITUTIONS, GATE_EXCEPTIONS, TREEBANK_CONTRACTIONS } from './constants';
 
 /**
  * Splits a sentence into an array of word tokens
@@ -31,7 +17,7 @@ import {
  * @param  {string}           input     The sentence to be tokenized
  * @return {Array<string>}              An array of word tokens
  */
-export function treeBankTokenize(input: string): Array<string> {
+export function treeBankTokenize(input: string): string[] {
   if (input.length === 0) return [];
 
   // Does the following things in order of appearance by line:
@@ -46,14 +32,15 @@ export function treeBankTokenize(input: string): Array<string> {
   // 6. Wrap spaces around all exclamation marks and question marks
   // 7. Wrap spaces around opening and closing brackets
   // 8. Wrap spaces around en and em-dashes
-  let parse = input.replace(/^\"/, ' `` ')
-                   .replace(/([ (\[{<])"/g, '$1 `` ')
-                   .replace(/\.\.\.*/g, ' ... ')
-                   .replace(/[;@#$%&]/g, ' $& ')
-                   .replace(/([^\.])(\.)([\]\)}>"\']*)\s*$/g, '$1 $2$3 ')
-                   .replace(/[,?!]/g, ' $& ')
-                   .replace(/[\]\[\(\)\{\}<>]/g, ' $& ')
-                   .replace(/---*/g, ' -- ');
+  let parse = input
+    .replace(/^\"/, ' `` ')
+    .replace(/([ (\[{<])"/g, '$1 `` ')
+    .replace(/\.\.\.*/g, ' ... ')
+    .replace(/[;@#$%&]/g, ' $& ')
+    .replace(/([^\.])(\.)([\]\)}>"\']*)\s*$/g, '$1 $2$3 ')
+    .replace(/[,?!]/g, ' $& ')
+    .replace(/[\]\[\(\)\{\}<>]/g, ' $& ')
+    .replace(/---*/g, ' -- ');
 
   // Wrap spaces at the start and end of the sentence for consistency
   // i.e. reduce the number of Regex matches required
@@ -64,10 +51,11 @@ export function treeBankTokenize(input: string): Array<string> {
   // 2. Wrap possessive or closing single quotes
   // 3. Add a space before single quotes followed by `s`, `m`, or `d` and a space
   // 4. Add a space before occurrences of `'ll`, `'re`, `'ve` or `n't`
-  parse = parse.replace(/"/g, ' \'\' ')
-               .replace(/([^'])' /g, '$1 \' ')
-               .replace(/'([sSmMdD]) /g, ' \'$1 ')
-               .replace(/('ll|'LL|'re|'RE|'ve|'VE|n't|N'T) /g, ' $1 ');
+  parse = parse
+    .replace(/"/g, " '' ")
+    .replace(/([^'])' /g, "$1 ' ")
+    .replace(/'([sSmMdD]) /g, " '$1 ")
+    .replace(/('ll|'LL|'re|'RE|'ve|'VE|n't|N'T) /g, ' $1 ');
 
   let iterator = -1;
   while (iterator++ < TREEBANK_CONTRACTIONS.length) {
@@ -76,8 +64,7 @@ export function treeBankTokenize(input: string): Array<string> {
   }
 
   // Concatenate double spaces and remove start/end spaces
-  parse = parse.replace(/\ \ +/g, ' ')
-               .replace(/^\ |\ $/g, '');
+  parse = parse.replace(/\ \ +/g, ' ').replace(/^\ |\ $/g, '');
 
   // Split on spaces (original and inserted) to return the tokenized result
   return parse.split(' ');
@@ -94,19 +81,19 @@ export function treeBankTokenize(input: string): Array<string> {
  * @param  {string}         input     The document to be segmented
  * @return {Array<string>}            An array of sentences
  */
-export function sentenceSegment(input: string): Array<string> {
+export function sentenceSegment(input: string): string[] {
   if (input.length === 0) return [];
 
-  const abbrvReg = new RegExp('\\b(' + GATE_SUBSTITUTIONS.join('|') + ')[.!?] ?$', 'i');
+  const abbrvReg = new RegExp(`\\b(${GATE_SUBSTITUTIONS.join('|')})[.!?] ?$`, 'i');
   const acronymReg = new RegExp(/[ |.][A-Z].?$/, 'i');
   const breakReg = new RegExp(/[\r\n]+/, 'g');
   const ellipseReg = new RegExp(/\.\.\.*$/);
-  const excepReg = new RegExp('\\b(' + GATE_EXCEPTIONS.join('|') + ')[.!?] ?$', 'i');
+  const excepReg = new RegExp(`\\b(${GATE_EXCEPTIONS.join('|')})[.!?] ?$`, 'i');
 
   // Split sentences naively based on common terminals (.?!")
-  let chunks = input.split(/(\S.+?[.?!])(?=\s+|$|")/g);
+  const chunks = input.split(/(\S.+?[.?!])(?=\s+|$|")/g);
 
-  let acc = [];
+  const acc: string[] = [];
   for (let idx = 0; idx < chunks.length; idx++) {
     if (chunks[idx]) {
       // Trim only whitespace (i.e. preserve line breaks/carriage feeds)
@@ -117,7 +104,8 @@ export function sentenceSegment(input: string): Array<string> {
           // Catch line breaks embedded within valid sentences
           // i.e. sentences that start with a capital letter
           // and merge them with a delimiting space
-          chunks[idx + 1] = (chunks[idx].trim() || '') + ' ' + (chunks[idx + 1] || '').replace(/ +/g, ' ');
+          chunks[idx + 1] =
+            `${chunks[idx].trim() || ''} ${(chunks[idx + 1] || '').replace(/ +/g, ' ')}`;
         } else {
           // Assume that all other embedded line breaks are
           // valid sentence breakpoints
@@ -132,7 +120,7 @@ export function sentenceSegment(input: string): Array<string> {
           chunks[idx] = '';
         } else {
           // Catch common abbreviations and merge them with a delimiting space
-          chunks[idx + 1] = (chunks[idx] || '') + ' ' + (nextChunk || '').replace(/ +/g, ' ');
+          chunks[idx + 1] = `${chunks[idx] || ''} ${(nextChunk || '').replace(/ +/g, ' ')}`;
         }
       } else if (chunks[idx].length > 1 && chunks[idx + 1] && acronymReg.test(chunks[idx])) {
         const words = chunks[idx].split(' ');
@@ -140,12 +128,16 @@ export function sentenceSegment(input: string): Array<string> {
 
         if (lastWord === lastWord.toLowerCase()) {
           // Catch small-letter abbreviations and merge them.
-          chunks[idx + 1] = chunks[idx + 1] = (chunks[idx] || '') + ' ' + (chunks[idx + 1] || '').replace(/ +/g, ' ');
+          chunks[idx + 1] = chunks[idx + 1] =
+            `${chunks[idx] || ''} ${(chunks[idx + 1] || '').replace(/ +/g, ' ')}`;
         } else if (chunks[idx + 2]) {
           if (strIsTitleCase(words[words.length - 2]) && strIsTitleCase(chunks[idx + 2])) {
             // Catch name abbreviations (e.g. Albert I. Jones) by checking if
             // the previous and next words are all capitalized.
-            chunks[idx + 2] = (chunks[idx] || '') + (chunks[idx + 1] || '').replace(/ +/g, ' ') + (chunks[idx + 2] || '');
+            chunks[idx + 2] =
+              (chunks[idx] || '') +
+              (chunks[idx + 1] || '').replace(/ +/g, ' ') +
+              (chunks[idx + 2] || '');
           } else {
             // Assume that remaining entities are indeed end-of-sentence markers.
             acc.push(chunks[idx]);
@@ -199,18 +191,20 @@ export function charIsUpperCase(input: string): boolean {
  *                            A store should implement `has`, `get`, and `set` methods.
  * @return {Function}         A closure of the memoization cache and the original function
  */
-function memoize(func: Function, Store: Function = Map): Function {
+function memoize<T, R>(func: (arg: T) => R, Store: new () => Map<T, R> = Map): (arg: T) => R {
   return (() => {
-    let cache = new Store();
+    const cache = new Store();
 
-    return (n) => {
+    return (n: T) => {
       if (cache.has(n)) {
-        return cache.get(n);
-      } else {
-        let result = func(n);
-        cache.set(n, result);
-        return result;
+        const cachedResult = cache.get(n);
+        if (cachedResult !== undefined) {
+          return cachedResult;
+        }
       }
+      const result = func(n);
+      cache.set(n, result);
+      return result;
     };
   })();
 }
@@ -231,10 +225,7 @@ function memoize(func: Function, Store: Function = Map): Function {
  * @param  {number} acc   The starting value for the computation. Defaults to 1.
  * @return {number}       The factorial result
  */
-function factRec(
-  x: number,
-  acc: number = 1
-): number {
+function factRec(x: number, acc: number = 1): number {
   if (x < 0) throw RangeError('Input must be a positive number');
   return x < 2 ? acc : factRec(x - 1, x * acc);
 }
@@ -248,12 +239,10 @@ export const fact = memoize(factRec);
  * @param  {Array<string>}    tokens      An array of word tokens
  * @return {Array<string>}                An array of skip bigram strings
  */
-export function skipBigram(
-  tokens: Array<string>
-): Array<string> {
+export function skipBigram(tokens: string[]): string[] {
   if (tokens.length < 2) throw new RangeError('Input must have at least two words');
 
-  let acc = [];
+  const acc: string[] = [];
   for (let baseIdx = 0; baseIdx < tokens.length - 1; baseIdx++) {
     for (let sweepIdx = baseIdx + 1; sweepIdx < tokens.length; sweepIdx++) {
       acc.push(`${tokens[baseIdx]} ${tokens[sweepIdx]}`);
@@ -263,7 +252,17 @@ export function skipBigram(
   return acc;
 }
 
-export const NGRAM_DEFAULT_OPTS = { start: false, end: false, val: '<S>' };
+interface NGramOptions {
+  start: boolean;
+  end: boolean;
+  val: string;
+}
+
+export const NGRAM_DEFAULT_OPTS: NGramOptions = {
+  start: false,
+  end: false,
+  val: '<S>',
+};
 
 /**
  * Returns n-grams for an array of word tokens.
@@ -274,22 +273,18 @@ export const NGRAM_DEFAULT_OPTS = { start: false, end: false, val: '<S>' };
  * @param  {Object}                 pad       String padding options. See example.
  * @return {Array<string>}                    An array of n-gram strings
  */
-export function nGram(
-  tokens: Array<string>,
-  n: number = 2,
-  pad: Object = {}
-): Array<string> {
+export function nGram(tokens: string[], n: number = 2, pad: Partial<NGramOptions> = {}): string[] {
   if (n < 1) throw new RangeError('ngram size cannot be smaller than 1');
 
   if (tokens.length < n) {
     throw new RangeError('ngram size cannot be larger than the number of tokens available');
   }
 
-  if (pad !== {}) {
-    const config = Object.assign({}, NGRAM_DEFAULT_OPTS, pad);
+  if (Object.keys(pad).length !== 0) {
+    const config = { ...NGRAM_DEFAULT_OPTS, ...pad };
 
     // Clone the input token array to avoid mutating the source data
-    let tempTokens = tokens.slice(0);
+    const tempTokens = tokens.slice(0);
 
     if (config.start) for (let i = 0; i < n - 1; i++) tempTokens.unshift(config.val);
     if (config.end) for (let i = 0; i < n - 1; i++) tempTokens.push(config.val);
@@ -297,8 +292,8 @@ export function nGram(
     tokens = tempTokens;
   }
 
-  let acc = [];
-  for (let idx = 0; idx < (tokens.length - n + 1); idx++) {
+  const acc: string[] = [];
+  for (let idx = 0; idx < tokens.length - n + 1; idx++) {
     acc.push(tokens.slice(idx, idx + n).join(' '));
   }
 
@@ -324,7 +319,7 @@ export function comb2(val: number): number {
  * @param  {Array<number>}   input    Data distribution
  * @return {number}                   The mean of the distribution
  */
-export function arithmeticMean(input: Array<number>): number {
+export function arithmeticMean(input: number[]): number {
   if (input.length < 1) throw new RangeError('Input array must have at least 1 element');
   return input.reduce((x, y) => x + y) / input.length;
 }
@@ -335,7 +330,7 @@ export function arithmeticMean(input: Array<number>): number {
  *
  * @method jackKnife
  * @param  {Array<string>}  cands      An array of candidate summaries to be evaluated
- * @param  {string}         ref        The reference summary to be evealuated against
+ * @param  {string}         ref        The reference summary to be evaluated against
  * @param  {Function}       func       The function used to evaluate a candidate against a reference.
  *                                     Should be of the type signature (string, string) => number
  * @param  {Function}       test       The function used to compute the test statistic.
@@ -344,21 +339,21 @@ export function arithmeticMean(input: Array<number>): number {
  * @return {number}                    The result computed by applying `test` to the resampled data
  */
 export function jackKnife(
-  cands: Array<string>,
+  cands: string[],
   ref: string,
-  func: ((x: string, y: string) => number),
-  test: ((x: Array<number>) => number) = arithmeticMean
+  func: (x: string, y: string) => number,
+  test: (x: number[]) => number = arithmeticMean
 ): number {
   if (cands.length < 2) {
     throw new RangeError('Candidate array must contain more than one element');
   }
 
-  const pairs = cands.map(c => func(c, ref));
+  const pairs: number[] = cands.map((c) => func(c, ref));
 
-  let acc = [];
+  const acc: number[] = [];
   for (let idx = 0; idx < pairs.length; idx++) {
     // Clone the array and remove one element
-    let leaveOneOut = pairs.slice(0);
+    const leaveOneOut = pairs.slice(0);
     leaveOneOut.splice(idx, 1);
 
     acc.push(Math.max(...leaveOneOut));
@@ -372,7 +367,7 @@ export function jackKnife(
  * and recall score.
  *
  * DUC evaluation favors precision by setting beta to an
- * arbitary large number. To replicate this, set beta to
+ * arbitrary large number. To replicate this, set beta to
  * any value larger than 1.
  *
  * @method fMeasure
@@ -382,11 +377,7 @@ export function jackKnife(
  *                              Defaults to 0.5, i.e. mean f-score
  * @return {number}             Computed f-score
  */
-export function fMeasure(
-  p: number,
-  r: number,
-  beta: number = 0.5
-): number {
+export function fMeasure(p: number, r: number, beta: number = 0.5): number {
   if (p < 0 || p > 1) throw new RangeError('Precision value p must have bounds 0 ≤ p ≤ 1');
   if (r < 0 || r > 1) throw new RangeError('Recall value r must have bounds 0 ≤ r ≤ 1');
 
@@ -403,15 +394,16 @@ export function fMeasure(
  * Computes the set intersection of two arrays
  *
  * @method intersection
- * @param  {Array<string>}    a     The first array
- * @param  {Array<string>}    b     The second array
- * @return {Array<string>}          Elements common to both the first and second array
+ * @template T
+ * @param  {Array<T>}    a     The first array
+ * @param  {Array<T>}    b     The second array
+ * @return {Array<T>}          Elements common to both the first and second array
  */
-export function intersection(a: Array<string>, b: Array<string>): Array<string> {
+export function intersection<T>(a: T[], b: T[]): T[] {
   const test = new Set(a);
   const ref = new Set(b);
 
-  return Array.from(test).filter(elem => ref.has(elem));
+  return Array.from(test).filter((elem): elem is T => ref.has(elem));
 }
 
 /**
@@ -419,7 +411,7 @@ export function intersection(a: Array<string>, b: Array<string>): Array<string> 
  * This function returns the elements from the two arrays
  * that form the LCS, in order of their appearance.
  *
- * For speed, the search-space is prunned by eliminating
+ * For speed, the search-space is pruned by eliminating
  * common entities at the start and end of both input arrays.
  *
  * @method lcs
@@ -427,35 +419,38 @@ export function intersection(a: Array<string>, b: Array<string>): Array<string> 
  * @param  {Array<string>}    b     The second array
  * @return {Array<string>}          The longest common subsequence between the first and second array
  */
-export function lcs(a: Array<string>, b: Array<string>): Array<string> {
+export function lcs(a: string[], b: string[]): string[] {
   if (a.length === 0 || b.length === 0) return [];
 
-  let start = [];
-  let end = [];
+  const dp: number[][] = Array(a.length + 1)
+    .fill(0)
+    .map(() => Array(b.length + 1).fill(0));
 
-  let startIdx = 0;
-  let aEndIdx = a.length - 1;
-  let bEndIdx = b.length - 1;
-
-  while (a[startIdx] && b[startIdx] && (a[startIdx] === b[startIdx])) {
-    start.push(a[startIdx]);
-    startIdx++;
-  }
-
-  while (a[aEndIdx] && b[bEndIdx] && (a[aEndIdx] === b[bEndIdx])) {
-    end.push(a[aEndIdx]);
-    aEndIdx--;
-    bEndIdx--;
-  }
-
-  let trimmedA = a.slice(startIdx, aEndIdx + 1);
-  let trimmedB = b.slice(startIdx, bEndIdx + 1);
-
-  for (let bIdx = 0; bIdx < trimmedB.length; bIdx++) {
-    for (let aIdx = 0; aIdx < trimmedA.length; aIdx++) {
-      if (trimmedB[bIdx] === trimmedA[aIdx]) start.push(trimmedA[aIdx]);
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
     }
   }
 
-  return start.concat(end);
+  const lcsResult: string[] = [];
+  let i = a.length;
+  let j = b.length;
+
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) {
+      lcsResult.unshift(a[i - 1]);
+      i--;
+      j--;
+    } else if (dp[i - 1][j] > dp[i][j - 1]) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+
+  return lcsResult;
 }
