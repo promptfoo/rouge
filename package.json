@@ -1,57 +1,53 @@
 {
   "name": "rouge",
-  "version": "2.0.0",
-  "description": "Recall-Oriented Understudy for Gisting Evaluation (ROUGE) Evaluation Functions",
-  "main": "dist/es5/rouge.js",
-  "jsnext:main": "dist/es6/rouge.js",
+  "version": "3.0.0",
+  "description": "Recall-Oriented Understudy for Gisting Evaluation (ROUGE) Evaluation Functions with TypeScript support",
+  "main": "dist/rouge.js",
+  "module": "dist/rouge.mjs",
+  "types": "dist/rouge.d.ts",
   "scripts": {
-    "test": "babel-node ./node_modules/istanbul/lib/cli.js cover --report html _mocha"
+    "test": "jest",
+    "build": "esbuild src/rouge.ts --bundle --minify --sourcemap --platform=node --target=node18 --outfile=dist/rouge.js && esbuild src/rouge.ts --bundle --minify --sourcemap --platform=neutral --format=esm --outfile=dist/rouge.mjs",
+    "type-check": "tsc --noEmit src/",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"**/*.{ts,js,json,md}\""
   },
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/kenlimmj/rouge.git"
+    "url": "git+https://github.com/promptfoo/rouge.git"
   },
   "keywords": [
     "ROUGE",
     "Auto-summarization",
-    "NLP"
+    "NLP",
+    "TypeScript"
   ],
   "author": "Lim Mingje, Kenneth <me@kenlimmj.com> (https://kenlimmj.com)",
+  "contributors": [
+    "promptfoo (https://promptfoo.dev)"
+  ],
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/kenlimmj/rouge/issues"
+    "url": "https://github.com/promptfoo/rouge/issues"
   },
-  "homepage": "https://github.com/kenlimmj/rouge",
+  "homepage": "https://github.com/promptfoo/rouge",
   "devDependencies": {
-    "babel-plugin-transform-flow-strip-types": "^6.4.0",
-    "babel-preset-es2015-rollup": "^1.1.1",
-    "chai": "^3.4.1",
-    "gulp": "^3.9.0",
-    "gulp-babel": "^6.1.1",
-    "gulp-concat": "^2.6.0",
-    "gulp-foreach": "^0.1.0",
-    "gulp-plumber": "^1.0.1",
-    "gulp-rollup": "^1.7.0",
-    "gulp-sourcemaps": "^1.6.0",
-    "isparta": "^4.0.0",
-    "istanbul": "^0.4.2",
-    "mocha": "^2.3.4",
-    "mocha-better-spec-reporter": "^3.0.1",
-    "rollup-plugin-babel": "^2.3.9",
-    "rollup-plugin-uglify": "^0.1.0",
-    "run-sequence": "^1.1.5"
+    "@types/jest": "^29.5.12",
+    "@typescript-eslint/eslint-plugin": "^8.1.0",
+    "@typescript-eslint/parser": "^8.1.0",
+    "esbuild": "^0.23.1",
+    "eslint": "^9.9.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.3.3",
+    "ts-jest": "^29.2.4",
+    "typescript": "^5.5.4"
   },
   "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "directories": {
     "lib": "lib",
     "test": "test"
-  },
-  "babel": {
-    "presets": [
-      "es2015-rollup"
-    ],
-    "plugins": [
-      "transform-flow-strip-types"
-    ]
   }
 }
