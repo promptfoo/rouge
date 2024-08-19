@@ -1,5 +1,5 @@
 {
-  "name": "rouge",
+  "name": "js-rouge",
   "version": "3.0.0",
   "description": "Recall-Oriented Understudy for Gisting Evaluation (ROUGE) Evaluation Functions with TypeScript support",
   "main": "dist/rouge.js",

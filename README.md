@@ -1,4 +1,4 @@
-# ROUGE.js
+# js-rouge
 
 A JavaScript implementation of the Recall-Oriented Understudy for Gisting Evaluation (ROUGE) evaluation metric for summaries. This package implements the following metrics:
 
@@ -6,7 +6,7 @@ A JavaScript implementation of the Recall-Oriented Understudy for Gisting Evalua
 - Longest Common Subsequence (ROUGE-L)
 - Skip Bigram (ROUGE-S)
 
-> **Note**: This is a fork of [the original ROUGE.js](https://github.com/kenlimmj/rouge) by kenlimmj. This fork, maintained by [promptfoo](https://promptfoo.dev/), adds TypeScript types and other improvements.
+> **Note**: This is a fork of [the original ROUGE.js](https://github.com/kenlimmj/rouge) by kenlimmj. This fork adds TypeScript types and other improvements.
 
 ## Rationale
 
@@ -19,17 +19,17 @@ Nevertheless, the [paper](http://www.aclweb.org/anthology/W04-1013) describing R
 This package is available on NPM, like so:
 
 ```shell
-npm install --save rouge
+npm install --save js-rouge
 ```
 
 To use it, simply require the package:
 
 ```javascript
-import rouge from 'rouge'; // ES2015+
+import rouge from 'js-rouge'; // ES2015+
 
 // OR
 
-const rouge = require('rouge'); // CommonJS
+const rouge = require('js-rouge'); // CommonJS
 ```
 
 A small but growing number of tests exist. To run them:
