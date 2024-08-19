@@ -6,7 +6,7 @@ module.exports = {
   testEnvironment: 'node',
 
   // The glob patterns Jest uses to detect test files
-  testMatch: ['**/test/**/*.js', '**/?(*.)+(spec|test).js'],
+  testMatch: ['**/test/**/*.ts', '**/?(*.)+(spec|test).ts'],
 
   // An array of file extensions your modules use
   moduleFileExtensions: ['js', 'json', 'jsx', 'ts', 'tsx', 'node'],
@@ -34,7 +34,9 @@ module.exports = {
 
   // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped
   testPathIgnorePatterns: ['/node_modules/'],
-
+  transform: {
+    '^.+\\.(t|j)sx?$': '@swc/jest',
+  },
   // Indicates whether each individual test should be reported during the run
   verbose: true,
 };

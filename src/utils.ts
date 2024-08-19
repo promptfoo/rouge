@@ -84,16 +84,16 @@ export function treeBankTokenize(input: string): string[] {
 export function sentenceSegment(input: string): string[] {
   if (input.length === 0) return [];
 
-  const abbrvReg = new RegExp('\\b(' + GATE_SUBSTITUTIONS.join('|') + ')[.!?] ?$', 'i');
+  const abbrvReg = new RegExp(`\\b(${GATE_SUBSTITUTIONS.join('|')})[.!?] ?$`, 'i');
   const acronymReg = new RegExp(/[ |.][A-Z].?$/, 'i');
   const breakReg = new RegExp(/[\r\n]+/, 'g');
   const ellipseReg = new RegExp(/\.\.\.*$/);
-  const excepReg = new RegExp('\\b(' + GATE_EXCEPTIONS.join('|') + ')[.!?] ?$', 'i');
+  const excepReg = new RegExp(`\\b(${GATE_EXCEPTIONS.join('|')})[.!?] ?$`, 'i');
 
   // Split sentences naively based on common terminals (.?!")
-  let chunks = input.split(/(\S.+?[.?!])(?=\s+|$|")/g);
+  const chunks = input.split(/(\S.+?[.?!])(?=\s+|$|")/g);
 
-  let acc: string[] = [];
+  const acc: string[] = [];
   for (let idx = 0; idx < chunks.length; idx++) {
     if (chunks[idx]) {
       // Trim only whitespace (i.e. preserve line breaks/carriage feeds)
@@ -105,7 +105,7 @@ export function sentenceSegment(input: string): string[] {
           // i.e. sentences that start with a capital letter
           // and merge them with a delimiting space
           chunks[idx + 1] =
-            (chunks[idx].trim() || '') + ' ' + (chunks[idx + 1] || '').replace(/ +/g, ' ');
+            `${chunks[idx].trim() || ''} ${(chunks[idx + 1] || '').replace(/ +/g, ' ')}`;
         } else {
           // Assume that all other embedded line breaks are
           // valid sentence breakpoints
@@ -120,7 +120,7 @@ export function sentenceSegment(input: string): string[] {
           chunks[idx] = '';
         } else {
           // Catch common abbreviations and merge them with a delimiting space
-          chunks[idx + 1] = (chunks[idx] || '') + ' ' + (nextChunk || '').replace(/ +/g, ' ');
+          chunks[idx + 1] = `${chunks[idx] || ''} ${(nextChunk || '').replace(/ +/g, ' ')}`;
         }
       } else if (chunks[idx].length > 1 && chunks[idx + 1] && acronymReg.test(chunks[idx])) {
         const words = chunks[idx].split(' ');
@@ -129,7 +129,7 @@ export function sentenceSegment(input: string): string[] {
         if (lastWord === lastWord.toLowerCase()) {
           // Catch small-letter abbreviations and merge them.
           chunks[idx + 1] = chunks[idx + 1] =
-            (chunks[idx] || '') + ' ' + (chunks[idx + 1] || '').replace(/ +/g, ' ');
+            `${chunks[idx] || ''} ${(chunks[idx + 1] || '').replace(/ +/g, ' ')}`;
         } else if (chunks[idx + 2]) {
           if (strIsTitleCase(words[words.length - 2]) && strIsTitleCase(chunks[idx + 2])) {
             // Catch name abbreviations (e.g. Albert I. Jones) by checking if
@@ -193,16 +193,18 @@ export function charIsUpperCase(input: string): boolean {
  */
 function memoize<T, R>(func: (arg: T) => R, Store: new () => Map<T, R> = Map): (arg: T) => R {
   return (() => {
-    let cache = new Store();
+    const cache = new Store();
 
     return (n: T) => {
       if (cache.has(n)) {
-        return cache.get(n)!;
-      } else {
-        let result = func(n);
-        cache.set(n, result);
-        return result;
+        const cachedResult = cache.get(n);
+        if (cachedResult !== undefined) {
+          return cachedResult;
+        }
       }
+      const result = func(n);
+      cache.set(n, result);
+      return result;
     };
   })();
 }
@@ -240,7 +242,7 @@ export const fact = memoize(factRec);
 export function skipBigram(tokens: string[]): string[] {
   if (tokens.length < 2) throw new RangeError('Input must have at least two words');
 
-  let acc: string[] = [];
+  const acc: string[] = [];
   for (let baseIdx = 0; baseIdx < tokens.length - 1; baseIdx++) {
     for (let sweepIdx = baseIdx + 1; sweepIdx < tokens.length; sweepIdx++) {
       acc.push(`${tokens[baseIdx]} ${tokens[sweepIdx]}`);
@@ -282,7 +284,7 @@ export function nGram(tokens: string[], n: number = 2, pad: Partial<NGramOptions
     const config = { ...NGRAM_DEFAULT_OPTS, ...pad };
 
     // Clone the input token array to avoid mutating the source data
-    let tempTokens = tokens.slice(0);
+    const tempTokens = tokens.slice(0);
 
     if (config.start) for (let i = 0; i < n - 1; i++) tempTokens.unshift(config.val);
     if (config.end) for (let i = 0; i < n - 1; i++) tempTokens.push(config.val);
@@ -290,7 +292,7 @@ export function nGram(tokens: string[], n: number = 2, pad: Partial<NGramOptions
     tokens = tempTokens;
   }
 
-  let acc: string[] = [];
+  const acc: string[] = [];
   for (let idx = 0; idx < tokens.length - n + 1; idx++) {
     acc.push(tokens.slice(idx, idx + n).join(' '));
   }
@@ -392,15 +394,16 @@ export function fMeasure(p: number, r: number, beta: number = 0.5): number {
  * Computes the set intersection of two arrays
  *
  * @method intersection
- * @param  {Array<string>}    a     The first array
- * @param  {Array<string>}    b     The second array
- * @return {Array<string>}          Elements common to both the first and second array
+ * @template T
+ * @param  {Array<T>}    a     The first array
+ * @param  {Array<T>}    b     The second array
+ * @return {Array<T>}          Elements common to both the first and second array
  */
-export function intersection(a: string[], b: string[]): string[] {
+export function intersection<T>(a: T[], b: T[]): T[] {
   const test = new Set(a);
   const ref = new Set(b);
 
-  return Array.from(test).filter((elem) => ref.has(elem));
+  return Array.from(test).filter((elem): elem is T => ref.has(elem));
 }
 
 /**

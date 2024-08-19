@@ -1,12 +1,4 @@
 /**
- * @license
- * @Author: Lim Mingjie, Kenneth
- * @Date:   2016-01-20T18:56:22-05:00
- * @Email:  me@kenlimmj.com
- * @Last modified by:   Astrianna
- * @Last modified time: 2016-02-27T21:34:23-05:00
- */
-/**
  * Splits a sentence into an array of word tokens
  * in accordance with the Penn Treebank guidelines.
  *
@@ -60,9 +52,9 @@ export declare const fact: (arg: number) => number;
  */
 export declare function skipBigram(tokens: string[]): string[];
 interface NGramOptions {
-  start: boolean;
-  end: boolean;
-  val: string;
+    start: boolean;
+    end: boolean;
+    val: string;
 }
 export declare const NGRAM_DEFAULT_OPTS: NGramOptions;
 /**
@@ -105,12 +97,7 @@ export declare function arithmeticMean(input: number[]): number;
  *                                     Should be of the type signature (Array<number>) => number
  * @return {number}                    The result computed by applying `test` to the resampled data
  */
-export declare function jackKnife(
-  cands: string[],
-  ref: string,
-  func: (x: string, y: string) => number,
-  test?: (x: number[]) => number
-): number;
+export declare function jackKnife(cands: string[], ref: string, func: (x: string, y: string) => number, test?: (x: number[]) => number): number;
 /**
  * Calculates the ROUGE f-measure for a given precision
  * and recall score.
@@ -131,11 +118,12 @@ export declare function fMeasure(p: number, r: number, beta?: number): number;
  * Computes the set intersection of two arrays
  *
  * @method intersection
- * @param  {Array<string>}    a     The first array
- * @param  {Array<string>}    b     The second array
- * @return {Array<string>}          Elements common to both the first and second array
+ * @template T
+ * @param  {Array<T>}    a     The first array
+ * @param  {Array<T>}    b     The second array
+ * @return {Array<T>}          Elements common to both the first and second array
  */
-export declare function intersection(a: string[], b: string[]): string[];
+export declare function intersection<T>(a: T[], b: T[]): T[];
 /**
  * Computes the longest common subsequence for two arrays.
  * This function returns the elements from the two arrays

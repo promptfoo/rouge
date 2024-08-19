@@ -1,8 +1,8 @@
-const rouge = require('../dist/rouge');
+import * as rouge from '../src/rouge';
 
 describe('Utility Functions', () => {
   describe('fact', () => {
-    const fact = rouge.fact;
+    const { fact } = rouge;
 
     test('should throw RangeError for -1!', () => {
       expect(() => fact(-1)).toThrow(RangeError);
@@ -30,7 +30,7 @@ describe('Utility Functions', () => {
   });
 
   describe('comb2', () => {
-    const comb2 = rouge.comb2;
+    const { comb2 } = rouge;
 
     test('should throw RangeError for C(1,2)', () => {
       expect(() => comb2(1)).toThrow(RangeError);
@@ -76,53 +76,53 @@ describe('Utility Functions', () => {
       expect(ins([], [])).toEqual([]);
     });
     test('should return empty array for first empty input', () => {
-      expect(ins([], [2])).toEqual([]);
+      expect(ins([], ['2'])).toEqual([]);
     });
     test('should return empty array for second empty input', () => {
-      expect(ins([2], [])).toEqual([]);
+      expect(ins(['2'], [])).toEqual([]);
     });
 
     test('should return singleton value of singleton array', () => {
-      expect(ins([2], [2])).toEqual([2]);
+      expect(ins(['2'], ['2'])).toEqual(['2']);
     });
     test('should return identical value of identical arrays', () => {
-      expect(ins([1, 2, 3], [1, 2, 3])).toEqual([1, 2, 3]);
+      expect(ins(['1', '2', '3'], ['1', '2', '3'])).toEqual(['1', '2', '3']);
     });
 
-    test('should return [2] for [1, 2, 3] and [2, 4, 6]', () => {
-      expect(ins([1, 2, 3], [2, 4, 6])).toEqual([2]);
+    test('should return ["2"] for ["1", "2", "3"] and ["2", "4", "6"]', () => {
+      expect(ins(['1', '2', '3'], ['2', '4', '6'])).toEqual(['2']);
     });
-    test('should return [2, 3] for [1, 2, 3] and [2, 3, 6]', () => {
-      expect(ins([1, 2, 3], [2, 3, 6])).toEqual([2, 3]);
+    test('should return ["2", "3"] for ["1", "2", "3"] and ["2", "3", "6"]', () => {
+      expect(ins(['1', '2', '3'], ['2', '3', '6'])).toEqual(['2', '3']);
     });
-    test('should return [1, 2, 3] for [1, 2, 3] and [1, 2, 3, 6]', () => {
-      expect(ins([1, 2, 3], [1, 2, 3, 6])).toEqual([1, 2, 3]);
+    test('should return ["1", "2", "3"] for ["1", "2", "3"] and ["1", "2", "3", "6"]', () => {
+      expect(ins(['1', '2', '3'], ['1', '2', '3', '6'])).toEqual(['1', '2', '3']);
     });
   });
 
   describe('lcs', () => {
-    const lcs = rouge.lcs;
+    const { lcs } = rouge;
 
     test('should return empty array for empty first input', () => {
-      expect(lcs([], [1])).toEqual([]);
+      expect(lcs([], ['1'])).toEqual([]);
     });
     test('should return empty array for empty second input', () => {
-      expect(lcs([1], [])).toEqual([]);
+      expect(lcs(['1'], [])).toEqual([]);
     });
     test('should return empty array for unique inputs', () => {
-      expect(lcs([1], [2])).toEqual([]);
+      expect(lcs(['1'], ['2'])).toEqual([]);
     });
     test('should return singleton value for singleton inputs', () => {
-      expect(lcs([1], [1])).toEqual([1]);
+      expect(lcs(['1'], ['1'])).toEqual(['1']);
     });
 
-    test('should return [1, 1] for [1, 1] and [2, 1, 1, 3]', () => {
-      expect(lcs([1, 1], [2, 1, 1, 3])).toEqual([1, 1]);
+    test('should return ["1", "1"] for ["1", "1"] and ["2", "1", "1", "3"]', () => {
+      expect(lcs(['1', '1'], ['2', '1', '1', '3'])).toEqual(['1', '1']);
     });
-    test('should return [2, 3] for [1, 2, 3] and [2, 3, 5]', () => {
-      expect(lcs([1, 2, 3], [2, 3, 5])).toEqual([2, 3]);
+    test('should return ["2", "3"] for ["1", "2", "3"] and ["2", "3", "5"]', () => {
+      expect(lcs(['1', '2', '3'], ['2', '3', '5'])).toEqual(['2', '3']);
     });
-    test('should return [w1, w3, w5] for [w1, w2, w3, w4, w5] and [w1, w3, w8, w9, w5]', () => {
+    test('should return ["w1", "w3", "w5"] for ["w1", "w2", "w3", "w4", "w5"] and ["w1", "w3", "w8", "w9", "w5"]', () => {
       expect(lcs(['w1', 'w2', 'w3', 'w4', 'w5'], ['w1', 'w3', 'w8', 'w9', 'w5'])).toEqual([
         'w1',
         'w3',
@@ -132,7 +132,7 @@ describe('Utility Functions', () => {
   });
 
   describe('nGram', () => {
-    const nGram = rouge.nGram;
+    const { nGram } = rouge;
     const data = ['a', 'b', 'c', 'd'];
 
     test('should throw RangeError for ngram size < 1', () => {
@@ -406,10 +406,10 @@ describe('Utility Functions', () => {
     test('should not split ellipsis at end of quotation', () => {
       expect(
         ss(
-          'Thoreau argues that by simplifying one’s life, "the laws of the universe will appear less complex...."'
+          'Thoreau argues that by simplifying one\'s life, "the laws of the universe will appear less complex...."'
         )
       ).toEqual([
-        'Thoreau argues that by simplifying one’s life, "the laws of the universe will appear less complex...."',
+        'Thoreau argues that by simplifying one\'s life, "the laws of the universe will appear less complex...."',
       ]);
     });
 
@@ -493,8 +493,8 @@ describe('Utility Functions', () => {
     const cands = ['a', 'ab', 'abc', 'abcd'];
     const ref = 'abcd';
 
-    const evalFunc = (a, b) => a.length + b.length;
-    const statTest = (input) => input.reduce((a, b) => a + b);
+    const evalFunc = (a: string, b: string): number => a.length + b.length;
+    const statTest = (input: number[]): number => input.reduce((a, b) => a + b);
 
     test('should throw RangeError when less than 2 candidates are provided', () => {
       expect(() => jk(['a'], ref, evalFunc)).toThrow(RangeError);
@@ -567,7 +567,7 @@ describe('Utility Functions', () => {
 
 describe('Core Functions', () => {
   describe('ROUGE-N', () => {
-    const n = rouge.n;
+    const { n } = rouge;
 
     const cand = 'pulses may ease schizophrenic voices';
     const refs = [
@@ -576,17 +576,17 @@ describe('Core Functions', () => {
     ];
 
     test('should throw RangeError for empty candidate', () => {
-      expect(() => n('', refs[0])).toThrow(RangeError);
+      expect(() => n('', refs[0], { n: 2 })).toThrow(RangeError);
     });
     test('should throw RangeError for empty ref', () => {
-      expect(() => n(cand, '')).toThrow(RangeError);
+      expect(() => n(cand, '', { n: 2 })).toThrow(RangeError);
     });
 
     test('should correctly compute ROUGE-N score for ref 1', () => {
-      expect(n(cand, refs[0])).toBe(0.4);
+      expect(n(cand, refs[0], { n: 2 })).toBe(1 / 3);
     });
     test('should correctly compute ROUGE-N score for ref 2', () => {
-      expect(n(cand, refs[1])).toBe(0.1);
+      expect(n(cand, refs[1], { n: 2 })).toBe(0);
     });
 
     test('should correctly compute ROUGE-N score for ref 1 with different opts', () => {
@@ -598,20 +598,23 @@ describe('Core Functions', () => {
   });
 
   describe('ROUGE-S', () => {
-    const s = rouge.s;
+    const { s } = rouge;
 
     const ref = 'police killed the gunman';
     const cands = ['police kill the gunman', 'the gunman kill police', 'the gunman police killed'];
 
     test('should throw RangeError for empty candidate', () => {
-      expect(() => s('', ref)).toThrow(RangeError);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(() => s('', ref, undefined as any)).toThrow(RangeError);
     });
     test('should throw RangeError for empty ref', () => {
-      expect(() => s(cands[0], '')).toThrow(RangeError);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(() => s(cands[0], '', undefined as any)).toThrow(RangeError);
     });
 
     test('should return 0 for summaries with zero overlap', () => {
-      expect(s('banana yoghurt', ref)).toBe(0);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(s('banana yoghurt', ref, undefined as any)).toBe(0);
     });
 
     test('should correctly compute ROUGE-S score for cand 1 with different opts', () => {
@@ -626,16 +629,18 @@ describe('Core Functions', () => {
   });
 
   describe('ROUGE-L', () => {
-    const l = rouge.l;
+    const { l } = rouge;
 
     const ref = 'police killed the gunman';
     const cands = ['police kill the gunman', 'the gunman kill police', 'the gunman police killed'];
 
     test('should throw RangeError for empty candidate', () => {
-      expect(() => l('', ref)).toThrow(RangeError);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(() => l('', ref, undefined as any)).toThrow(RangeError);
     });
     test('should throw RangeError for empty ref', () => {
-      expect(() => l(cands[0], '')).toThrow(RangeError);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(() => l(cands[0], '', undefined as any)).toThrow(RangeError);
     });
 
     test('should correctly compute ROUGE-L score for cand 1 with different opts', () => {

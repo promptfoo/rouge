@@ -1,11 +1,3 @@
-/**
- * @license
- * @Author: Lim Mingjie, Kenneth
- * @Date:   2016-01-20T18:56:14-05:00
- * @Email:  me@kenlimmj.com
- * @Last modified by:   Astrianna
- * @Last modified time: 2016-02-27T19:50:25-05:00
- */
 export * from './utils';
 /**
  * Computes the ROUGE-N score for a candidate summary.
@@ -28,15 +20,11 @@ export * from './utils';
  * @param  {Object}     opts        Configuration options (see example)
  * @return {number}                 The ROUGE-N score
  */
-export declare function n(
-  cand: string,
-  ref: string,
-  opts: {
+export declare function n(cand: string, ref: string, opts: {
     n?: number;
     nGram?: (tokens: string[], n: number) => string[];
     tokenizer?: (input: string) => string[];
-  }
-): number;
+}): number;
 /**
  * Computes the ROUGE-S score for a candidate summary.
  *
@@ -59,15 +47,11 @@ export declare function n(
  * @param  {Object}     opts        Configuration options (see example)
  * @return {number}                 The ROUGE-S score
  */
-export declare function s(
-  cand: string,
-  ref: string,
-  opts: {
+export declare function s(cand: string, ref: string, opts: {
     beta?: number;
     skipBigram?: (tokens: string[]) => string[];
     tokenizer?: (input: string) => string[];
-  }
-): number;
+}): number;
 /**
  * Computes the ROUGE-L score for a candidate summary
  *
@@ -91,14 +75,10 @@ export declare function s(
  * @param  {Object}     opts        Configuration options (see example)
  * @return {number}                 The ROUGE-L score
  */
-export declare function l(
-  cand: string,
-  ref: string,
-  opts: {
+export declare function l(cand: string, ref: string, opts: {
     beta?: number;
     lcs?: (a: string[], b: string[]) => string[];
     segmenter?: (input: string) => string[];
     tokenizer?: (input: string) => string[];
-  }
-): number;
+}): number;
 //# sourceMappingURL=rouge.d.ts.map
