@@ -1,6 +1,12 @@
-import * as utils from './utils';
+/**
+ * @license
+ * @Author: Lim Mingjie, Kenneth
+ * @Date:   2016-01-20T18:56:14-05:00
+ * @Email:  me@kenlimmj.com
+ * @Last modified by:   Astrianna
+ * @Last modified time: 2016-02-27T19:50:25-05:00
+ */
 export * from './utils';
-
 /**
  * Computes the ROUGE-N score for a candidate summary.
  *
@@ -22,7 +28,7 @@ export * from './utils';
  * @param  {Object}     opts        Configuration options (see example)
  * @return {number}                 The ROUGE-N score
  */
-export function n(
+export declare function n(
   cand: string,
   ref: string,
   opts: {
@@ -30,27 +36,7 @@ export function n(
     nGram?: (tokens: string[], n: number) => string[];
     tokenizer?: (input: string) => string[];
   }
-): number {
-  if (cand.length === 0) throw new RangeError('Candidate cannot be an empty string');
-  if (ref.length === 0) throw new RangeError('Reference cannot be an empty string');
-
-  // Merge user-provided configuration with defaults
-  const options = Object.assign(
-    {
-      n: 1,
-      nGram: utils.nGram,
-      tokenizer: utils.treeBankTokenize,
-    },
-    opts
-  );
-
-  const candGrams = options.nGram(options.tokenizer(cand), options.n);
-  const refGrams = options.nGram(options.tokenizer(ref), options.n);
-
-  const match = utils.intersection(candGrams, refGrams);
-  return match.length / refGrams.length;
-}
-
+): number;
 /**
  * Computes the ROUGE-S score for a candidate summary.
  *
@@ -73,7 +59,7 @@ export function n(
  * @param  {Object}     opts        Configuration options (see example)
  * @return {number}                 The ROUGE-S score
  */
-export function s(
+export declare function s(
   cand: string,
   ref: string,
   opts: {
@@ -81,35 +67,7 @@ export function s(
     skipBigram?: (tokens: string[]) => string[];
     tokenizer?: (input: string) => string[];
   }
-): number {
-  if (cand.length === 0) throw new RangeError('Candidate cannot be an empty string');
-  if (ref.length === 0) throw new RangeError('Reference cannot be an empty string');
-
-  // Merge user-provided configuration with defaults
-  const options = Object.assign(
-    {
-      beta: 0.5,
-      skipBigram: utils.skipBigram,
-      tokenizer: utils.treeBankTokenize,
-    },
-    opts
-  );
-
-  const candGrams = options.skipBigram(options.tokenizer(cand));
-  const refGrams = options.skipBigram(options.tokenizer(ref));
-
-  const skip2 = utils.intersection(candGrams, refGrams).length;
-
-  if (skip2 === 0) {
-    return 0;
-  } else {
-    const skip2Recall = skip2 / refGrams.length;
-    const skip2Prec = skip2 / candGrams.length;
-
-    return utils.fMeasure(skip2Prec, skip2Recall, options.beta);
-  }
-}
-
+): number;
 /**
  * Computes the ROUGE-L score for a candidate summary
  *
@@ -133,7 +91,7 @@ export function s(
  * @param  {Object}     opts        Configuration options (see example)
  * @return {number}                 The ROUGE-L score
  */
-export function l(
+export declare function l(
   cand: string,
   ref: string,
   opts: {
@@ -142,40 +100,5 @@ export function l(
     segmenter?: (input: string) => string[];
     tokenizer?: (input: string) => string[];
   }
-): number {
-  if (cand.length === 0) throw new RangeError('Candidate cannot be an empty string');
-  if (ref.length === 0) throw new RangeError('Reference cannot be an empty string');
-
-  // Merge user-provided configuration with defaults
-  const options = Object.assign(
-    {
-      beta: 0.5,
-      lcs: utils.lcs,
-      segmenter: utils.sentenceSegment,
-      tokenizer: utils.treeBankTokenize,
-    },
-    opts
-  );
-
-  const candSents = options.segmenter(cand);
-  const refSents = options.segmenter(ref);
-
-  const candWords = options.tokenizer(cand);
-  const refWords = options.tokenizer(ref);
-
-  const lcsAcc = refSents.map((r) => {
-    const rTokens = options.tokenizer(r);
-    const lcsUnion = new Set(...candSents.map((c) => options.lcs(options.tokenizer(c), rTokens)));
-
-    return lcsUnion.size;
-  });
-
-  // Sum the array as quickly as we can
-  let lcsSum = 0;
-  while (lcsAcc.length) lcsSum += lcsAcc.pop() || 0;
-
-  const lcsRecall = lcsSum / candWords.length;
-  const lcsPrec = lcsSum / refWords.length;
-
-  return utils.fMeasure(lcsPrec, lcsRecall, options.beta);
-}
+): number;
+//# sourceMappingURL=rouge.d.ts.map

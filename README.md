@@ -25,11 +25,11 @@ npm install --save rouge
 To use it, simply require the package:
 
 ```javascript
-import rouge from "rouge"; // ES2015+
+import rouge from 'rouge'; // ES2015+
 
 // OR
 
-const rouge = require("rouge"); // CommonJS
+const rouge = require('rouge'); // CommonJS
 ```
 
 A small but growing number of tests exist. To run them:
@@ -55,10 +55,10 @@ All functions take in a candidate string, a reference string, and a configuratio
 Here's an example evaluating ROUGE-L using an averaged-F1 score instead of the DUC-F1:
 
 ```javascript
-import { l as rougeL } from "rouge";
+import { l as rougeL } from 'rouge';
 
-const ref = "police killed the gunman";
-const cand = "police kill the gunman";
+const ref = 'police killed the gunman';
+const cand = 'police kill the gunman';
 
 rougeL(cand, ref, { beta: 0.5 });
 ```
@@ -68,15 +68,11 @@ In addition, the main functions rely on a battery of utility functions specified
 Here's an example applying jackknife resampling as described in the original paper:
 
 ```javascript
-import { n as rougeN } from "rouge";
-import { jackKnife } from "rouge/utils";
+import { n as rougeN } from 'rouge';
+import { jackKnife } from 'rouge/utils';
 
-const ref = "police killed the gunman";
-const cands = [
-  "police kill the gunman",
-  "the gunman kill police",
-  "the gunman police killed",
-];
+const ref = 'police killed the gunman';
+const cands = ['police kill the gunman', 'the gunman kill police', 'the gunman police killed'];
 
 // Standard evaluation taking the arithmetic mean
 jackKnife(cands, ref, rougeN);

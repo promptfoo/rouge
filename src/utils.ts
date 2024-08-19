@@ -1,17 +1,4 @@
-/**
- * @license
- * @Author: Lim Mingjie, Kenneth
- * @Date:   2016-01-20T18:56:22-05:00
- * @Email:  me@kenlimmj.com
- * @Last modified by:   Astrianna
- * @Last modified time: 2016-02-27T21:34:23-05:00
- */
-
-import {
-  GATE_SUBSTITUTIONS,
-  GATE_EXCEPTIONS,
-  TREEBANK_CONTRACTIONS,
-} from "./constants";
+import { GATE_SUBSTITUTIONS, GATE_EXCEPTIONS, TREEBANK_CONTRACTIONS } from './constants';
 
 /**
  * Splits a sentence into an array of word tokens
@@ -46,14 +33,14 @@ export function treeBankTokenize(input: string): string[] {
   // 7. Wrap spaces around opening and closing brackets
   // 8. Wrap spaces around en and em-dashes
   let parse = input
-    .replace(/^\"/, " `` ")
-    .replace(/([ (\[{<])"/g, "$1 `` ")
-    .replace(/\.\.\.*/g, " ... ")
-    .replace(/[;@#$%&]/g, " $& ")
-    .replace(/([^\.])(\.)([\]\)}>"\']*)\s*$/g, "$1 $2$3 ")
-    .replace(/[,?!]/g, " $& ")
-    .replace(/[\]\[\(\)\{\}<>]/g, " $& ")
-    .replace(/---*/g, " -- ");
+    .replace(/^\"/, ' `` ')
+    .replace(/([ (\[{<])"/g, '$1 `` ')
+    .replace(/\.\.\.*/g, ' ... ')
+    .replace(/[;@#$%&]/g, ' $& ')
+    .replace(/([^\.])(\.)([\]\)}>"\']*)\s*$/g, '$1 $2$3 ')
+    .replace(/[,?!]/g, ' $& ')
+    .replace(/[\]\[\(\)\{\}<>]/g, ' $& ')
+    .replace(/---*/g, ' -- ');
 
   // Wrap spaces at the start and end of the sentence for consistency
   // i.e. reduce the number of Regex matches required
@@ -68,19 +55,19 @@ export function treeBankTokenize(input: string): string[] {
     .replace(/"/g, " '' ")
     .replace(/([^'])' /g, "$1 ' ")
     .replace(/'([sSmMdD]) /g, " '$1 ")
-    .replace(/('ll|'LL|'re|'RE|'ve|'VE|n't|N'T) /g, " $1 ");
+    .replace(/('ll|'LL|'re|'RE|'ve|'VE|n't|N'T) /g, ' $1 ');
 
   let iterator = -1;
   while (iterator++ < TREEBANK_CONTRACTIONS.length) {
     // Break uncommon contractions with a space and wrap-in spaces
-    parse = parse.replace(TREEBANK_CONTRACTIONS[iterator], " $1 $2 ");
+    parse = parse.replace(TREEBANK_CONTRACTIONS[iterator], ' $1 $2 ');
   }
 
   // Concatenate double spaces and remove start/end spaces
-  parse = parse.replace(/\ \ +/g, " ").replace(/^\ |\ $/g, "");
+  parse = parse.replace(/\ \ +/g, ' ').replace(/^\ |\ $/g, '');
 
   // Split on spaces (original and inserted) to return the tokenized result
-  return parse.split(" ");
+  return parse.split(' ');
 }
 
 /**
@@ -97,17 +84,11 @@ export function treeBankTokenize(input: string): string[] {
 export function sentenceSegment(input: string): string[] {
   if (input.length === 0) return [];
 
-  const abbrvReg = new RegExp(
-    "\\b(" + GATE_SUBSTITUTIONS.join("|") + ")[.!?] ?$",
-    "i",
-  );
-  const acronymReg = new RegExp(/[ |.][A-Z].?$/, "i");
-  const breakReg = new RegExp(/[\r\n]+/, "g");
+  const abbrvReg = new RegExp('\\b(' + GATE_SUBSTITUTIONS.join('|') + ')[.!?] ?$', 'i');
+  const acronymReg = new RegExp(/[ |.][A-Z].?$/, 'i');
+  const breakReg = new RegExp(/[\r\n]+/, 'g');
   const ellipseReg = new RegExp(/\.\.\.*$/);
-  const excepReg = new RegExp(
-    "\\b(" + GATE_EXCEPTIONS.join("|") + ")[.!?] ?$",
-    "i",
-  );
+  const excepReg = new RegExp('\\b(' + GATE_EXCEPTIONS.join('|') + ')[.!?] ?$', 'i');
 
   // Split sentences naively based on common terminals (.?!")
   let chunks = input.split(/(\S.+?[.?!])(?=\s+|$|")/g);
@@ -116,7 +97,7 @@ export function sentenceSegment(input: string): string[] {
   for (let idx = 0; idx < chunks.length; idx++) {
     if (chunks[idx]) {
       // Trim only whitespace (i.e. preserve line breaks/carriage feeds)
-      chunks[idx] = chunks[idx].replace(/(^ +| +$)/g, "");
+      chunks[idx] = chunks[idx].replace(/(^ +| +$)/g, '');
 
       if (breakReg.test(chunks[idx])) {
         if (chunks[idx + 1] && strIsTitleCase(chunks[idx])) {
@@ -124,68 +105,51 @@ export function sentenceSegment(input: string): string[] {
           // i.e. sentences that start with a capital letter
           // and merge them with a delimiting space
           chunks[idx + 1] =
-            (chunks[idx].trim() || "") +
-            " " +
-            (chunks[idx + 1] || "").replace(/ +/g, " ");
+            (chunks[idx].trim() || '') + ' ' + (chunks[idx + 1] || '').replace(/ +/g, ' ');
         } else {
           // Assume that all other embedded line breaks are
           // valid sentence breakpoints
-          acc.push(...chunks[idx].trim().split("\n"));
+          acc.push(...chunks[idx].trim().split('\n'));
         }
       } else if (chunks[idx + 1] && abbrvReg.test(chunks[idx])) {
         const nextChunk = chunks[idx + 1];
-        if (
-          nextChunk.trim() &&
-          strIsTitleCase(nextChunk) &&
-          !excepReg.test(chunks[idx])
-        ) {
+        if (nextChunk.trim() && strIsTitleCase(nextChunk) && !excepReg.test(chunks[idx])) {
           // Catch abbreviations followed by a capital letter and treat as a boundary.
           // FIXME: This causes named entities like `Mt. Fuji` or `U.S. Government` to fail.
           acc.push(chunks[idx]);
-          chunks[idx] = "";
+          chunks[idx] = '';
         } else {
           // Catch common abbreviations and merge them with a delimiting space
-          chunks[idx + 1] =
-            (chunks[idx] || "") + " " + (nextChunk || "").replace(/ +/g, " ");
+          chunks[idx + 1] = (chunks[idx] || '') + ' ' + (nextChunk || '').replace(/ +/g, ' ');
         }
-      } else if (
-        chunks[idx].length > 1 &&
-        chunks[idx + 1] &&
-        acronymReg.test(chunks[idx])
-      ) {
-        const words = chunks[idx].split(" ");
+      } else if (chunks[idx].length > 1 && chunks[idx + 1] && acronymReg.test(chunks[idx])) {
+        const words = chunks[idx].split(' ');
         const lastWord = words[words.length - 1];
 
         if (lastWord === lastWord.toLowerCase()) {
           // Catch small-letter abbreviations and merge them.
           chunks[idx + 1] = chunks[idx + 1] =
-            (chunks[idx] || "") +
-            " " +
-            (chunks[idx + 1] || "").replace(/ +/g, " ");
+            (chunks[idx] || '') + ' ' + (chunks[idx + 1] || '').replace(/ +/g, ' ');
         } else if (chunks[idx + 2]) {
-          if (
-            strIsTitleCase(words[words.length - 2]) &&
-            strIsTitleCase(chunks[idx + 2])
-          ) {
+          if (strIsTitleCase(words[words.length - 2]) && strIsTitleCase(chunks[idx + 2])) {
             // Catch name abbreviations (e.g. Albert I. Jones) by checking if
             // the previous and next words are all capitalized.
             chunks[idx + 2] =
-              (chunks[idx] || "") +
-              (chunks[idx + 1] || "").replace(/ +/g, " ") +
-              (chunks[idx + 2] || "");
+              (chunks[idx] || '') +
+              (chunks[idx + 1] || '').replace(/ +/g, ' ') +
+              (chunks[idx + 2] || '');
           } else {
             // Assume that remaining entities are indeed end-of-sentence markers.
             acc.push(chunks[idx]);
-            chunks[idx] = "";
+            chunks[idx] = '';
           }
         }
       } else if (chunks[idx + 1] && ellipseReg.test(chunks[idx])) {
         // Catch mid-sentence ellipses (and their derivatives) and merge them
-        chunks[idx + 1] =
-          (chunks[idx] || "") + (chunks[idx + 1] || "").replace(/ +/g, " ");
+        chunks[idx + 1] = (chunks[idx] || '') + (chunks[idx + 1] || '').replace(/ +/g, ' ');
       } else if (chunks[idx] && chunks[idx].length > 0) {
         acc.push(chunks[idx]);
-        chunks[idx] = "";
+        chunks[idx] = '';
       }
     }
   }
@@ -212,8 +176,7 @@ export function strIsTitleCase(input: string): boolean {
  * @return {boolean}            True if the character is uppercase and false otherwise.
  */
 export function charIsUpperCase(input: string): boolean {
-  if (input.length !== 1)
-    throw new RangeError("Input should be a single character");
+  if (input.length !== 1) throw new RangeError('Input should be a single character');
 
   const char = input.charCodeAt(0);
   return char >= 65 && char <= 90;
@@ -228,10 +191,7 @@ export function charIsUpperCase(input: string): boolean {
  *                            A store should implement `has`, `get`, and `set` methods.
  * @return {Function}         A closure of the memoization cache and the original function
  */
-function memoize<T, R>(
-  func: (arg: T) => R,
-  Store: new () => Map<T, R> = Map,
-): (arg: T) => R {
+function memoize<T, R>(func: (arg: T) => R, Store: new () => Map<T, R> = Map): (arg: T) => R {
   return (() => {
     let cache = new Store();
 
@@ -264,7 +224,7 @@ function memoize<T, R>(
  * @return {number}       The factorial result
  */
 function factRec(x: number, acc: number = 1): number {
-  if (x < 0) throw RangeError("Input must be a positive number");
+  if (x < 0) throw RangeError('Input must be a positive number');
   return x < 2 ? acc : factRec(x - 1, x * acc);
 }
 
@@ -278,8 +238,7 @@ export const fact = memoize(factRec);
  * @return {Array<string>}                An array of skip bigram strings
  */
 export function skipBigram(tokens: string[]): string[] {
-  if (tokens.length < 2)
-    throw new RangeError("Input must have at least two words");
+  if (tokens.length < 2) throw new RangeError('Input must have at least two words');
 
   let acc: string[] = [];
   for (let baseIdx = 0; baseIdx < tokens.length - 1; baseIdx++) {
@@ -300,7 +259,7 @@ interface NGramOptions {
 export const NGRAM_DEFAULT_OPTS: NGramOptions = {
   start: false,
   end: false,
-  val: "<S>",
+  val: '<S>',
 };
 
 /**
@@ -312,17 +271,11 @@ export const NGRAM_DEFAULT_OPTS: NGramOptions = {
  * @param  {Object}                 pad       String padding options. See example.
  * @return {Array<string>}                    An array of n-gram strings
  */
-export function nGram(
-  tokens: string[],
-  n: number = 2,
-  pad: Partial<NGramOptions> = {},
-): string[] {
-  if (n < 1) throw new RangeError("ngram size cannot be smaller than 1");
+export function nGram(tokens: string[], n: number = 2, pad: Partial<NGramOptions> = {}): string[] {
+  if (n < 1) throw new RangeError('ngram size cannot be smaller than 1');
 
   if (tokens.length < n) {
-    throw new RangeError(
-      "ngram size cannot be larger than the number of tokens available",
-    );
+    throw new RangeError('ngram size cannot be larger than the number of tokens available');
   }
 
   if (Object.keys(pad).length !== 0) {
@@ -331,8 +284,7 @@ export function nGram(
     // Clone the input token array to avoid mutating the source data
     let tempTokens = tokens.slice(0);
 
-    if (config.start)
-      for (let i = 0; i < n - 1; i++) tempTokens.unshift(config.val);
+    if (config.start) for (let i = 0; i < n - 1; i++) tempTokens.unshift(config.val);
     if (config.end) for (let i = 0; i < n - 1; i++) tempTokens.push(config.val);
 
     tokens = tempTokens;
@@ -340,7 +292,7 @@ export function nGram(
 
   let acc: string[] = [];
   for (let idx = 0; idx < tokens.length - n + 1; idx++) {
-    acc.push(tokens.slice(idx, idx + n).join(" "));
+    acc.push(tokens.slice(idx, idx + n).join(' '));
   }
 
   return acc;
@@ -355,7 +307,7 @@ export function nGram(
  * @return {number}         The number of ways in which 2 items can be chosen from `val`
  */
 export function comb2(val: number): number {
-  if (val < 2) throw new RangeError("Input must be greater than 2");
+  if (val < 2) throw new RangeError('Input must be greater than 2');
   return 0.5 * val * (val - 1);
 }
 
@@ -366,8 +318,7 @@ export function comb2(val: number): number {
  * @return {number}                   The mean of the distribution
  */
 export function arithmeticMean(input: number[]): number {
-  if (input.length < 1)
-    throw new RangeError("Input array must have at least 1 element");
+  if (input.length < 1) throw new RangeError('Input array must have at least 1 element');
   return input.reduce((x, y) => x + y) / input.length;
 }
 
@@ -389,10 +340,10 @@ export function jackKnife(
   cands: string[],
   ref: string,
   func: (x: string, y: string) => number,
-  test: (x: number[]) => number = arithmeticMean,
+  test: (x: number[]) => number = arithmeticMean
 ): number {
   if (cands.length < 2) {
-    throw new RangeError("Candidate array must contain more than one element");
+    throw new RangeError('Candidate array must contain more than one element');
   }
 
   const pairs: number[] = cands.map((c) => func(c, ref));
@@ -425,13 +376,11 @@ export function jackKnife(
  * @return {number}             Computed f-score
  */
 export function fMeasure(p: number, r: number, beta: number = 0.5): number {
-  if (p < 0 || p > 1)
-    throw new RangeError("Precision value p must have bounds 0 ≤ p ≤ 1");
-  if (r < 0 || r > 1)
-    throw new RangeError("Recall value r must have bounds 0 ≤ r ≤ 1");
+  if (p < 0 || p > 1) throw new RangeError('Precision value p must have bounds 0 ≤ p ≤ 1');
+  if (r < 0 || r > 1) throw new RangeError('Recall value r must have bounds 0 ≤ r ≤ 1');
 
   if (beta < 0) {
-    throw new RangeError("beta value must be greater than 0");
+    throw new RangeError('beta value must be greater than 0');
   } else if (0 <= beta && beta <= 1) {
     return ((1 + beta * beta) * r * p) / (r + beta * beta * p);
   } else {
