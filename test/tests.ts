@@ -992,6 +992,19 @@ describe('Utility Functions', () => {
       ).toHaveLength(2);
     });
 
+    test.each([
+      "The label 'Success' appears in the report etc.\nNext sentence.",
+      "The label 'Happy days' appears in the report etc.\nNext sentence.",
+      "The label 'Success' appears beside 'Failure' in the report etc.\nNext sentence.",
+      "The label 'Success' doesn't appear in the report etc.\nNext sentence.",
+    ])('closes a quote before an ordinary continuation: %s', (input) => {
+      const expected = input.split('\n');
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
     test('closes single-quoted words ending in s', () => {
       expect(ss("He called it 'Success' before we use etc.\nNext sentence.")).toEqual([
         "He called it 'Success' before we use etc.",

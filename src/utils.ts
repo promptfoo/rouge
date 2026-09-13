@@ -132,6 +132,7 @@ const independentSentenceReg =
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
   readonly #caseNeutral: boolean;
+  readonly #quoteSource: { input: string; index: number };
   #parts: string[] = [];
   #normalizedThrough = 0;
   #words: { titleCase: boolean; lowerCase: boolean }[] = [];
@@ -142,8 +143,9 @@ class SentenceBuffer {
   hasLineBreaks = false;
   startsWithTitleCase = false;
 
-  constructor(text: string, caseNeutral: boolean) {
+  constructor(text: string, caseNeutral: boolean, quoteSource: { input: string; index: number }) {
     this.#caseNeutral = caseNeutral;
+    this.#quoteSource = quoteSource;
     this.append(trimSpaces(text));
   }
 
@@ -235,6 +237,8 @@ class SentenceBuffer {
   }
 
   #trackSingleQuote(text: string, index: number): void {
+    const source = this.#quoteSource;
+    source.index = source.input.indexOf("'", source.index) + 1;
     const previous = index === 0 ? this.#lastCharacter : text[index - 1];
     const following = text[index + 1] ?? '';
     if (this.#insideSingleQuotes) {
@@ -243,7 +247,7 @@ class SentenceBuffer {
         previous.toLowerCase() === 's' &&
         /\s/.test(following) &&
         (this.#caseNeutral
-          ? startsWithCasedCharacter(continuation) && !sentenceContinuationReg.test(continuation)
+          ? nextSingleQuoteCloses(source.input, source.index)
           : /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(continuation));
       this.#insideSingleQuotes =
         possessive || (following.length > 0 && !/[\s.,!?;:)\]}]/.test(following));
@@ -289,6 +293,20 @@ class SentenceBuffer {
   }
 }
 
+// Look past contractions, but stop at the next standalone quotation boundary.
+function nextSingleQuoteCloses(input: string, start: number): boolean {
+  for (let index = input.indexOf("'", start); index !== -1; index = input.indexOf("'", index + 1)) {
+    const following = input[index + 1] ?? '';
+    if ((index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1])) && /\S/.test(following)) {
+      return false;
+    }
+    if (following.length === 0 || /[\s.,!?;:)\]}]/.test(following)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Splits a body of text into an array of sentences
  * using a rule-based segmentation approach.
@@ -319,10 +337,11 @@ export function sentenceSegment(
   const chunks = sentenceChunks(input.replace(/\u0085/g, ' '), caseNeutral);
 
   const acc: string[] = [];
+  const quoteSource = { input, index: 0 };
   let pending: SentenceBuffer | undefined;
   for (let idx = 0; idx < chunks.length; idx++) {
     if (pending || chunks[idx]) {
-      const chunk = pending ?? new SentenceBuffer(chunks[idx], caseNeutral);
+      const chunk = pending ?? new SentenceBuffer(chunks[idx], caseNeutral, quoteSource);
       pending = undefined;
       // Trim only spaces (i.e. preserve line breaks/carriage feeds)
       chunk.trimEnd();
