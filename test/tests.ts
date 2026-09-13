@@ -573,6 +573,20 @@ describe('Utility Functions', () => {
       );
     });
 
+    test.each([
+      '1. First item 2. Second item',
+      'a. First item b. Second item',
+      '• 1. First item • 2. Second item',
+    ])('normalizes next-line whitespace before detecting list markers: %s', (input) => {
+      const wrapped = input.replaceAll(' ', '\u0085');
+      expect(ss(wrapped)).toEqual(ss(input));
+      expect(segmentCaseNeutrally(wrapped)).toEqual(segmentCaseNeutrally(input));
+      for (const score of [rouge.n, rouge.s, rouge.l]) {
+        expect(score(wrapped, input)).toBe(1);
+        expect(score(wrapped, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      }
+    });
+
     test('recognizes list markers after document indentation', () => {
       expect(ss('  1. The first item 2. The second item')).toEqual([
         '1. The first item',
