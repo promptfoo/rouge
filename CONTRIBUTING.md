@@ -157,6 +157,11 @@ This project uses [release-please](https://github.com/googleapis/release-please)
    - Version bump in `package.json`
    - Updated `CHANGELOG.md`
 
-3. When the release PR is merged, release-please:
+3. When the release PR is merged, the release workflow:
    - Creates a GitHub release
-   - Triggers the publish workflow to publish to npm with provenance
+   - Waits for CI and security checks on the release tag's exact commit
+   - Builds and publishes that commit to npm with provenance
+
+To retry an npm publication, run the **Release** workflow with `release_tag` set to the
+existing GitHub release tag. The workflow validates and checks out the tag's commit,
+even when `main` has advanced. Release runs are serialized to avoid competing publications.
