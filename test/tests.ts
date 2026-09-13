@@ -1393,6 +1393,16 @@ describe('Utility Functions', () => {
 
     test('closes spaced smart quotes and nested bracketed quotations', () => {
       expect(ss('He said “Stop. ” Next.')).toEqual(['He said “Stop. ”', 'Next.']);
+      expect(ss('He said ‘Stop. ’ Next.')).toEqual(['He said ‘Stop. ’', 'Next.']);
+      expect(ss('He said “The students’ protest. ” Next.')).toEqual([
+        'He said “The students’ protest. ”',
+        'Next.',
+      ]);
+      expect(ss('He said “She called ‘Stop.’ ” Next.')).toEqual([
+        'He said “She called ‘Stop.’ ”',
+        'Next.',
+      ]);
+      expect(ss('She said ‘Don’t stop. ’ Next.')).toEqual(['She said ‘Don’t stop. ’', 'Next.']);
       expect(ss('He said “(Stop.)” Next.')).toEqual(['He said “(Stop.)”', 'Next.']);
       expect(ss('Use etc.\n“Next sentence.”')).toEqual(['Use etc.', '“Next sentence.”']);
       expect(ss('She said “Don’t stop.” Next.')).toEqual(['She said “Don’t stop.”', 'Next.']);

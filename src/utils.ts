@@ -101,6 +101,16 @@ function quotationState(input: string, index: number, insideQuotes: boolean): bo
   );
 }
 
+function singleQuotationState(input: string, index: number, insideQuotes: boolean): boolean {
+  if (input[index] === '‘') {
+    return true;
+  }
+  if (input[index] === '’' && !/^\p{Letter}$/u.test(characterAt(input, index + 1))) {
+    return false;
+  }
+  return insideQuotes;
+}
+
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -518,12 +528,13 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const ellipsisCursor = { index: 0 };
   let lastEnd = 0;
   let start = -1;
-  let insideQuotes = false;
+  const quotes = { double: false, single: false };
   const brackets = { depth: 0, standalone: false };
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
-    insideQuotes = quotationState(input, index, insideQuotes);
+    quotes.double = quotationState(input, index, quotes.double);
+    quotes.single = singleQuotationState(input, index, quotes.single);
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
         brackets.standalone = start === -1;
@@ -549,7 +560,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       char === '?' ||
       char === '!'
     ) {
-      const end = sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
+      const end = sentenceEnd(input, index, quotes, brackets, caseNeutral);
       if (end === -1) {
         continue;
       }
@@ -614,12 +625,18 @@ function isProtectedEllipsisPeriod(
 }
 
 /** Scan closing delimiters, including whitespace before a pending closing quote. */
-function closingDelimiterEnd(input: string, index: number, insideQuotes: boolean): number {
+function closingDelimiterEnd(
+  input: string,
+  index: number,
+  quotes: { double: boolean; single: boolean },
+): number {
   let end = index + 1;
-  let quotePending = insideQuotes;
+  let doublePending = quotes.double;
+  let singlePending = quotes.single;
   while (end < input.length) {
     if (closingDelimiterReg.test(input[end])) {
-      quotePending &&= input[end] !== '"' && input[end] !== '”';
+      doublePending &&= input[end] !== '"' && input[end] !== '”';
+      singlePending &&= input[end] !== '’';
       end++;
       continue;
     }
@@ -633,7 +650,8 @@ function closingDelimiterEnd(input: string, index: number, insideQuotes: boolean
       next > end &&
       next < input.length &&
       (closingBracketReg.test(input[next]) ||
-        (quotePending && (input[next] === '"' || input[next] === '”')))
+        (doublePending && (input[next] === '"' || input[next] === '”')) ||
+        (singlePending && input[next] === '’'))
     ) {
       end = next;
       continue;
@@ -647,10 +665,11 @@ function closingDelimiterEnd(input: string, index: number, insideQuotes: boolean
 function sentenceEnd(
   input: string,
   index: number,
-  insideQuotes: boolean,
+  quotes: { double: boolean; single: boolean },
   brackets: { depth: number; standalone: boolean },
   caseNeutral: boolean,
 ): number {
+  const insideQuotes = quotes.double || quotes.single;
   if (
     !insideQuotes &&
     brackets.depth === 0 &&
@@ -658,7 +677,7 @@ function sentenceEnd(
   ) {
     return index + 1;
   }
-  const end = closingDelimiterEnd(input, index, insideQuotes);
+  const end = closingDelimiterEnd(input, index, quotes);
   if (end < input.length && !/\s/.test(input[end])) {
     return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
   }
@@ -667,9 +686,7 @@ function sentenceEnd(
   }
 
   const closedBrackets = countClosingBrackets(input, index + 1, end);
-  const closesQuotation =
-    insideQuotes &&
-    (input[end - 1] === '"' || input[end - 1] === '”' || input.slice(end - 2, end) === "''");
+  const closesQuotation = insideQuotes && /(?:["”’]|'')$/.test(input.slice(end - 2, end));
   if (
     closedBrackets > 0 &&
     (closedBrackets < brackets.depth || !(brackets.standalone || closesQuotation))
