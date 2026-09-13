@@ -2947,6 +2947,31 @@ describe('Core Functions', () => {
       },
     );
 
+    test.each(['ΟΣ.Α', 'ΟΣ.Α Β', 'ΟΣ.\u0301Α', 'İΟΣ.Α', 'ΟΣ.Α\nNext sentence.', 'ΟΣ. Α', 'ΟΣ\nΑ'])(
+      'preserves whole-summary case context across segmentation: %s',
+      (input) => {
+        for (const score of [n, s, l]) {
+          expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(
+            score(input, input, { caseSensitive: false }),
+          );
+        }
+      },
+    );
+
+    test('protects prepared sentences from a custom LCS consuming its arguments', () => {
+      expect(
+        l('alpha|beta', 'alpha|beta', {
+          segmenter: (input) => input.split('|'),
+          lcs: (candidate, reference) => {
+            const common = candidate.filter((token) => reference.includes(token));
+            candidate.length = 0;
+            reference.length = 0;
+            return common;
+          },
+        }),
+      ).toBe(1);
+    });
+
     test('ROUGE-L passes original text to custom segmenters before case folding', () => {
       const segmenter = jest.fn((input: string): string[] => [input]);
       expect(

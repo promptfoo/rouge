@@ -1,4 +1,5 @@
 import { lcsIndices as builtInLcsIndices } from './lcs';
+import { prepareSummary } from './prepare';
 import * as utils from './utils';
 import {
   validateBeta,
@@ -191,14 +192,7 @@ function tokenizeSummary(
   caseSensitive: boolean,
   tokenizer?: (input: string) => string[],
 ): string[] {
-  const tokenize = tokenizer ?? utils.treeBankTokenize;
-  const sentences =
-    tokenize === utils.treeBankTokenize
-      ? utils.sentenceSegment(input, { caseNeutral: !caseSensitive })
-      : [input];
-  return sentences.flatMap((sentence) =>
-    tokenize(caseSensitive ? sentence : sentence.toLowerCase()),
-  );
+  return prepareSummary(input, caseSensitive, tokenizer).sentences.flat();
 }
 
 /** JSON string tokens remain unambiguous when the built-in gram utilities join them. */
@@ -404,32 +398,28 @@ export function l(cand: string, ref: string, opts?: RougeLOptions): number {
   }
   validateBeta(beta);
 
-  const tokenizeSentence = (sentence: string): string[] => {
-    const tokens = tokenizer(caseSensitive ? sentence : sentence.toLowerCase());
-    return tokenizer === utils.treeBankTokenize ? tokens : [...tokens];
-  };
-  const segmentSummary = (input: string): string[] =>
-    segmenter === utils.sentenceSegment
-      ? utils.sentenceSegment(input, { caseNeutral: !caseSensitive })
-      : segmenter(input);
-  const candSents = segmentSummary(cand).map(tokenizeSentence);
-  const refSents = segmentSummary(ref).map(tokenizeSentence);
-
+  const candidate = prepareSummary(cand, caseSensitive, tokenizer, segmenter);
+  const reference = prepareSummary(ref, caseSensitive, tokenizer, segmenter);
+  const candLength = candidate.tokenCount;
+  const refLength = reference.tokenCount;
   const remaining = new Map<string, number>();
-  let candLength = 0;
-  for (const sentence of candSents) {
+  for (const sentence of candidate.sentences) {
     for (const token of sentence) {
-      candLength++;
       remaining.set(token, (remaining.get(token) ?? 0) + 1);
     }
   }
-  const refLength = refSents.reduce((total, sentence) => total + sentence.length, 0);
 
   if (candLength === 0 || refLength === 0) {
     return 0;
   }
 
-  const matches = countSummaryLcsMatches(candSents, refSents, remaining, getLcs, getLcsIndices);
+  const matches = countSummaryLcsMatches(
+    candidate.sentences,
+    reference.sentences,
+    remaining,
+    getLcs,
+    getLcsIndices,
+  );
   if (matches === 0) {
     return 0;
   }
@@ -437,8 +427,8 @@ export function l(cand: string, ref: string, opts?: RougeLOptions): number {
 }
 
 function countSummaryLcsMatches(
-  candidates: string[][],
-  references: string[][],
+  candidates: readonly (readonly string[])[],
+  references: readonly (readonly string[])[],
   remaining: Map<string, number>,
   getLcs: (a: string[], b: string[]) => string[],
   getLcsIndices?: (candidate: string[], reference: string[]) => number[],
@@ -474,13 +464,17 @@ function countSummaryLcsMatches(
 }
 
 function matchedReferenceIndices(
-  candidate: string[],
-  reference: string[],
+  candidate: readonly string[],
+  reference: readonly string[],
   getLcs: (a: string[], b: string[]) => string[],
   getLcsIndices?: (candidate: string[], reference: string[]) => number[],
 ): number[] {
   if (getLcsIndices !== undefined) {
-    return validateCustomLcsIndices(candidate, reference, getLcsIndices(candidate, reference));
+    return validateCustomLcsIndices(
+      candidate,
+      reference,
+      getLcsIndices([...candidate], [...reference]),
+    );
   }
   if (getLcs === utils.lcs) {
     return builtInLcsIndices(candidate, reference);
@@ -489,7 +483,7 @@ function matchedReferenceIndices(
   // Preserve the value-only callback's legacy best-effort alignment.
   const indices: number[] = [];
   let next = 0;
-  for (const token of getLcs(candidate, reference)) {
+  for (const token of getLcs([...candidate], [...reference])) {
     const index = reference.indexOf(token, next);
     if (index !== -1) {
       indices.push(index);
@@ -500,8 +494,8 @@ function matchedReferenceIndices(
 }
 
 function validateCustomLcsIndices(
-  candidate: string[],
-  reference: string[],
+  candidate: readonly string[],
+  reference: readonly string[],
   result: number[],
 ): number[] {
   if (!Array.isArray(result)) {
