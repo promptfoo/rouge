@@ -1377,6 +1377,27 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+    ])('recognizes typographic quotation pairs %s%s without changing text', (open, close) => {
+      const first = `${open}Alpha.${close}`;
+      const second = `${open}Beta.${close}`;
+      expect(ss(`${first} ${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+      expect(rouge.l(`${first} ${second}`, `${second} ${first}`)).toBe(1);
+      expect(ss(`We invested in ${open}Acme Co.\nInternational Holdings${close} today.`)).toEqual([
+        `We invested in ${open}Acme Co. International Holdings${close} today.`,
+      ]);
+    });
+
+    test('closes spaced smart quotes and nested bracketed quotations', () => {
+      expect(ss('He said “Stop. ” Next.')).toEqual(['He said “Stop. ”', 'Next.']);
+      expect(ss('He said “(Stop.)” Next.')).toEqual(['He said “(Stop.)”', 'Next.']);
+      expect(ss('Use etc.\n“Next sentence.”')).toEqual(['Use etc.', '“Next sentence.”']);
+      expect(ss('She said “Don’t stop.” Next.')).toEqual(['She said “Don’t stop.”', 'Next.']);
+    });
+
     test('recognizes Treebank closing quotes after bracketed sentences', () => {
       expect(ss("He said ``(Stop.)'' Next.")).toEqual(["He said ``(Stop.)''", 'Next.']);
       expect(ss("He said ''(Stop.)'' Next.")).toEqual(["He said ''(Stop.)''", 'Next.']);
