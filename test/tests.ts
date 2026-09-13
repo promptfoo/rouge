@@ -987,7 +987,7 @@ describe('Utility Functions', () => {
       'keeps protected periods inside possessive quotes: %s',
       (abbreviation) => {
         const input = `She reviewed 'the students' ${abbreviation}\nInternational report' today.`;
-        const expected = input.replace('\n', ' ');
+        const expected = `She reviewed 'the students' ${abbreviation} International report' today.`;
         expect(ss(input)).toEqual([expected]);
         expect(segmentCaseNeutrally(input)).toEqual([expected]);
         expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([expected.toLowerCase()]);
