@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   validate:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_tag == '' }}
     uses: ./.github/workflows/validate-commit.yml
     permissions:
       checks: read
@@ -25,6 +26,7 @@ jobs:
 
   release-please:
     needs: validate
+    if: ${{ !cancelled() && (needs.validate.result == 'success' || needs.validate.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -77,9 +79,7 @@ jobs:
             echo "Release $RELEASE_TAG did not resolve to a commit"
             exit 1
           fi
-          echo 'publish=true' >> "$GITHUB_OUTPUT"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          printf 'publish=true\nsha=%s\ntag=%s\n' "$sha" "$tag" >> "$GITHUB_OUTPUT"
 
   validate-release:
     needs: release-please
@@ -106,7 +106,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
-          cache: 'npm'
+          package-manager-cache: false
       - run: npm ci
       - run: npm test
 
@@ -128,7 +128,7 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
-          cache: 'npm'
+          package-manager-cache: false
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
       # Publishing uses npm's OIDC trusted publishers for authentication.
