@@ -1013,16 +1013,22 @@ export function arithmeticMean(input: number[]): number {
     return sum / input.length;
   }
 
-  // Recover from an overflowing sum without overflowing a difference either.
-  let mean = input[0];
-  for (let i = 1; i < input.length; i++) {
-    const value = input[i];
-    mean =
-      Math.sign(mean) === Math.sign(value)
-        ? mean + (value - mean) / (i + 1)
-        : mean * (i / (i + 1)) + value / (i + 1);
+  // Power-of-two scaling prevents overflow; compensation preserves cancelled residuals.
+  const scale = 2 ** (Math.ceil(Math.log2(input.length)) + 1);
+  let scaledSum = 0;
+  let correction = 0;
+  for (const value of input) {
+    const scaled = value / scale;
+    const next = scaledSum + scaled;
+    correction +=
+      Math.abs(scaledSum) >= Math.abs(scaled)
+        ? scaledSum - next + scaled
+        : scaled - next + scaledSum;
+    scaledSum = next;
   }
-  return mean;
+  const mean = (scaledSum + correction) / (input.length / scale);
+  // Rounding at the largest finite value must not introduce infinity.
+  return Math.max(-Number.MAX_VALUE, Math.min(Number.MAX_VALUE, mean));
 }
 
 /**

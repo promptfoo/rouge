@@ -136,6 +136,15 @@ describe('Utility Functions', () => {
       expect(am(values)).toBe(expected);
     });
 
+    test.each([
+      [Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE, 1],
+      [1, Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE],
+      [Number.MAX_VALUE, 1, Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE],
+    ])('preserves a residual after large cancellation: %p', (...values) => {
+      expect(am(values)).toBe(0.2);
+      expect(am(values.map((value) => -value))).toBe(-0.2);
+    });
+
     test('averages overflowing mixed-sign sums', () => {
       expect(am([1e308, 1e308, -1e308]) / 1e308).toBeCloseTo(1 / 3, 14);
     });
