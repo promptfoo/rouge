@@ -647,6 +647,30 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each([
+      'Use AC.İ for instructions.',
+      'Open İD.X for instructions.',
+      'Foo.İ. Next.',
+      'A.I\u0307 for instructions.',
+      'Use AC.I\u0307\u0323 for instructions.',
+    ])('preserves combining marks in case-neutral identifiers: %s', (input) => {
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        segmentCaseNeutrally(input).map((sentence) => sentence.toLowerCase()),
+      );
+      for (const score of [rouge.n, rouge.s, rouge.l]) {
+        expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      }
+    });
+
+    test('does not count combining marks as extra identifier letters', () => {
+      const input = `Use AC.I${'\u0345'.repeat(16_000)}! Next.`;
+      expect(segmentCaseNeutrally(input)).toEqual([
+        'Use AC.',
+        `I${'\u0345'.repeat(16_000)}!`,
+        'Next.',
+      ]);
+    });
+
     test('keeps bracketed references inside their sentence', () => {
       expect(ss('He wrote (see Fig.[2] for details). Next.')).toEqual([
         'He wrote (see Fig.[2] for details).',
