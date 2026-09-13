@@ -650,6 +650,9 @@ describe('Utility Functions', () => {
     test.each([
       'Use AC.İ for instructions.',
       'Open İD.X for instructions.',
+      'Use İ.A next.',
+      'Use Σ.A next.',
+      'Use İ.Α next.',
       'Foo.İ. Next.',
       'A.I\u0307 for instructions.',
       'Use AC.I\u0307\u0323 for instructions.',
