@@ -160,3 +160,11 @@ This project uses [release-please](https://github.com/googleapis/release-please)
 3. When the release PR is merged, release-please:
    - Creates a GitHub release
    - Triggers the publish workflow to publish to npm with provenance
+
+The release workflow builds one tarball with `npm pack`, validates its installed runtime,
+types, and contents, then publishes that same tarball. Package builds run through `prepack`.
+The release workflow owns package verification; `npm publish` from a directory builds but
+does not run the consumer smoke tests.
+
+Run `npm run test:package` for a clean build and consumer smoke test. To validate an existing
+artifact without rebuilding it, run `npm run test:package -- /path/to/js-rouge-VERSION.tgz`.

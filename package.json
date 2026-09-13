@@ -29,7 +29,6 @@
     "format": "biome format --write . && prettier --write \"**/*.md\"",
     "check": "biome check --write . && prettier --write \"**/*.md\"",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run build && npm run test:package",
     "prepare": "node scripts/prepare.js"
   },
   "repository": {

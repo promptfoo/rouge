@@ -46,13 +46,13 @@ jobs:
       - run: npm run type-check
       - name: Biome CI check
         run: npx biome ci . --error-on-warnings
-      - run: npm run build
+      - run: npm pack --pack-destination "$RUNNER_TEMP"
       - name: Verify build artifacts
         run: |
           test -f dist/rouge.js || (echo "Missing dist/rouge.js" && exit 1)
           test -f dist/rouge.mjs || (echo "Missing dist/rouge.mjs" && exit 1)
           test -f dist/rouge.d.ts || (echo "Missing dist/rouge.d.ts" && exit 1)
-      - run: npm run test:package
+      - run: npm run test:package -- "$RUNNER_TEMP"/js-rouge-*.tgz
       - run: npm test
 
   ci-success:

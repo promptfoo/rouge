@@ -32,12 +32,15 @@ function writeConsumerJson(file, value) {
 
 try {
   assert.ok(npmCli, 'Run the package smoke test through npm');
-  rmSync(join(repositoryRoot, 'dist'), { force: true, recursive: true });
-  run(process.execPath, [npmCli, 'pack', '--pack-destination', temporaryRoot], repositoryRoot);
-
-  const tarballs = readdirSync(temporaryRoot).filter((file) => file.endsWith('.tgz'));
-  assert.equal(tarballs.length, 1, 'npm pack should create exactly one tarball');
-  const tarball = join(temporaryRoot, tarballs[0]);
+  let tarball = process.argv[2];
+  if (tarball === undefined) {
+    run(process.execPath, [npmCli, 'pack', '--pack-destination', temporaryRoot], repositoryRoot);
+    const tarballs = readdirSync(temporaryRoot).filter((file) => file.endsWith('.tgz'));
+    assert.equal(tarballs.length, 1, 'npm pack should create exactly one tarball');
+    tarball = join(temporaryRoot, tarballs[0]);
+  } else {
+    tarball = resolve(tarball);
+  }
 
   mkdirSync(consumerRoot);
   writeConsumerJson('package.json', { name: 'js-rouge-smoke', private: true, type: 'module' });
