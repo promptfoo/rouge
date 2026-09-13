@@ -16,7 +16,10 @@ js-rouge is a TypeScript implementation of ROUGE (Recall-Oriented Understudy for
 src/
 ├── rouge.ts      # Main API: n(), s(), l() functions
 ├── lcs.ts        # Internal position-aware LCS implementation
-├── utils.ts      # Utility functions: tokenization, LCS, n-grams, etc.
+├── utils.ts      # Numeric/sequence utilities and public preprocessing re-exports
+├── tokenize.ts   # Penn Treebank tokenization
+├── sentence-segment.ts # Sentence boundary and line-wrap rules
+├── text.ts       # Shared character, bracket, and quote rules
 └── constants.ts  # NLP constants: abbreviations, contractions, etc.
 
 test/
