@@ -106,7 +106,12 @@ function singleQuotationState(input: string, index: number, insideQuotes: boolea
     return true;
   }
   if (input[index] === '’' && !/^\p{Letter}$/u.test(characterAt(input, index + 1))) {
-    return false;
+    return (
+      insideQuotes &&
+      input[index - 1]?.toLowerCase() === 's' &&
+      /\s/.test(input[index + 1] ?? '') &&
+      input.slice(index + 1).match(/[‘’]/)?.[0] === '’'
+    );
   }
   return insideQuotes;
 }
