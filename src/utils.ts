@@ -455,12 +455,24 @@ export function sentenceSegment(
 function nextListMarker(
   input: string,
   expression: RegExp,
-  family?: RegExp,
+  previous?: string,
+  caseNeutral = false,
 ): RegExpExecArray | null {
+  let family: RegExp | undefined;
+  if (previous !== undefined) {
+    if (/\d/.test(previous)) {
+      family = /\d/;
+    } else {
+      // Consecutive letters distinguish list labels from initials inside an item.
+      const label = (caseNeutral ? previous.toLowerCase() : previous).trim();
+      const nextLetter = String.fromCodePoint((label.codePointAt(0) as number) + 1);
+      family = new RegExp(`^\\s*${escapeRegExp(nextLetter)}\\.`, 'u');
+    }
+  }
   let marker = expression.exec(input);
   while (marker !== null) {
     if (
-      (family === undefined || family.test(marker[0])) &&
+      (family === undefined || family.test(caseNeutral ? marker[0].toLowerCase() : marker[0])) &&
       (marker.index === 0 ||
         !/\b(?:section|chapter|page|figure|table|paragraph|article|clause)$/i.test(
           input.slice(Math.max(0, marker.index - 24), marker.index).trimEnd(),
@@ -479,9 +491,7 @@ function segmentList(input: string, caseNeutral: boolean): string[] | undefined 
   if (current === null || input.slice(0, current.index).trim().length > 0) {
     return undefined;
   }
-  const firstMarker = current[0];
-  const family = [/\d/, /^\s*\p{Lu}/u, /^\s*\p{Ll}/u].find((pattern) => pattern.test(firstMarker));
-  let next = nextListMarker(input, expression, family);
+  let next = nextListMarker(input, expression, current[0], caseNeutral);
   if (next === null) {
     return undefined;
   }
@@ -495,7 +505,7 @@ function segmentList(input: string, caseNeutral: boolean): string[] | undefined 
     }
     segments.push(`${current[0].trim()} ${sentences[0]}`, ...sentences.slice(1));
     current = next;
-    next = nextListMarker(input, expression, family);
+    next = current && nextListMarker(input, expression, current[0], caseNeutral);
   } while (current !== null);
   return segments;
 }

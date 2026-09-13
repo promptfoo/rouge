@@ -553,6 +553,33 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each([
+      ['A. J. Smith. B. A. Brown.', ['A. J. Smith.', 'B. A. Brown.']],
+      [
+        'A. J. Smith will attend B. A. Brown will attend',
+        ['A. J. Smith will attend', 'B. A. Brown will attend'],
+      ],
+      ['Y. First Z. Last', ['Y. First', 'Z. Last']],
+      ['α. First β. Next', ['α. First', 'β. Next']],
+    ] as const)(
+      'uses letter progression to keep name initials in their list item: %s',
+      (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['A. One b. Two', 'a. One B. Two', 'A. J. Smith. B. A. Brown.'])(
+      'recognizes neutral list labels regardless of case: %s',
+      (input) => {
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          segmentCaseNeutrally(input).map((sentence) => sentence.toLowerCase()),
+        );
+        for (const score of [rouge.n, rouge.s, rouge.l]) {
+          expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+        }
+      },
+    );
+
     test('recognizes quoted and bracketed list-item starts', () => {
       expect(ss('1. "First item" 2. "Second item"')).toEqual([
         '1. "First item"',
