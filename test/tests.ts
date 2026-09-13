@@ -983,6 +983,17 @@ describe('Utility Functions', () => {
       }
     });
 
+    test.each(['Jan.', 'Calif.', 'P.M.', 'E.g.', 'Latest 3.5 Co.'])(
+      'keeps protected periods inside possessive quotes: %s',
+      (abbreviation) => {
+        const input = `She reviewed 'the students' ${abbreviation}\nInternational report' today.`;
+        const expected = input.replace('\n', ' ');
+        expect(ss(input)).toEqual([expected]);
+        expect(segmentCaseNeutrally(input)).toEqual([expected]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([expected.toLowerCase()]);
+      },
+    );
+
     test.each([' ', '\u0085'])('keeps neutral possessives open with whitespace %j', (separator) => {
       expect(
         segmentCaseNeutrally(

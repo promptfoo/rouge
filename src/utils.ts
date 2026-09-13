@@ -1,5 +1,8 @@
 import {
+  ABBR_DATES,
   ABBR_ORGANIZATIONS,
+  ABBR_PLACES,
+  ABBR_TIME,
   GATE_EXCEPTIONS,
   GATE_SUBSTITUTIONS,
   TREEBANK_CONTRACTIONS,
@@ -298,8 +301,12 @@ class SentenceBuffer {
   }
 }
 
+// Name, date, and time abbreviations can continue a wrapped quoted phrase.
+// Common terminal forms such as "etc." still stop lookahead.
 const quoteContinuationAbbreviationReg = new RegExp(
-  `\\b(?:${[...ABBR_ORGANIZATIONS, ...GATE_EXCEPTIONS].map(escapeRegExp).join('|')})\\.$`,
+  `\\b(?:${[...ABBR_DATES, ...ABBR_ORGANIZATIONS, ...ABBR_PLACES, ...ABBR_TIME, ...GATE_EXCEPTIONS]
+    .map(escapeRegExp)
+    .join('|')})\\.$`,
   'i',
 );
 
@@ -311,7 +318,12 @@ function nextSingleQuoteCloses(input: string, start: number): boolean {
     const index = boundary.index;
     if (boundary[0] !== "'") {
       const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-      if (!quoteContinuationAbbreviationReg.test(suffix)) {
+      // Internal dots in abbreviations and numbers do not end the quoted phrase.
+      const internalPeriod =
+        boundary[0] === '.' &&
+        /[\p{Letter}\p{Number}]/u.test(characterAt(input, index + 1)) &&
+        !isUnspacedSentenceBoundary(input, index, index + 1, true);
+      if (!(internalPeriod || quoteContinuationAbbreviationReg.test(suffix))) {
         return false;
       }
       continue;
