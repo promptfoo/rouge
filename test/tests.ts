@@ -553,6 +553,11 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test('keeps long sequences of leading initials in one item', () => {
+      const first = `A. ${'J. '.repeat(10_000)}Smith will attend`;
+      expect(ss(`${first} B. Next item`)).toEqual([first, 'B. Next item']);
+    });
+
     test.each(['İ. One j. Two', 'i\u0307. One j. Two'])(
       'preserves expanding case mappings in list labels: %s',
       (input) => {
@@ -568,6 +573,8 @@ describe('Utility Functions', () => {
 
     test.each([
       ['A. J. Smith. B. A. Brown.', ['A. J. Smith.', 'B. A. Brown.']],
+      ['A. J. K. Smith will attend B. Next item', ['A. J. K. Smith will attend', 'B. Next item']],
+      ['a. J. K. Smith will attend b. Next item', ['a. J. K. Smith will attend', 'b. Next item']],
       [
         'A. J. Smith will attend B. A. Brown will attend',
         ['A. J. Smith will attend', 'B. A. Brown will attend'],

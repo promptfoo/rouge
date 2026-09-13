@@ -469,13 +469,15 @@ function nextListMarker(
       family = [/^\s*\p{Lu}/u, /^\s*\p{Ll}/u].find((pattern) => pattern.test(label));
     }
   }
+  let bodyStart = previous ? previous.index + previous[0].length : 0;
+  let hasBody = previous === undefined;
   let marker = expression.exec(input);
   while (marker !== null) {
+    hasBody ||= input.slice(bodyStart, marker.index).trim().length > 0;
+    bodyStart = marker.index + marker[0].length;
     if (
       (family === undefined || family.test(marker[0])) &&
-      // A marker immediately followed by an initial has not started its item body yet.
-      (previous === undefined ||
-        input.slice(previous.index + previous[0].length, marker.index).trim().length > 0) &&
+      hasBody &&
       (marker.index === 0 ||
         !/\b(?:section|chapter|page|figure|table|paragraph|article|clause)$/i.test(
           input.slice(Math.max(0, marker.index - 24), marker.index).trimEnd(),
@@ -503,10 +505,17 @@ function segmentList(input: string, caseNeutral: boolean): string[] | undefined 
   do {
     const body = input.slice(current.index + current[0].length, next?.index ?? input.length).trim();
     const sentences = /[.!?\r\n]/.test(body) ? sentenceSegment(body, { caseNeutral }) : [body];
-    if (sentences.length > 1 && /^\p{Cased}\p{Mark}*\.$/u.test(sentences[0])) {
-      sentences.splice(0, 2, `${sentences[0]} ${sentences[1]}`);
+    let firstSentenceEnd = 1;
+    while (
+      firstSentenceEnd < sentences.length &&
+      /^\p{Cased}\p{Mark}*\.$/u.test(sentences[firstSentenceEnd - 1])
+    ) {
+      firstSentenceEnd++;
     }
-    segments.push(`${current[0].trim()} ${sentences[0]}`, ...sentences.slice(1));
+    segments.push(
+      `${current[0].trim()} ${sentences.slice(0, firstSentenceEnd).join(' ')}`,
+      ...sentences.slice(firstSentenceEnd),
+    );
     current = next;
     next = current && nextListMarker(input, expression, current, caseNeutral);
   } while (current !== null);
