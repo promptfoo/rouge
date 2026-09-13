@@ -255,6 +255,13 @@ class SentenceBuffer {
   }
 
   #trackSingleQuote(text: string, index: number): void {
+    if (text[index] === '‘') {
+      this.#insideSingleQuotes = true;
+      return;
+    }
+    if (text[index] === '’' && !this.#insideSingleQuotes) {
+      return;
+    }
     const previous = index === 0 ? this.#lastCharacter : text[index - 1];
     const following = text[index + 1] ?? '';
     if (this.#insideSingleQuotes) {
@@ -827,7 +834,7 @@ function isNeutralSentenceStart(input: string, previousEnd: number, next: number
   return (
     !sentenceContinuationReg.test(continuation) ||
     independentSentenceReg.test(continuation) ||
-    /["“]/.test(input.slice(previousEnd, next))
+    /["“‘]/.test(input.slice(previousEnd, next))
   );
 }
 

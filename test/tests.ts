@@ -1391,6 +1391,29 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each(['Class of ’99', 'Rock ’n’ roll', 'The students’ work'])(
+      'does not open a quotation for an apostrophe in %s',
+      (prefix) => {
+        const input = `${prefix} etc.\nNext sentence.`;
+        const expected = [`${prefix} etc.`, 'Next sentence.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['And go.', 'Before dawn.', 'To work.'])(
+      'recognizes a new single-curly quotation beginning with %s',
+      (continuation) => {
+        const input = `‘First.’ ‘${continuation}’`;
+        const expected = ['‘First.’', `‘${continuation}’`];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
     test('closes spaced smart quotes and nested bracketed quotations', () => {
       expect(ss('He said “Stop. ” Next.')).toEqual(['He said “Stop. ”', 'Next.']);
       expect(ss('He said ‘Stop. ’ Next.')).toEqual(['He said ‘Stop. ’', 'Next.']);
