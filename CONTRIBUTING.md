@@ -163,5 +163,6 @@ This project uses [release-please](https://github.com/googleapis/release-please)
    - Builds and publishes that commit to npm with provenance
 
 To retry an npm publication, run the **Release** workflow with `release_tag` set to the
-existing GitHub release tag. The workflow validates and checks out the tag's commit,
-even when `main` has advanced. Release runs are serialized to avoid competing publications.
+existing GitHub release tag. The tag must point to a commit in `main` history. The workflow
+validates and checks out that commit even when `main` has advanced. Release runs are
+serialized to avoid competing publications.
