@@ -1008,7 +1008,21 @@ export function arithmeticMean(input: number[]): number {
   if (input.length === 0) {
     throw new RangeError('Input array must have at least 1 element');
   }
-  return input.reduce((x, y) => x + y) / input.length;
+  const sum = input.reduce((x, y) => x + y);
+  if (Number.isFinite(sum) || !input.every(Number.isFinite)) {
+    return sum / input.length;
+  }
+
+  // Recover from an overflowing sum without overflowing a difference either.
+  let mean = input[0];
+  for (let i = 1; i < input.length; i++) {
+    const value = input[i];
+    mean =
+      Math.sign(mean) === Math.sign(value)
+        ? mean + (value - mean) / (i + 1)
+        : mean * (i / (i + 1)) + value / (i + 1);
+  }
+  return mean;
 }
 
 /**

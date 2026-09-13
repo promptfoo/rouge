@@ -123,6 +123,23 @@ describe('Utility Functions', () => {
   describe('arithmeticMean', () => {
     const am = rouge.arithmeticMean;
 
+    test.each([
+      [[1e308, 1e308], 1e308],
+      [[-1e308, -1e308], -1e308],
+      [[Number.MAX_VALUE, Number.MAX_VALUE], Number.MAX_VALUE],
+      [[1e308, 1e308, -1e308, -1e308], 0],
+      [[1e-308, 1e-308], 1e-308],
+      [[Number.MIN_VALUE, Number.MIN_VALUE], Number.MIN_VALUE],
+      [[Number.POSITIVE_INFINITY, 1], Number.POSITIVE_INFINITY],
+      [[Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY], Number.NaN],
+    ])('averages %p without introducing overflow or underflow', (values, expected) => {
+      expect(am(values)).toBe(expected);
+    });
+
+    test('averages overflowing mixed-sign sums', () => {
+      expect(am([1e308, 1e308, -1e308]) / 1e308).toBeCloseTo(1 / 3, 14);
+    });
+
     test('should throw RangeError for empty array', () => {
       expect(() => am([])).toThrow(RangeError);
     });
