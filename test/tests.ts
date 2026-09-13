@@ -596,6 +596,30 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test('reuses address lookahead across adjacent sentence boundaries', () => {
+      expect(ss('One.Two.Three. Jane.Doe@example.COM Next.Last.')).toEqual([
+        'One.',
+        'Two.',
+        'Three.',
+        'Jane.Doe@example.COM Next.',
+        'Last.',
+      ]);
+    });
+
+    test('segments long unspaced text within a bounded subprocess', () => {
+      expectBundledScriptToPass(
+        `
+          const input = 'Sentence.'.repeat(100_000);
+          const sentences = module.exports.sentenceSegment(input);
+          if (sentences.length !== 100_000 || sentences.some(s => s !== 'Sentence.')) {
+            throw new Error('Adjacent sentence boundaries changed');
+          }
+          process.stdout.write('ok');
+        `,
+        5000,
+      );
+    }, 10_000);
+
     test('keeps uppercase email domain labels inside their address', () => {
       expect(ss('Mail Jane.Doe@example.COM for help.')).toEqual([
         'Mail Jane.Doe@example.COM for help.',

@@ -511,6 +511,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const chunks: string[] = [];
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
+  const addressCursor = { end: 0, lastAt: -1 };
   let lastEnd = 0;
   let start = -1;
   let insideQuotes = false;
@@ -544,7 +545,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       char === '?' ||
       char === '!'
     ) {
-      const end = sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
+      const end = sentenceEnd(input, index, insideQuotes, brackets, caseNeutral, addressCursor);
       if (end === -1) {
         continue;
       }
@@ -644,6 +645,7 @@ function sentenceEnd(
   insideQuotes: boolean,
   brackets: { depth: number; standalone: boolean },
   caseNeutral: boolean,
+  addressCursor: { end: number; lastAt: number },
 ): number {
   if (
     !insideQuotes &&
@@ -654,7 +656,7 @@ function sentenceEnd(
   }
   const end = closingDelimiterEnd(input, index, insideQuotes);
   if (end < input.length && !/\s/.test(input[end])) {
-    return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
+    return isUnspacedSentenceBoundary(input, index, end, caseNeutral, addressCursor) ? end : -1;
   }
   if (end === index + 1) {
     return end;
@@ -733,11 +735,31 @@ function isUnspacedDelimitedSentenceStart(
   );
 }
 
+/** Cache the last @ in each whitespace-delimited token instead of rescanning each suffix. */
+function hasFollowingAt(
+  input: string,
+  next: number,
+  cursor: { end: number; lastAt: number },
+): boolean {
+  if (next >= cursor.end) {
+    cursor.end = next;
+    cursor.lastAt = -1;
+    while (cursor.end < input.length && !/\s/.test(input[cursor.end])) {
+      if (input[cursor.end] === '@') {
+        cursor.lastAt = cursor.end;
+      }
+      cursor.end++;
+    }
+  }
+  return cursor.lastAt >= next;
+}
+
 function isUnspacedSentenceBoundary(
   input: string,
   index: number,
   next: number,
   caseNeutral: boolean,
+  addressCursor: { end: number; lastAt: number },
 ): boolean {
   const nextCharacter = characterAt(input, next);
   const startsWithLetter = caseNeutral
@@ -782,7 +804,7 @@ function isUnspacedSentenceBoundary(
     continuesAbbreviation ||
     initial.test(following) ||
     (trailingInitial.test(suffix) && nextInitial.test(following)) ||
-    /^[^\s]*@/.test(following) ||
+    hasFollowingAt(input, next, addressCursor) ||
     insideAddress ||
     insideHostname ||
     dottedIdentifier
