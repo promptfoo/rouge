@@ -969,6 +969,29 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each([
+      "He described 'the students' Acme Co.\nInternational project' today.",
+      "He described 'the students' favorite Acme Co.\nInternational project' today.",
+      "He called it 'Success' Before we use etc.\nNext sentence.",
+      "He called it 'Success' before we use etc.\nNext sentence.",
+    ])('keeps possessive quote state invariant under case folding: %s', (input) => {
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        segmentCaseNeutrally(input).map((sentence) => sentence.toLowerCase()),
+      );
+      for (const score of [rouge.n, rouge.s, rouge.l]) {
+        expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      }
+    });
+
+    test('keeps neutral possessives open and closes quoted words before a continuation', () => {
+      expect(
+        segmentCaseNeutrally("He described 'the students' Acme Co.\nInternational project' today."),
+      ).toHaveLength(1);
+      expect(
+        segmentCaseNeutrally("He called it 'Success' before we use etc.\nNext sentence."),
+      ).toHaveLength(2);
+    });
+
     test('closes single-quoted words ending in s', () => {
       expect(ss("He called it 'Success' before we use etc.\nNext sentence.")).toEqual([
         "He called it 'Success' before we use etc.",

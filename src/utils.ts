@@ -238,10 +238,13 @@ class SentenceBuffer {
     const previous = index === 0 ? this.#lastCharacter : text[index - 1];
     const following = text[index + 1] ?? '';
     if (this.#insideSingleQuotes) {
+      const continuation = text.slice(index + 1).trimStart();
       const possessive =
         previous.toLowerCase() === 's' &&
         /\s/.test(following) &&
-        /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(text.slice(index + 1).trimStart());
+        (this.#caseNeutral
+          ? startsWithCasedCharacter(continuation) && !sentenceContinuationReg.test(continuation)
+          : /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(continuation));
       this.#insideSingleQuotes =
         possessive || (following.length > 0 && !/[\s.,!?;:)\]}]/.test(following));
       return;
