@@ -121,7 +121,7 @@ const closingDelimiterReg = /[\])}>"']/;
 const openingBracketReg = /[([{<]/;
 const closingBracketReg = /[\])}>]/;
 const listMarkerReg =
-  /(?:^|\s)(?:(?:[•⁃]\s*)?\d+(?:\.\)|[.)])|\p{Cased}\.)(?=\s+["'([{<]*\p{Cased})/gu;
+  /(?:^|\s)(?:(?:[•⁃]\s*)?\d+(?:\.\)|[.)])|\p{Cased}\p{Mark}*\.)(?=\s+["'([{<]*\p{Cased})/gu;
 const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
 const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
 const sentenceContinuationReg =
@@ -460,13 +460,18 @@ function nextListMarker(
 ): RegExpExecArray | null {
   let family: RegExp | undefined;
   if (previous !== undefined) {
-    if (/\d/.test(previous)) {
+    const label = (caseNeutral ? previous.toLowerCase() : previous).trim();
+    if (/\d/.test(label)) {
       family = /\d/;
+    } else if (/^[A-Za-z]\p{Mark}*\.$/u.test(label)) {
+      // ASCII progression distinguishes list labels from initials inside an item.
+      const nextLetter = String.fromCharCode(label.charCodeAt(0) + 1);
+      family = new RegExp(`^\\s*${escapeRegExp(nextLetter)}\\p{Mark}*\\.`, 'u');
+    } else if (caseNeutral) {
+      family = /^\s*\p{Cased}/u;
     } else {
-      // Consecutive letters distinguish list labels from initials inside an item.
-      const label = (caseNeutral ? previous.toLowerCase() : previous).trim();
-      const nextLetter = String.fromCodePoint((label.codePointAt(0) as number) + 1);
-      family = new RegExp(`^\\s*${escapeRegExp(nextLetter)}\\.`, 'u');
+      // Unicode alphabets need not follow code-point order. Retain their casing groups.
+      family = [/^\s*\p{Lu}/u, /^\s*\p{Ll}/u].find((pattern) => pattern.test(label));
     }
   }
   let marker = expression.exec(input);
@@ -500,7 +505,7 @@ function segmentList(input: string, caseNeutral: boolean): string[] | undefined 
   do {
     const body = input.slice(current.index + current[0].length, next?.index ?? input.length).trim();
     const sentences = /[.!?\r\n]/.test(body) ? sentenceSegment(body, { caseNeutral }) : [body];
-    if (sentences.length > 1 && /^\p{Cased}\.$/u.test(sentences[0])) {
+    if (sentences.length > 1 && /^\p{Cased}\p{Mark}*\.$/u.test(sentences[0])) {
       sentences.splice(0, 2, `${sentences[0]} ${sentences[1]}`);
     }
     segments.push(`${current[0].trim()} ${sentences[0]}`, ...sentences.slice(1));

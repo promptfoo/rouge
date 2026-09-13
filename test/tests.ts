@@ -553,6 +553,19 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each(['İ. One j. Two', 'i\u0307. One j. Two'])(
+      'preserves expanding case mappings in list labels: %s',
+      (input) => {
+        expect(segmentCaseNeutrally(input)).toHaveLength(2);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          segmentCaseNeutrally(input).map((sentence) => sentence.toLowerCase()),
+        );
+        for (const score of [rouge.n, rouge.s, rouge.l]) {
+          expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+        }
+      },
+    );
+
     test.each([
       ['A. J. Smith. B. A. Brown.', ['A. J. Smith.', 'B. A. Brown.']],
       [
@@ -561,6 +574,8 @@ describe('Utility Functions', () => {
       ],
       ['Y. First Z. Last', ['Y. First', 'Z. Last']],
       ['α. First β. Next', ['α. First', 'β. Next']],
+      ['ρ. First σ. Next', ['ρ. First', 'σ. Next']],
+      ['Ρ. First Σ. Next', ['Ρ. First', 'Σ. Next']],
     ] as const)(
       'uses letter progression to keep name initials in their list item: %s',
       (input, expected) => {
