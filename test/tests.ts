@@ -999,6 +999,7 @@ describe('Utility Functions', () => {
 
     test.each([
       "The label 'Success' appears in the report etc.\nNext sentence.",
+      "The label 'Success' appears in the report etc.\nThe students' work continues.",
       "The label 'Happy days' appears in the report etc.\nNext sentence.",
       "The label 'Success' appears beside 'Failure' in the report etc.\nNext sentence.",
       "The label 'Success' doesn't appear in the report etc.\nNext sentence.",

@@ -1,4 +1,9 @@
-import { GATE_EXCEPTIONS, GATE_SUBSTITUTIONS, TREEBANK_CONTRACTIONS } from './constants';
+import {
+  ABBR_ORGANIZATIONS,
+  GATE_EXCEPTIONS,
+  GATE_SUBSTITUTIONS,
+  TREEBANK_CONTRACTIONS,
+} from './constants';
 import { lcsIndices } from './lcs';
 import {
   validateBeta,
@@ -293,9 +298,24 @@ class SentenceBuffer {
   }
 }
 
-// Look past contractions, but stop at the next standalone quotation boundary.
+const quoteContinuationAbbreviationReg = new RegExp(
+  `\\b(?:${[...ABBR_ORGANIZATIONS, ...GATE_EXCEPTIONS].map(escapeRegExp).join('|')})\\.$`,
+  'i',
+);
+
+// A later sentence cannot supply the closer for the current quotation.
 function nextSingleQuoteCloses(input: string, start: number): boolean {
-  for (let index = input.indexOf("'", start); index !== -1; index = input.indexOf("'", index + 1)) {
+  const boundaries = /['.!?]/g;
+  boundaries.lastIndex = start;
+  for (const boundary of input.matchAll(boundaries)) {
+    const index = boundary.index;
+    if (boundary[0] !== "'") {
+      const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+      if (!quoteContinuationAbbreviationReg.test(suffix)) {
+        return false;
+      }
+      continue;
+    }
     const following = input[index + 1] ?? '';
     if ((index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1])) && /\S/.test(following)) {
       return false;
