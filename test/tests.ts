@@ -983,9 +983,14 @@ describe('Utility Functions', () => {
       }
     });
 
-    test('keeps neutral possessives open and closes quoted words before a continuation', () => {
+    test.each([' ', '\u0085'])('keeps neutral possessives open with whitespace %j', (separator) => {
       expect(
-        segmentCaseNeutrally("He described 'the students' Acme Co.\nInternational project' today."),
+        segmentCaseNeutrally(
+          "He described 'the students' Acme Co.\nInternational project' today.".replaceAll(
+            ' ',
+            separator,
+          ),
+        ),
       ).toHaveLength(1);
       expect(
         segmentCaseNeutrally("He called it 'Success' before we use etc.\nNext sentence."),

@@ -334,10 +334,11 @@ export function sentenceSegment(
   }
 
   // Scan terminals before applying abbreviation and line-wrap rules.
-  const chunks = sentenceChunks(input.replace(/\u0085/g, ' '), caseNeutral);
+  const source = input.replace(/\u0085/g, ' ');
+  const chunks = sentenceChunks(source, caseNeutral);
 
   const acc: string[] = [];
-  const quoteSource = { input, index: 0 };
+  const quoteSource = { input: source, index: 0 };
   let pending: SentenceBuffer | undefined;
   for (let idx = 0; idx < chunks.length; idx++) {
     if (pending || chunks[idx]) {
