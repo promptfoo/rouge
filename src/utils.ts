@@ -455,29 +455,27 @@ export function sentenceSegment(
 function nextListMarker(
   input: string,
   expression: RegExp,
-  previous?: string,
+  previous?: RegExpExecArray,
   caseNeutral = false,
 ): RegExpExecArray | null {
   let family: RegExp | undefined;
   if (previous !== undefined) {
-    const label = (caseNeutral ? previous.toLowerCase() : previous).trim();
+    const label = previous[0];
     if (/\d/.test(label)) {
       family = /\d/;
-    } else if (/^[A-Za-z]\p{Mark}*\.$/u.test(label)) {
-      // ASCII progression distinguishes list labels from initials inside an item.
-      const nextLetter = String.fromCharCode(label.charCodeAt(0) + 1);
-      family = new RegExp(`^\\s*${escapeRegExp(nextLetter)}\\p{Mark}*\\.`, 'u');
     } else if (caseNeutral) {
       family = /^\s*\p{Cased}/u;
     } else {
-      // Unicode alphabets need not follow code-point order. Retain their casing groups.
       family = [/^\s*\p{Lu}/u, /^\s*\p{Ll}/u].find((pattern) => pattern.test(label));
     }
   }
   let marker = expression.exec(input);
   while (marker !== null) {
     if (
-      (family === undefined || family.test(caseNeutral ? marker[0].toLowerCase() : marker[0])) &&
+      (family === undefined || family.test(marker[0])) &&
+      // A marker immediately followed by an initial has not started its item body yet.
+      (previous === undefined ||
+        input.slice(previous.index + previous[0].length, marker.index).trim().length > 0) &&
       (marker.index === 0 ||
         !/\b(?:section|chapter|page|figure|table|paragraph|article|clause)$/i.test(
           input.slice(Math.max(0, marker.index - 24), marker.index).trimEnd(),
@@ -496,7 +494,7 @@ function segmentList(input: string, caseNeutral: boolean): string[] | undefined 
   if (current === null || input.slice(0, current.index).trim().length > 0) {
     return undefined;
   }
-  let next = nextListMarker(input, expression, current[0], caseNeutral);
+  let next = nextListMarker(input, expression, current, caseNeutral);
   if (next === null) {
     return undefined;
   }
@@ -510,7 +508,7 @@ function segmentList(input: string, caseNeutral: boolean): string[] | undefined 
     }
     segments.push(`${current[0].trim()} ${sentences[0]}`, ...sentences.slice(1));
     current = next;
-    next = current && nextListMarker(input, expression, current[0], caseNeutral);
+    next = current && nextListMarker(input, expression, current, caseNeutral);
   } while (current !== null);
   return segments;
 }
