@@ -145,6 +145,57 @@ describe('Utility Functions', () => {
       expect(am(values.map((value) => -value))).toBe(-0.2);
     });
 
+    test.each([
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          3 * Number.MIN_VALUE,
+        ],
+        Number.MIN_VALUE,
+      ],
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          3 * Number.MIN_VALUE,
+          0,
+        ],
+        0,
+      ],
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          9 * Number.MIN_VALUE,
+          0,
+        ],
+        2 * Number.MIN_VALUE,
+      ],
+      [new Array<number>(5).fill(Number.MAX_VALUE), Number.MAX_VALUE],
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          1,
+          -Number.MAX_VALUE,
+        ],
+        1 / 7,
+      ],
+    ])('rounds an overflowing finite mean once: %p', (values, expected) => {
+      expect(am(values)).toBe(expected);
+      expect(am(values.map((value) => -value))).toBe(-expected);
+    });
+
     test('averages overflowing mixed-sign sums', () => {
       expect(am([1e308, 1e308, -1e308]) / 1e308).toBeCloseTo(1 / 3, 14);
     });

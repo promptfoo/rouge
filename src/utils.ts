@@ -1013,22 +1013,32 @@ export function arithmeticMean(input: number[]): number {
     return sum / input.length;
   }
 
-  // Power-of-two scaling prevents overflow; compensation preserves cancelled residuals.
-  const scale = 2 ** (Math.ceil(Math.log2(input.length)) + 1);
-  let scaledSum = 0;
-  let correction = 0;
+  // Sum exact multiples of 2^-1074 only when ordinary addition overflows.
+  const view = new DataView(new ArrayBuffer(8));
+  const implicitBit = 1n << 52n;
+  let total = 0n;
   for (const value of input) {
-    const scaled = value / scale;
-    const next = scaledSum + scaled;
-    correction +=
-      Math.abs(scaledSum) >= Math.abs(scaled)
-        ? scaledSum - next + scaled
-        : scaled - next + scaledSum;
-    scaledSum = next;
+    view.setFloat64(0, value);
+    const bits = view.getBigUint64(0);
+    const exponent = Number((bits >> 52n) & 0x7ffn);
+    const fraction = bits & (implicitBit - 1n);
+    const significand = exponent === 0 ? fraction : fraction + implicitBit;
+    const units = significand << BigInt(Math.max(0, exponent - 1));
+    total += value < 0 ? -units : units;
   }
-  const mean = (scaledSum + correction) / (input.length / scale);
-  // Rounding at the largest finite value must not introduce infinity.
-  return Math.max(-Number.MAX_VALUE, Math.min(Number.MAX_VALUE, mean));
+
+  const negative = total < 0n;
+  const magnitude = negative ? -total : total;
+  const count = BigInt(input.length);
+  const shift = Math.max(0, (magnitude / count).toString(2).length - 53);
+  const denominator = count << BigInt(shift);
+  let significand = magnitude / denominator;
+  const remainder = magnitude % denominator;
+  // Round once to the nearest double, breaking exact ties toward an even significand.
+  if (2n * remainder > denominator || (2n * remainder === denominator && significand % 2n === 1n)) {
+    significand++;
+  }
+  return (negative ? -1 : 1) * Number(significand) * 2 ** (shift - 1074);
 }
 
 /**
