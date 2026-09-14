@@ -1389,6 +1389,13 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
     }, 5000);
 
+    test('recognizes astral digits before measurement apostrophes', () => {
+      const input = "The answer 'Yes' worked. It was 𝟝' tall. Next.";
+      const expected = ["The answer 'Yes' worked.", "It was 𝟝' tall.", 'Next.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
     test('recovers after an abbreviation possessive without changing neutral abbreviation policy', () => {
       const input = "That is JFK Jr.'s book. Next.";
       expect(ss(input)).toEqual(["That is JFK Jr.'s book.", 'Next.']);

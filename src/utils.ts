@@ -241,7 +241,7 @@ function markStraightPossessives(input: string, apostrophes: Uint8Array): void {
     if (/^[\p{Letter}\p{Mark}]$/u.test(following)) {
       continue;
     }
-    if (/\p{Number}/u.test(previous)) {
+    if (/\p{Number}$/u.test(input.slice(Math.max(0, index - 2), index))) {
       candidate = undefined;
     } else if (/[sS]/.test(previous)) {
       candidate ??= index;
