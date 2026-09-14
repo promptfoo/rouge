@@ -724,6 +724,18 @@ describe('Utility Functions', () => {
       expect(ss(input)).toEqual([input]);
     });
 
+    test.each([
+      'She said ‘Alice’s Alpha.[1] Beta.’ aloud.',
+      'She said ‘𝒜’s Alpha.[1] Beta.’ aloud.',
+      'She said ‘Café’s Alpha.[1] Beta.’ aloud.',
+      'She said ‘The dogs’ Alpha.[1] Beta.’ aloud.',
+      'She said ‘The dogs’ owners’ Alpha.[1] Beta.’ aloud.',
+    ])('keeps cited text inside quotes containing apostrophes: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
     test('does not mistake a quoted numeric sentence start for a citation', () => {
       const input = 'Alpha."2 people agreed."';
       const expected = ['Alpha.', '"2 people agreed."'];

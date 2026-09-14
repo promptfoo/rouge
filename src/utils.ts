@@ -518,11 +518,12 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   let insideQuotes = false;
   const brackets = { depth: 0, standalone: false };
   const citationQuotationClosers: string[] = [];
+  const apostrophes = citationApostrophes(input);
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     insideQuotes = quotationState(input, index, insideQuotes);
-    updateCitationQuotationState(input, index, citationQuotationClosers);
+    updateCitationQuotationState(input, index, citationQuotationClosers, apostrophes);
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
         brackets.standalone = start === -1;
@@ -565,8 +566,41 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   return chunks;
 }
 
-function updateCitationQuotationState(input: string, index: number, closers: string[]): void {
+/** An ambiguous s-ending mark stays internal only when a later unambiguous closer confirms it. */
+function citationApostrophes(input: string): Uint8Array {
+  const apostrophes = new Uint8Array(input.length);
+  let candidate: number | undefined;
+  for (const quote of input.matchAll(/[‘’]/g)) {
+    const index = quote.index;
+    if (quote[0] === '‘') {
+      candidate = undefined;
+    } else if (
+      /[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+      /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1))
+    ) {
+      apostrophes[index] = 1;
+    } else if (/[sS]$/.test(input.slice(Math.max(0, index - 1), index))) {
+      candidate ??= index;
+    } else {
+      if (candidate !== undefined) {
+        apostrophes.fill(1, candidate, index);
+      }
+      candidate = undefined;
+    }
+  }
+  return apostrophes;
+}
+
+function updateCitationQuotationState(
+  input: string,
+  index: number,
+  closers: string[],
+  apostrophes: Uint8Array,
+): void {
   const character = input[index];
+  if (character === '’' && apostrophes[index] === 1) {
+    return;
+  }
   if (character === '“' || character === '‘') {
     pushCitationQuotation(closers, character === '“' ? '”' : '’');
     return;
