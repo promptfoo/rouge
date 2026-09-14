@@ -125,7 +125,7 @@ function isAlphabeticFootnote(input: string, index: number): boolean {
   const following = characterAt(input, index + 1);
   return (
     following !== following.normalize('NFKC') &&
-    /^\p{Lm}(?:[.,;:!?]|$)/u.test(input.slice(index + 1, index + 5))
+    /^\p{Lm}(?:[\s.,;:!?"'”’\])}>]|$)/u.test(input.slice(index + 1, index + 5))
   );
 }
 
@@ -829,7 +829,9 @@ function sentenceEnd(
     return index + 1;
   }
   const delimiterEnd = closingDelimiterEnd(input, index, quotes);
-  const end = insideQuotes ? quotationCitationEnd(input, index, delimiterEnd) : delimiterEnd;
+  const end = insideQuotes
+    ? quotationCitationEnd(input, index, delimiterEnd, quotes)
+    : delimiterEnd;
   const hasCitation = end > delimiterEnd;
   const closesQuotation =
     insideQuotes && (hasCitation || /(?:["”’]|'')$/.test(input.slice(end - 2, end)));
@@ -873,9 +875,15 @@ function sentenceEnd(
 }
 
 /** Attach supported citations after a consumed quotation, including enclosing brackets. */
-function quotationCitationEnd(input: string, index: number, delimiterEnd: number): number {
+function quotationCitationEnd(
+  input: string,
+  index: number,
+  delimiterEnd: number,
+  quotes: QuoteState,
+): number {
   let end = delimiterEnd;
-  if (!/(?:["”’]|'')[\s)\]}>]*$/.test(input.slice(index + 1, end))) {
+  const delimiters = input.slice(index + 1, end);
+  if (!/(?:["”’]|'')[\s)\]}>]*$/.test(delimiters)) {
     return end;
   }
   while (/^\p{Number}$/u.test(characterAt(input, end))) {
@@ -884,15 +892,25 @@ function quotationCitationEnd(input: string, index: number, delimiterEnd: number
   if (isAlphabeticFootnote(input, end - 1)) {
     end += characterAt(input, end).length;
   }
-  return end;
+  if (end === delimiterEnd) {
+    return end;
+  }
+  return closingDelimiterEnd(input, end - 1, {
+    double: quotes.double && !/(?:"|'')/.test(delimiters),
+    smartDouble: quotes.smartDouble && !delimiters.includes('”'),
+    single: quotes.single && !delimiters.includes('’'),
+    apostrophes: quotes.apostrophes,
+  });
 }
 
 function isIndependentParenthetical(input: string, index: number): boolean {
   const contents = input.slice(index + 1);
-  return (
-    independentSentenceReg.test(contents.trimStart()) &&
-    /^[^()[\]{}<>]*[.!?]\s*[)\]}>]/.test(contents)
-  );
+  const sentence = contents.match(/^[^()[\]{}<>]*[.!?]\s*[)\]}>]/)?.[0];
+  if (sentence === undefined) {
+    return false;
+  }
+  const suffix = sentence.slice(0, -1).trimEnd().slice(-sentenceSuffixLength).toLowerCase();
+  return independentSentenceReg.test(contents.trimStart()) || !abbrvReg.test(suffix);
 }
 
 function sentenceEndAfterDelimiter(

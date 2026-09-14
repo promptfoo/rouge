@@ -1967,6 +1967,50 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each([' ', '\t', '\n'])(
+      'attaches alphabetic footnotes before whitespace %j',
+      (separator) => {
+        for (const [open, close] of [
+          ['‘', '’'],
+          ['“', '”'],
+          ['"', '"'],
+        ]) {
+          const first = `${open}Stop?${close}ᵃ`;
+          const input = `${first}${separator}Next sentence.`;
+          expect(ss(input)).toEqual([first, 'Next sentence.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            'next sentence.',
+          ]);
+        }
+      },
+    );
+
+    test.each(['ᵃ', '²'])('attaches closing delimiters after a quotation footnote %s', (marker) => {
+      for (const first of [
+        `He said [“Stop?”${marker}]`,
+        `He said [‘Stop?’${marker} ]`,
+        `“He said ‘Stop?’${marker}”`,
+        `‘He said “Stop?”${marker}’`,
+      ]) {
+        const input = `${first} Next sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          'next sentence.',
+        ]);
+      }
+      const adjacentQuote = `He said "Stop?"${marker}"2 people agreed."`;
+      for (const caseNeutral of [false, true]) {
+        expect(ss(adjacentQuote, { caseNeutral })).toEqual([
+          `He said "Stop?"${marker}`,
+          '"2 people agreed."',
+        ]);
+      }
+    });
+
     test.each(bracketPairs)('attaches numeric citations after enclosing %s%s', (open, close) => {
       for (const quote of [
         ['‘', '’'],
@@ -1999,13 +2043,20 @@ describe('Utility Functions', () => {
       'recognizes a parenthetical sentence after a quoted abbreviation with separator %j',
       (separator) => {
         const first = 'The company is “Acme Co.”';
-        const second = '(It closed.)';
-        expect(ss(`${first}${separator}${second}`)).toEqual([first, second]);
-        expect(segmentCaseNeutrally(`${first}${separator}${second}`)).toEqual([first, second]);
-        expect(segmentCaseNeutrally(`${first}${separator}${second}`.toLowerCase())).toEqual([
-          first.toLowerCase(),
-          second.toLowerCase(),
-        ]);
+        for (const second of ['(It closed.)', '(The office closed.)', '(Bob left.)']) {
+          expect(ss(`${first}${separator}${second}`)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(`${first}${separator}${second}`)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(`${first}${separator}${second}`.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+          ]);
+          const straightFirst = first.replace(/[“”]/g, '"');
+          expect(ss(`${straightFirst}${separator}${second}`)).toEqual([straightFirst, second]);
+          expect(segmentCaseNeutrally(`${straightFirst}${separator}${second}`)).toEqual([
+            straightFirst,
+            second,
+          ]);
+        }
         const continuation = `${first}${separator}(It owns subsidiaries) today.`;
         expect(ss(continuation)).toEqual([continuation.replaceAll('\n', ' ')]);
         expect(segmentCaseNeutrally(continuation)).toEqual([continuation.replaceAll('\n', ' ')]);
