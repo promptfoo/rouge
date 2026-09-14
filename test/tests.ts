@@ -1314,6 +1314,109 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each(['alice.smith@example.com', 'ALICE.SMITH@EXAMPLE.COM'])(
+      'preserves email punctuation in an auxiliary question: %s',
+      (address) => {
+        const input = `"It ended." Was ${address} ready? Next.`;
+        const expected = ['"It ended."', `Was ${address} ready?`, 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each([
+      [
+        'He typed "hello. Next sentence. Last one.',
+        ['He typed "hello.', 'Next sentence.', 'Last one.'],
+      ],
+      [
+        "He typed 'hello. Next sentence. Last one.",
+        ["He typed 'hello.", 'Next sentence.', 'Last one.'],
+      ],
+      [
+        'He typed “hello. Next sentence. Last one.',
+        ['He typed “hello.', 'Next sentence.', 'Last one.'],
+      ],
+      [
+        'He typed „hello. Next sentence. Last one.',
+        ['He typed „hello.', 'Next sentence.', 'Last one.'],
+      ],
+      [
+        'He typed ``hello. Next sentence. Last one.',
+        ['He typed ``hello.', 'Next sentence.', 'Last one.'],
+      ],
+      [
+        "The answer 'Yes' worked. It was 5' tall. Next.",
+        ["The answer 'Yes' worked.", "It was 5' tall.", 'Next.'],
+      ],
+      [
+        "The answer 'Yes' worked. It was 5' Tall. Next.",
+        ["The answer 'Yes' worked.", "It was 5' Tall.", 'Next.'],
+      ],
+      [
+        'She said „He answered “No.” Then left.“ Next.',
+        ['She said „He answered “No.” Then left.“', 'Next.'],
+      ],
+      ["He said 'Alpha.''Beta.'", ["He said 'Alpha.'", "'Beta.'"]],
+      ["She said 'Til tomorrow.'Next.", ["She said 'Til tomorrow.'", 'Next.']],
+      [
+        "She said 'The dogs' owners were born in 2020.' Next.",
+        ["She said 'The dogs' owners were born in 2020.'", 'Next.'],
+      ],
+    ])('shares confirmed quotation pairs across boundary consumers: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      [
+        'She said “First. Then „inner.“ Finally left.” Next.',
+        ['She said “First. Then „inner.“ Finally left.”', 'Next.'],
+      ],
+      [
+        '"It ended." Was “First. Then „inner.“ Finally left.”? Next.',
+        ['"It ended."', 'Was “First. Then „inner.“ Finally left.”?', 'Next.'],
+      ],
+    ])('retains an English outer pair across a German closing mark: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('recovers many unmatched quote openers without repeated closer searches', () => {
+      const first = `He typed ${'“ '.repeat(20_000)}Done.`;
+      const input = `${first} Next.`;
+      expect(ss(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+    }, 5000);
+
+    test('recovers after an abbreviation possessive without changing neutral abbreviation policy', () => {
+      const input = "That is JFK Jr.'s book. Next.";
+      expect(ss(input)).toEqual(["That is JFK Jr.'s book.", 'Next.']);
+      // Preserve the baseline's neutral abbreviation boundary, but do not hold the remaining document open.
+      expect(segmentCaseNeutrally(input)).toEqual(['That is JFK Jr.', "'s book.", 'Next.']);
+    });
+
+    test('finds an auxiliary question beyond its paired inner quotation', () => {
+      const input = '"It ended." Was "No." the answer? Next.';
+      expect(ss(input)).toEqual(['"It ended."', 'Was "No." the answer?', 'Next.']);
+      // The existing neutral continuation policy still splits a lower-case clause after a quote.
+      expect(segmentCaseNeutrally(input)).toEqual([
+        '"It ended."',
+        'Was "No."',
+        'the answer?',
+        'Next.',
+      ]);
+    });
+
+    test.each(['"hello."', '“hello.”', '‘hello.’', '„hello.“'])(
+      'applies the existing quoted line-wrap continuation rule to %s',
+      (quoted) => {
+        const input = `2020 saw ${quoted}\nthen left.`;
+        expect(ss(input)).toEqual([`2020 saw ${quoted}`, 'then left.']);
+        expect(segmentCaseNeutrally(input)).toEqual([`2020 saw ${quoted} then left.`]);
+      },
+    );
+
     test('preserves Unicode-folded abbreviations at quotation boundaries', () => {
       for (const input of [
         'He said "Kan." 2 people remained.',
@@ -1863,6 +1966,20 @@ describe('Utility Functions', () => {
         const elapsed = Date.now() - start;
         expect(elapsed).toBeLessThan(TIMEOUT_MS);
       });
+
+      test('short-circuits known URLs before searching question suffixes for email', () => {
+        expectBundledScriptToPass(
+          `
+            const input = '"Dr." Is ' + 'https://a.b/'.repeat(30000) + 'valid?';
+            for (const caseNeutral of [false, true]) {
+              const sentences = module.exports.sentenceSegment(input, { caseNeutral });
+              if (sentences.join(' ') !== input) throw new Error('URL content changed');
+            }
+            process.stdout.write('ok');
+          `,
+          5000,
+        );
+      }, 10_000);
 
       test('scans repeated quoted abbreviations before a question once', () => {
         expectBundledScriptToPass(

@@ -80,38 +80,6 @@ function opensDoubleQuote(input: string, index: number, insideQuotes: boolean): 
   return !insideQuotes && (index === 0 || /[\s\p{Punctuation}]/u.test(input[index - 1]));
 }
 
-function quotationState(input: string, index: number, insideQuotes: boolean): boolean {
-  if (input[index] === '"') {
-    return opensDoubleQuote(input, index, insideQuotes);
-  }
-  if (input.startsWith('``', index)) {
-    return true;
-  }
-  if (!input.startsWith("''", index)) {
-    return insideQuotes;
-  }
-  return (
-    !insideQuotes &&
-    opensDoubleQuote(input, index, false) &&
-    /^[\p{Letter}\p{Number}\p{Sc}\p{Ps}]$/u.test(characterAt(input, index + 2)) &&
-    input.slice(index + 2).includes("''")
-  );
-}
-
-function trackCurlyDoubleQuotation(character: string, state: SingleAndCurlyQuotations): void {
-  if (character === '“') {
-    if (state.germanDouble) {
-      state.germanDouble = false;
-    } else {
-      state.curlyDouble = true;
-    }
-  } else if (character === '”') {
-    state.curlyDouble = false;
-  } else if (character === '„') {
-    state.germanDouble = true;
-  }
-}
-
 function remainsInsideNestedQuotation(
   input: string,
   start: number,
@@ -142,7 +110,11 @@ function singleQuotationState(input: string, index: number, insideQuotes: boolea
       );
     return possessive || (following.length > 0 && !/[\s.,!?;:)\]}"”»\p{Pd}]/u.test(following));
   }
-  return (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) && /\S/.test(following);
+  return (
+    (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) &&
+    !(/[.!?]/.test(previous) && /^'(?:s|m|d|ll|re|ve)\b/i.test(input.slice(index, index + 4))) &&
+    /\S/.test(following)
+  );
 }
 
 const leadingElisionReg =
@@ -234,6 +206,7 @@ function markUnpairedElisions(input: string, apostrophes: Uint8Array): void {
     const elision = leadingElisionReg.test(input.slice(index + 1, index + 12));
     if (
       elisionOpening !== undefined &&
+      !/[.!?]/.test(input[index - 1] ?? '') &&
       opensDoubleQuote(input, index, false) &&
       /^[\p{Letter}\p{Number}([{<]$/u.test(characterAt(input, index + 1))
     ) {
@@ -268,7 +241,9 @@ function markStraightPossessives(input: string, apostrophes: Uint8Array): void {
     if (/^[\p{Letter}\p{Mark}]$/u.test(following)) {
       continue;
     }
-    if (/[sS]/.test(previous)) {
+    if (/\p{Number}/u.test(previous)) {
+      candidate = undefined;
+    } else if (/[sS]/.test(previous)) {
       candidate ??= index;
     } else if (candidate !== undefined) {
       // Preserve the other quote family's bits; confirmed ranges do not overlap.
@@ -281,6 +256,7 @@ function markStraightPossessives(input: string, apostrophes: Uint8Array): void {
 }
 
 interface SingleAndCurlyQuotations {
+  straightDouble: boolean;
   curlyDouble: boolean;
   germanDouble: boolean;
   curlySingle: boolean;
@@ -290,29 +266,157 @@ interface SingleAndCurlyQuotations {
 interface QuotationSource extends SingleAndCurlyQuotations {
   input: string;
   index: number;
-  apostrophes: Uint8Array;
+  pairs: Int32Array;
 }
 
-function trackSingleAndCurlyQuotations(
-  input: string,
-  index: number,
-  state: SingleAndCurlyQuotations,
-  apostrophes: Uint8Array,
-): void {
-  const character = input[index];
-  trackCurlyDoubleQuotation(character, state);
-  if (/['‘’]/.test(character)) {
-    const kind = character === "'" ? 'straightSingle' : 'curlySingle';
-    state[kind] = singleQuoteState(input, index, state[kind], apostrophes);
+type QuotationKind = keyof SingleAndCurlyQuotations;
+
+/** Pair quote tokens once; negative entries point back to their matching opener. */
+function quotationPairs(input: string, apostrophes: Uint8Array): Int32Array {
+  const pairing = new QuotationPairing(input, apostrophes);
+  for (const quote of input.matchAll(/["'`“”„‘’]/g)) {
+    pairing.add(quote.index);
+  }
+  return pairing.pairs;
+}
+
+class QuotationPairing {
+  readonly pairs: Int32Array;
+  readonly #input: string;
+  readonly #apostrophes: Uint8Array;
+  readonly #openings = {
+    straightDouble: -1,
+    straightSingle: -1,
+    curlyDouble: -1,
+    germanDouble: -1,
+    curlySingle: -1,
+  };
+  #skipThrough = -1;
+  #nextEnglishClose = -1;
+  #nextCurlyBoundary = -1;
+  #nextTreebankClose = -1;
+
+  constructor(input: string, apostrophes: Uint8Array) {
+    this.#input = input;
+    this.#apostrophes = apostrophes;
+    this.pairs = new Int32Array(input.length);
+  }
+
+  add(index: number): void {
+    if (index <= this.#skipThrough || this.#treebank(index)) {
+      return;
+    }
+    const character = this.#input[index];
+    if (character === '"') {
+      if (this.#openings.straightDouble >= 0) {
+        this.#close('straightDouble', index);
+      } else if (opensDoubleQuote(this.#input, index, false)) {
+        this.#openings.straightDouble = index;
+      }
+    } else if (character === '“') {
+      this.#curlyOpening(index);
+    } else if (character === '”') {
+      this.#close('curlyDouble', index);
+    } else if (character === '„') {
+      this.#openings.germanDouble = index;
+    } else if (/['‘’]/.test(character)) {
+      const kind = character === "'" ? 'straightSingle' : 'curlySingle';
+      const inside = this.#openings[kind] >= 0;
+      const next = singleQuoteState(this.#input, index, inside, this.#apostrophes);
+      if (next && !inside) {
+        this.#openings[kind] = index;
+      } else if (!next && inside) {
+        this.#close(kind, index);
+      }
+    }
+  }
+
+  #close(kind: QuotationKind, index: number): void {
+    const opening = this.#openings[kind];
+    if (opening >= 0) {
+      this.pairs[opening] = index + 1;
+      this.pairs[index] = -(opening + 1);
+      this.#openings[kind] = -1;
+    }
+  }
+
+  #treebank(index: number): boolean {
+    if (this.#input.startsWith('``', index)) {
+      this.#openings.straightDouble = index;
+      this.#skipThrough = index + 1;
+      return true;
+    }
+    if (!this.#input.startsWith("''", index) || this.#openings.straightSingle >= 0) {
+      return false;
+    }
+    if (this.#openings.straightDouble >= 0) {
+      this.#close('straightDouble', index);
+      this.#skipThrough = index + 1;
+      return true;
+    }
+    this.#nextTreebankClose = this.#nextQuote(this.#nextTreebankClose, "''", index + 1);
+    if (
+      opensDoubleQuote(this.#input, index, false) &&
+      /^[\p{Letter}\p{Number}\p{Sc}\p{Ps}]$/u.test(characterAt(this.#input, index + 2)) &&
+      this.#nextTreebankClose < this.#input.length
+    ) {
+      this.#openings.straightDouble = index;
+      this.#skipThrough = index + 1;
+    }
+    return true;
+  }
+
+  #curlyOpening(index: number): void {
+    this.#nextEnglishClose = this.#nextQuote(this.#nextEnglishClose, '”', index);
+    this.#nextCurlyBoundary = this.#nextQuote(this.#nextCurlyBoundary, '“', index);
+    // A nearer English closer identifies an English inner span inside German quotes.
+    if (
+      this.#openings.germanDouble >= 0 &&
+      (this.#openings.curlyDouble >= 0 || this.#nextEnglishClose >= this.#nextCurlyBoundary)
+    ) {
+      this.#close('germanDouble', index);
+    } else {
+      this.#openings.curlyDouble = index;
+    }
+  }
+
+  #nextQuote(previous: number, quote: string, index: number): number {
+    if (previous > index) {
+      return previous;
+    }
+    const next = this.#input.indexOf(quote, index + 1);
+    return next < 0 ? this.#input.length : next;
   }
 }
 
-function closingQuotationMarks(
-  insideStraightDouble: boolean,
+function trackQuotations(
+  input: string,
+  index: number,
   state: SingleAndCurlyQuotations,
-): string {
+  pairs: Int32Array,
+): void {
+  const endpoint = pairs[index];
+  if (endpoint === 0) {
+    return;
+  }
+  const opening = endpoint > 0 ? index : -endpoint - 1;
+  const character = input[opening];
+  let kind: QuotationKind = 'straightDouble';
+  if (character === '„') {
+    kind = 'germanDouble';
+  } else if (character === '“') {
+    kind = 'curlyDouble';
+  } else if (character === '‘') {
+    kind = 'curlySingle';
+  } else if (character === "'" && !input.startsWith("''", opening)) {
+    kind = 'straightSingle';
+  }
+  state[kind] = endpoint > 0;
+}
+
+function closingQuotationMarks(state: SingleAndCurlyQuotations): string {
   return (
-    (insideStraightDouble ? '"' : '') +
+    (state.straightDouble ? '"' : '') +
     (state.straightSingle ? "'" : '') +
     (state.curlyDouble ? '”' : '') +
     (state.germanDouble ? '“' : '') +
@@ -375,8 +479,6 @@ class SentenceBuffer {
   #normalizedThrough = 0;
   #words: { titleCase: boolean; lowerCase: boolean }[] = [];
   #openingDelimiters: string[] = [];
-  #insideDoubleQuotes = false;
-  #lastCharacter = '';
   hasLineBreaks = false;
   startsWithTitleCase = false;
 
@@ -404,7 +506,7 @@ class SentenceBuffer {
 
   get #insideQuotation(): boolean {
     return (
-      this.#insideDoubleQuotes ||
+      this.#quoteSource.straightDouble ||
       this.#quoteSource.curlyDouble ||
       this.#quoteSource.germanDouble ||
       this.#quoteSource.curlySingle ||
@@ -455,10 +557,8 @@ class SentenceBuffer {
   #trackDelimiters(text: string): void {
     for (let index = 0; index < text.length; index++) {
       const character = text[index];
-      if (/["“”„]/.test(character)) {
-        this.#trackDoubleQuote(text, index);
-      } else if (/['‘’]/.test(character)) {
-        this.#trackSingleQuote(character);
+      if (/["'`“”„‘’]/.test(character)) {
+        this.#trackQuote(character);
       } else if (
         !this.#insideQuotation &&
         openingBracketReg.test(character) &&
@@ -472,25 +572,12 @@ class SentenceBuffer {
         }
       }
     }
-    this.#lastCharacter = text.at(-1) ?? this.#lastCharacter;
   }
 
-  #trackDoubleQuote(text: string, index: number): void {
-    const character = text[index];
-    if (character !== '"') {
-      trackSingleAndCurlyQuotations(text, index, this.#quoteSource, this.#quoteSource.apostrophes);
-      return;
-    }
-    const previous = index === 0 ? this.#lastCharacter : text[index - 1];
-    this.#insideDoubleQuotes =
-      !this.#insideDoubleQuotes &&
-      (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous));
-  }
-
-  #trackSingleQuote(character: string): void {
+  #trackQuote(character: string): void {
     const source = this.#quoteSource;
     source.index = source.input.indexOf(character, source.index);
-    trackSingleAndCurlyQuotations(source.input, source.index, source, source.apostrophes);
+    trackQuotations(source.input, source.index, source, source.pairs);
     source.index++;
   }
 
@@ -561,13 +648,14 @@ export function sentenceSegment(
   const source: QuotationSource = {
     input: sourceInput,
     index: 0,
-    apostrophes: singleQuoteApostrophes(sourceInput),
+    pairs: quotationPairs(sourceInput, singleQuoteApostrophes(sourceInput)),
+    straightDouble: false,
     curlyDouble: false,
     germanDouble: false,
     curlySingle: false,
     straightSingle: false,
   };
-  const chunks = sentenceChunks(source.input, caseNeutral, source.apostrophes);
+  const chunks = sentenceChunks(source.input, caseNeutral, source.pairs);
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -609,7 +697,7 @@ export function sentenceSegment(
           (chunk.startsWithTitleCase ||
             (caseNeutral &&
               sentenceContinuationReg.test(nextChunk.trimStart()) &&
-              /[.!?]["'\])}>]\s*[\r\n]/.test(suffix)))
+              /[.!?]["'”’“\])}>]\s*[\r\n]/.test(suffix)))
         ) {
           // Catch line breaks embedded within valid sentences
           // i.e. sentences that start with a capital letter
@@ -761,15 +849,15 @@ export interface SentenceSegmentOptions {
 }
 
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
-function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8Array): string[] {
+function sentenceChunks(input: string, caseNeutral: boolean, pairs: Int32Array): string[] {
   const chunks: string[] = [];
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
-  const questionTerminal = questionTerminalChecker(input, protectedPeriods, caseNeutral);
+  const questionTerminal = questionTerminalChecker(input, protectedPeriods, caseNeutral, pairs);
   let lastEnd = 0;
   let start = -1;
-  let insideQuotes = false;
   const quotations: SingleAndCurlyQuotations = {
+    straightDouble: false,
     curlyDouble: false,
     germanDouble: false,
     curlySingle: false,
@@ -779,8 +867,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
-    insideQuotes = quotationState(input, index, insideQuotes);
-    trackSingleAndCurlyQuotations(input, index, quotations, apostrophes);
+    trackQuotations(input, index, quotations, pairs);
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
         brackets.standalone = start === -1;
@@ -806,7 +893,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
       char === '?' ||
       char === '!'
     ) {
-      const closingQuotes = closingQuotationMarks(insideQuotes, quotations);
+      const closingQuotes = closingQuotationMarks(quotations);
       const end = sentenceEnd(input, index, closingQuotes, brackets, caseNeutral, questionTerminal);
       if (end === -1 || remainsInsideNestedQuotation(input, index, end, closingQuotes)) {
         continue;
@@ -875,13 +962,20 @@ function isProtectedEllipsisPeriod(
 function closingDelimiterEnd(input: string, index: number, closingQuotes: string): number {
   let end = index + 1;
   let pendingQuotes = closingQuotes;
+  let treebankCloseThrough = -1;
   while (end < input.length) {
-    if (input[end] === '"' && closingQuotes.includes('"') && !pendingQuotes.includes('"')) {
+    if (
+      end > treebankCloseThrough &&
+      /["']/.test(input[end]) &&
+      closingQuotes.includes(input[end]) &&
+      !pendingQuotes.includes(input[end])
+    ) {
       break;
     }
     if (closingDelimiterReg.test(input[end]) || pendingQuotes.includes(input[end])) {
-      if (input.startsWith("''", end)) {
+      if (input.startsWith("''", end) && pendingQuotes.includes('"')) {
         pendingQuotes = pendingQuotes.replace('"', '');
+        treebankCloseThrough = end + 1;
       }
       if (pendingQuotes.includes(input[end])) {
         pendingQuotes = pendingQuotes.replace(input[end], '');
@@ -1010,13 +1104,43 @@ function isDialogueAttribution(
   );
 }
 
+/** Advance quotation context and terminal matches together, without rescanning source tails. */
+function unquotedTerminalScanner(
+  input: string,
+  pairs: Int32Array,
+): (start: number) => RegExpExecArray | null {
+  const terminals = /\.{2,}|[.!?]/g;
+  let quoteCursor = 0;
+  let quotedThrough = -1;
+  return (start) => {
+    terminals.lastIndex = start;
+    let terminal = terminals.exec(input);
+    while (terminal !== null) {
+      while (quoteCursor <= terminal.index) {
+        if (pairs[quoteCursor] > 0) {
+          quotedThrough = Math.max(quotedThrough, pairs[quoteCursor] - 1);
+        }
+        quoteCursor++;
+      }
+      if (terminal.index >= quotedThrough) {
+        return terminal;
+      }
+      terminals.lastIndex = quotedThrough + 1;
+      quoteCursor = quotedThrough + 1;
+      terminal = terminals.exec(input);
+    }
+    return null;
+  };
+}
+
 /** Reuse the next real terminal across monotone quotation-boundary lookaheads. */
 function questionTerminalChecker(
   input: string,
   ellipses: SpacedEllipsisRange[],
   caseNeutral: boolean,
+  pairs: Int32Array,
 ): (start: number) => boolean {
-  const terminals = /\.{2,}|[.!?]/g;
+  const nextTerminal = unquotedTerminalScanner(input, pairs);
   const ellipsisCursor = { index: 0 };
   let through = -1;
   let question = false;
@@ -1024,23 +1148,22 @@ function questionTerminalChecker(
     if (start <= through) {
       return question;
     }
-    terminals.lastIndex = start;
     through = input.length;
     question = false;
-    let terminal = terminals.exec(input);
+    let terminal = nextTerminal(start);
     while (terminal !== null) {
       if (
         (terminal[0].length > 1 && terminal[0].length !== 4) ||
         isProtectedEllipsisPeriod(terminal.index, ellipses, ellipsisCursor)
       ) {
-        terminal = terminals.exec(input);
+        terminal = nextTerminal(terminal.index + terminal[0].length);
         continue;
       }
       if (
         /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, terminal.index + 1)) &&
-        !isUnspacedSentenceBoundary(input, terminal.index, terminal.index + 1, true)
+        !isUnspacedSentenceBoundary(input, terminal.index, terminal.index + 1, caseNeutral)
       ) {
-        terminal = terminals.exec(input);
+        terminal = nextTerminal(terminal.index + terminal[0].length);
         continue;
       }
       const suffix = input.slice(
@@ -1057,7 +1180,7 @@ function questionTerminalChecker(
         question = terminal[0] === '?';
         break;
       }
-      terminal = terminals.exec(input);
+      terminal = nextTerminal(terminal.index + terminal[0].length);
     }
     return question;
   };
@@ -1167,10 +1290,10 @@ function isUnspacedSentenceBoundary(
     continuesAbbreviation ||
     initial.test(following) ||
     (trailingInitial.test(suffix) && nextInitial.test(following)) ||
-    /^[^\s]*@/.test(following) ||
     insideAddress ||
     insideHostname ||
-    dottedIdentifier
+    dottedIdentifier ||
+    /^[^\s]*@/.test(following)
   );
 }
 
