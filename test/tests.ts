@@ -731,6 +731,22 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['I\u0345', 'I\u0301\u0345', 'Í\u0345'])(
+      'preserves sigma context after mixed Latin and cased-mark token %s',
+      (token) => {
+        const input = `${token}.Σ/Α.`;
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+        for (const score of [rouge.n, rouge.s, rouge.l]) {
+          expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+        }
+      },
+    );
+
+    test.each(['α\u0345', 'ᾳ'])('keeps ordinary Greek tokens separate before %s', (token) => {
+      expect(segmentCaseNeutrally(`${token}.Σ/Α.`)).toEqual([`${token}.`, 'Σ/Α.']);
+    });
+
     test('does not let a truncated mark qualify an unrelated later word', () => {
       const input = 'İ?0b/]]\té.𝒜B';
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(

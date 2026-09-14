@@ -750,7 +750,7 @@ function caseNeutralIdentifierContext(input: string, index: number): boolean {
   }
   return (
     hasStableAsciiIdentifierEvidence(input, tokenStart, index) ||
-    (/\p{Script=Latin}/u.test(token) && /\p{Script=Greek}/u.test(token))
+    (/\p{Script=Latin}/u.test(token) && /(?:\p{Script=Greek}|(?=\p{Mark})\p{Cased})/u.test(token))
   );
 }
 
