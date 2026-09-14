@@ -1323,6 +1323,42 @@ describe('Utility Functions', () => {
     );
 
     test.each(['vs.', 'v.s.'])(
+      'keeps quoted literal brackets inside a plain-single versus phrase: %s',
+      (abbreviation) => {
+        for (const [open, close] of bracketPairs) {
+          const input = `He noted ${open}'${abbreviation}${close}' Examples followed${close} today.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          const first = `He wrote ${open}'${abbreviation}'${close}`;
+          expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+        }
+        const first = `He wrote '${abbreviation}'`;
+        expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+      },
+    );
+
+    test.each([
+      "The authors' notes (vs.) stayed together.",
+      "She said 'can't (vs.) stay' today.",
+      "She said 'The students' notes (vs.) stayed' today.",
+      'He said "The value [...]" Next sentence.',
+    ])('preserves apostrophe and omission context beside plain-single brackets: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each(["The '90s (vs.) remained.", "'Tis (vs.) today."])(
+      'keeps an unpaired leading elision separate from a later independent quote: %s',
+      (first) => {
+        const second = "He said 'No.'";
+        expect(ss(`${first} ${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
       'keeps provisional geographic abbreviation and bracket attachment conservative: %s',
       (abbreviation) => {
         const input = `I live in the U.S. (He wrote ${abbreviation}) Alice replied.`;

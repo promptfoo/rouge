@@ -550,6 +550,7 @@ export interface SentenceSegmentOptions {
 interface BracketContext {
   depth: number;
   standalone: boolean;
+  singleQuoteEnd: number;
   angles?: Uint8Array;
 }
 
@@ -694,6 +695,26 @@ function matchedAngleDelimiters(input: string): Uint8Array | undefined {
   return matched;
 }
 
+/** Reuse paired-quote recognition only for the surrounding bracket context. */
+function plainSingleQuoteEnd(
+  input: string,
+  index: number,
+  currentEnd: number,
+  positions: Record<string, number>,
+): number {
+  if (
+    index <= currentEnd ||
+    input[index] !== "'" ||
+    input.startsWith("''", index) ||
+    input[index - 1] === "'"
+  ) {
+    return currentEnd;
+  }
+  return angleQuoteCloser(input, index) === "'"
+    ? angleQuotationEnd(input, index, "'", positions) - 1
+    : currentEnd;
+}
+
 function followsParagraph(input: string, index: number): boolean {
   let breaks = 0;
   for (let previous = index - 1; previous >= 0 && /\s/.test(input[previous]); previous--) {
@@ -736,9 +757,11 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   let start = -1;
   let sentenceStarted = false;
   let insideQuotes = false;
+  const singleQuotePositions: Record<string, number> = {};
   const brackets: BracketContext = {
     depth: 0,
     standalone: false,
+    singleQuoteEnd: -1,
     angles: matchedAngleDelimiters(input),
   };
 
@@ -746,7 +769,15 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
     const char = input[index];
     insideQuotes = quotationState(input, index, insideQuotes);
     if (!insideQuotes) {
-      updateBracketContext(input, index, !sentenceStarted, brackets);
+      brackets.singleQuoteEnd = plainSingleQuoteEnd(
+        input,
+        index,
+        brackets.singleQuoteEnd,
+        singleQuotePositions,
+      );
+      if (index >= brackets.singleQuoteEnd) {
+        updateBracketContext(input, index, !sentenceStarted, brackets);
+      }
     }
     if (index < lastEnd || char === '\r' || char === '\n') {
       // Only closing-delimiter lookahead can cross CR/LF; other wraps reset the prefix.
@@ -990,7 +1021,7 @@ function closingDelimiterContext(
       (input[index] !== '>' || brackets.angles?.[index] === 1)
     ) {
       containsBracket = true;
-      closedBrackets += Number(!quotePending);
+      closedBrackets += Number(!quotePending && index >= brackets.singleQuoteEnd);
     }
     closesQuote ||= input[index] === "'" || (insideQuotes && input[index] === '"');
   }
