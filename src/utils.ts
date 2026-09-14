@@ -125,7 +125,7 @@ function straightSingleQuotationState(
       previous.toLowerCase() === 's' &&
       /\s/.test(following) &&
       /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(input.slice(index + 1).trimStart());
-    return possessive || (following.length > 0 && !/[\s.,!?;:)\]}“‘]/.test(following));
+    return possessive || (following.length > 0 && !/[\s.,!?;:)\]}“‘”’]/.test(following));
   }
   return (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) && /\S/.test(following);
 }
@@ -259,10 +259,68 @@ const sentenceContinuationReg =
 const independentSentenceReg =
   /^(?:(?:i|we|he|she|they|you|it|who|what|why|how|which|whose|whom)\b|(?:do|does|did|is|are|was|were|has|have|had|can|could|will|would|shall|should|may|might|must)\s+(?:i|we|he|she|they|you|it)\b|in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
-function isIndependentSentence(input: string): boolean {
+const hostnameLabelReg =
+  /^(com|org|net|edu|gov|mil|io|dev|app|co|uk|us|ca|ai|info|biz|me|tv)(?=[/.!?\s"'“”‘’()[\]{}<>]|$)/i;
+
+function isIndependentSentence(input: string, question?: boolean): boolean {
   return (
     independentSentenceReg.test(input) &&
-    (!/^(?:who|which|whose|whom)\b/i.test(input) || /^[^.!?]*\?/.test(input))
+    (!/^(?:who|which|whose|whom)\b/i.test(input) || (question ?? questionStartChecker([input])(0)))
+  );
+}
+
+/** Share the next meaningful terminal across monotone provisional-chunk lookaheads. */
+function questionStartChecker(
+  chunks: readonly string[],
+): (index: number, offset?: number) => boolean {
+  let through = -1;
+  let throughOffset = -1;
+  let question = false;
+  return (index, offset = 0) => {
+    if (index < through || (index === through && offset <= throughOffset)) {
+      return question;
+    }
+    for (let chunkIndex = index; chunkIndex < chunks.length; chunkIndex++) {
+      const terminals = /[.!?]/g;
+      terminals.lastIndex = chunkIndex === index ? offset : 0;
+      for (const terminal of chunks[chunkIndex].matchAll(terminals)) {
+        if (terminal[0] === '.' && isProtectedQuestionPeriod(chunks, chunkIndex, terminal.index)) {
+          continue;
+        }
+        through = chunkIndex;
+        throughOffset = terminal.index;
+        question = terminal[0] === '?';
+        return question;
+      }
+    }
+    through = chunks.length;
+    question = false;
+    return false;
+  };
+}
+
+function isProtectedQuestionPeriod(
+  chunks: readonly string[],
+  chunk: number,
+  index: number,
+): boolean {
+  const text = chunks[chunk];
+  const suffix = text.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const word = suffix.match(/\S+$/)?.[0] ?? '';
+  let following = text.slice(index + 1, index + 33);
+  for (let next = chunk + 1; following.length < 32 && next < chunks.length; next++) {
+    following += chunks[next].slice(0, 32 - following.length);
+  }
+  return (
+    abbrvReg.test(suffix.toLowerCase()) ||
+    caseNeutralAcronymReg.test(word) ||
+    (/^[^\s.!?"'“”‘’()[\]{}<>]/.test(following) &&
+      /https?:\/\/|www\./i.test(
+        text.slice(Math.max(0, index - 320), index + 1).match(/\S+$/)?.[0] ?? '',
+      )) ||
+    hostnameLabelReg.test(following) ||
+    (/\p{Number}$/u.test(text.slice(Math.max(0, index - 2), index)) &&
+      /^\p{Number}/u.test(following))
   );
 }
 
@@ -480,6 +538,7 @@ export function sentenceSegment(
     single: false,
   };
   const chunks = sentenceChunks(source, caseNeutral, quoteSource.apostrophes);
+  const startsQuestion = questionStartChecker(chunks);
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -504,7 +563,10 @@ export function sentenceSegment(
         const nextSentence = nextChunk?.replace(/^[\s"'“‘’([{<]+/, '');
         const abbreviation = gateSuffix.trimEnd();
         const insideSmartQuotes = quoteSource.double || quoteSource.single;
-        const independentSentence = isIndependentSentence(nextSentence ?? '');
+        const independentSentence = isIndependentSentence(
+          nextSentence ?? '',
+          startsQuestion(idx + 1),
+        );
         if (
           nextSentence &&
           abbrvReg.test(abbreviation) &&
@@ -547,7 +609,7 @@ export function sentenceSegment(
           (caseNeutral
             ? startsWithCasedCharacter(nextChunk) &&
               (!sentenceContinuationReg.test(nextChunk.trimStart()) ||
-                isIndependentSentence(nextChunk.trimStart()))
+                isIndependentSentence(nextChunk.trimStart(), startsQuestion(idx + 1)))
             : strIsTitleCase(nextChunk)) &&
           !excepReg.test(gateSuffix) &&
           !(
@@ -701,6 +763,8 @@ function updateBracketState(brackets: BracketState, character: string, standalon
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
 function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8Array): string[] {
   const chunks: string[] = [];
+  const questionInSource = questionStartChecker([input]);
+  const startsQuestion = (offset: number): boolean => questionInSource(0, offset);
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
   let lastEnd = 0;
@@ -735,7 +799,15 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
       char === '?' ||
       char === '!'
     ) {
-      const end = sentenceEnd(input, index, quotes, brackets, caseNeutral, straightSingle);
+      const end = sentenceEnd(
+        input,
+        index,
+        quotes,
+        brackets,
+        caseNeutral,
+        straightSingle,
+        startsQuestion,
+      );
       if (end === -1) {
         continue;
       }
@@ -847,6 +919,7 @@ function sentenceEnd(
   brackets: BracketState,
   caseNeutral: boolean,
   straightSingle: boolean,
+  startsQuestion: (offset: number) => boolean,
 ): number {
   const insideQuotes = quotes.double || quotes.smartDouble || quotes.single;
   if (
@@ -876,7 +949,7 @@ function sentenceEnd(
     closesQuotation &&
     openingBracketReg.test(input[continuation] ?? '') &&
     abbrvReg.test(gateSuffix) &&
-    !isIndependentParenthetical(input, continuation, caseNeutral)
+    !isIndependentParenthetical(input, continuation, caseNeutral, startsQuestion)
   ) {
     // Retain this interruption's context even when a line wrap resets the scanner prefix.
     brackets.inlineStart = continuation;
@@ -933,7 +1006,12 @@ function quotationCitationEnd(
   });
 }
 
-function isIndependentParenthetical(input: string, index: number, caseNeutral: boolean): boolean {
+function isIndependentParenthetical(
+  input: string,
+  index: number,
+  caseNeutral: boolean,
+  startsQuestion: (offset: number) => boolean,
+): boolean {
   const contents = input.slice(index + 1);
   const sentence = contents.match(/^[^()[\]{}<>]*[.!?]\s*[)\]}>]/)?.[0];
   if (sentence === undefined) {
@@ -942,13 +1020,14 @@ function isIndependentParenthetical(input: string, index: number, caseNeutral: b
   const following = contents.slice(sentence.length).trimStart();
   if (
     following.length > 0 &&
-    !isIndependentSentence(following) &&
+    !isIndependentSentence(following, startsQuestion(input.length - following.length)) &&
+    !isUnspacedDelimitedSentenceStart(following, -1, caseNeutral) &&
     (caseNeutral || !charIsUpperCase(characterAt(following, 0)))
   ) {
     return false;
   }
   const suffix = sentence.slice(0, -1).trimEnd().slice(-sentenceSuffixLength).toLowerCase();
-  return isIndependentSentence(contents.trimStart()) || !abbrvReg.test(suffix);
+  return isIndependentSentence(sentence.slice(0, -1).trimStart()) || !abbrvReg.test(suffix);
 }
 
 function sentenceEndAfterDelimiter(
@@ -1045,9 +1124,7 @@ function isUnspacedSentenceBoundary(
   const following = input.slice(next);
   const insideAddress =
     precedingToken.includes('@') && !/@[^\s.]+(?:\.[^\s.]+)+\.$/u.test(precedingToken);
-  const hostnameLabel = following.match(
-    /^(com|org|net|edu|gov|mil|io|dev|app|co|uk|us|ca|ai|info|biz|me|tv)(?=[/.\s]|$)/i,
-  )?.[0];
+  const hostnameLabel = following.match(hostnameLabelReg)?.[0];
   const insideHostname =
     insideUrl ||
     (hostnameLabel !== undefined &&

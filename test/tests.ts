@@ -2204,6 +2204,109 @@ describe('Utility Functions', () => {
       expect(rouge.treeBankTokenize(first)).toEqual([open, '``', 'Stop.', "''", close]);
     });
 
+    test.each([
+      'Which example.com?',
+      'Which https://example.xyz?',
+      'Which Mr. Smith?',
+      'Who chose 1.2?',
+      'Whose U.S. government closed?',
+    ])('finds a question terminal beyond protected periods: %s', (question) => {
+      const first = 'She asked “Acme Co.';
+      const second = `${question}”`;
+      const input = `${first}\n${second}`;
+      expect(ss(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+      const parenthetical = `He joined “Acme Co.” (It closed.) ${question}`;
+      expect(ss(parenthetical)).toEqual(['He joined “Acme Co.”', '(It closed.)', question]);
+      expect(segmentCaseNeutrally(parenthetical)).toEqual([
+        'He joined “Acme Co.”',
+        '(It closed.)',
+        question,
+      ]);
+    });
+
+    test.each(['whose advisor is Mr. Smith.', 'whose office is on example.com.'])(
+      'keeps a relative clause with protected periods joined: %s',
+      (relative) => {
+        const input = `She described “Acme Co.\n${relative}”`;
+        const expected = input.replaceAll('\n', ' ');
+        expect(ss(input)).toEqual([expected]);
+        expect(segmentCaseNeutrally(input)).toEqual([expected]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([expected.toLowerCase()]);
+      },
+    );
+
+    test('stops a relative-clause lookahead at the terminal after a URL', () => {
+      const first = 'She described “Acme Co.\nwhose site is https://example.com.';
+      const second = 'Who asked?”';
+      const input = `${first} ${second}`;
+      const expected = [first.replaceAll('\n', ' '), second];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test('shares source question lookahead across repeated parenthetical candidates', () => {
+      const input = `${'“Acme Co.” (Mr.) Whose Mr. '.repeat(5000)}?`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    }, 5000);
+
+    test('advances cached source terminals after separate parenthetical questions', () => {
+      const sentences = ['He joined “Acme Co.”', '(It closed.)', 'Which Mr. Smith?'];
+      const input = `${`${sentences.join(' ')} `.repeat(1000)}`.trimEnd();
+      const expected = Array.from({ length: 1000 }, () => sentences).flat();
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test('reuses question terminals across many provisional abbreviation chunks', () => {
+      const first = 'She asked “Acme Co.';
+      const second = 'Which Mr. Smith?”';
+      const count = 5000;
+      const input = `${`${first}\n${second} `.repeat(count)}`.trimEnd();
+      const expected = Array.from({ length: count }, () => [first, second]).flat();
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test.each([
+      ['‘', '’'],
+      ['“', '”'],
+    ])('closes a nested straight quotation before its outer %s%s closer', (open, close) => {
+      const first = `${open}He said 'Stop.'${close}`;
+      const input = `${first} Next.'Another.'`;
+      expect(ss(input)).toEqual([first, 'Next.', "'Another.'"]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.', "'Another.'"]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        'next.',
+        "'another.'",
+      ]);
+    });
+
+    test.each(['“Next.”', '‘Next.’', '"Next."', '(Next.)'])(
+      'recognizes a delimited tail after a separate parenthetical: %s',
+      (third) => {
+        const first = 'He joined “Acme Co.”';
+        const second = '(It closed.)';
+        const input = `${first} ${second} ${third}`;
+        expect(ss(input)).toEqual([first, second, third]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second, third]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+          third.toLowerCase(),
+        ]);
+      },
+    );
+
     test('requires a paired single quote before attaching a closing apostrophe', () => {
       const unmatched = 'He said Stop.’ Next.';
       const possessive = 'The U.S.’ Economy grew.';
