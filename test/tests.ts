@@ -1472,10 +1472,43 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each([
+      ['The students’ work continues.', ['The students’ work continues.']],
+      ['Next sentence. ‘Another.’', ['Next sentence.', '‘Another.’']],
+    ] as const)(
+      'does not borrow a later apostrophe from %s to close a quotation',
+      (continuation, sentences) => {
+        const first = 'He called it ‘Success’ before we use etc.';
+        const input = `${first}\n${continuation}`;
+        const expected = [first, ...sentences];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
     test('closes nested smart quotations before a wrapped abbreviation', () => {
       const first = 'He said “She called ‘Stop.’” before we use etc.';
       expect(ss(`${first}\nNext.`)).toEqual([first, 'Next.']);
       expect(segmentCaseNeutrally(`${first}\nNext.`)).toEqual([first, 'Next.']);
+    });
+
+    test('keeps unquoted abbreviation possessives inside a sentence', () => {
+      const input = 'The U.S.’ Economy grew.';
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each([
+      ['‘', '’'],
+      ['“', '”'],
+    ])('carries %s%s quotation state across sentences', (open, close) => {
+      const input = `${open}First. We use Acme Co.\nInternational Holdings.${close}`;
+      const expected = [`${open}First.`, `We use Acme Co. International Holdings.${close}`];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
     test.each([

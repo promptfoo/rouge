@@ -98,23 +98,49 @@ function quotationState(input: string, index: number, insideQuotes: boolean): bo
   );
 }
 
-function singleQuotationState(input: string, index: number, insideQuotes: boolean): boolean {
+function singleQuotationState(
+  input: string,
+  index: number,
+  insideQuotes: boolean,
+  apostrophes: Set<number>,
+): boolean {
   if (input[index] === '‘') {
     return true;
   }
-  if (
-    input[index] === '’' &&
-    !/^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, index + 1))
-  ) {
-    return (
-      insideQuotes &&
-      (input.slice(index - 2, index).toLowerCase() === '’n' ||
-        (input[index - 1]?.toLowerCase() === 's' &&
-          /\s/.test(input[index + 1] ?? '') &&
-          input.slice(index + 1).match(/[‘’]/)?.[0] === '’'))
-    );
+  return insideQuotes && (input[index] !== '’' || apostrophes.has(index));
+}
+
+/** Classify elisions and possessives once, without borrowing an unrelated possessive as a closer. */
+function smartApostrophes(input: string): Set<number> {
+  const apostrophes = new Set<number>();
+  let candidates: number[] = [];
+  for (const quote of input.matchAll(/[‘’]/g)) {
+    const index = quote.index;
+    if (quote[0] === '‘') {
+      candidates = [];
+    } else if (
+      /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, index + 1)) ||
+      input.slice(index - 2, index).toLowerCase() === '’n'
+    ) {
+      apostrophes.add(index);
+    } else if (input[index - 1]?.toLowerCase() === 's' && /\s/.test(input[index + 1] ?? '')) {
+      candidates.push(index);
+    } else {
+      for (const candidate of candidates) {
+        apostrophes.add(candidate);
+      }
+      candidates = [];
+    }
   }
-  return insideQuotes;
+  return apostrophes;
+}
+
+interface SmartQuoteSource {
+  input: string;
+  index: number;
+  apostrophes: Set<number>;
+  double: boolean;
+  single: boolean;
 }
 
 function escapeRegExp(input: string): string {
@@ -151,20 +177,18 @@ const independentSentenceReg =
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
   readonly #caseNeutral: boolean;
-  readonly #quoteSource: { input: string; index: number };
+  readonly #quoteSource: SmartQuoteSource;
   #parts: string[] = [];
   #normalizedThrough = 0;
   #words: { titleCase: boolean; lowerCase: boolean }[] = [];
   #openingDelimiters: string[] = [];
   #insideDoubleQuotes = false;
-  #insideSmartDoubleQuotes = false;
   #insideSingleQuotes = false;
-  #insideSmartSingleQuotes = false;
   #lastCharacter = '';
   hasLineBreaks = false;
   startsWithTitleCase = false;
 
-  constructor(text: string, caseNeutral: boolean, quoteSource: { input: string; index: number }) {
+  constructor(text: string, caseNeutral: boolean, quoteSource: SmartQuoteSource) {
     this.#caseNeutral = caseNeutral;
     this.#quoteSource = quoteSource;
     this.append(trimSpaces(text));
@@ -185,9 +209,9 @@ class SentenceBuffer {
   get #insideQuotes(): boolean {
     return (
       this.#insideDoubleQuotes ||
-      this.#insideSmartDoubleQuotes ||
+      this.#quoteSource.double ||
       this.#insideSingleQuotes ||
-      this.#insideSmartSingleQuotes
+      this.#quoteSource.single
     );
   }
 
@@ -239,7 +263,7 @@ class SentenceBuffer {
     for (let index = 0; index < text.length; index++) {
       const character = text[index];
       if (/[“”]/.test(character)) {
-        this.#insideSmartDoubleQuotes = character === '“';
+        this.#quoteSource.double = character === '“';
       } else if (character === '"') {
         const previous = index === 0 ? this.#lastCharacter : text[index - 1];
         this.#insideDoubleQuotes =
@@ -248,10 +272,11 @@ class SentenceBuffer {
       } else if (/[‘’]/.test(character)) {
         const source = this.#quoteSource;
         source.index = source.input.indexOf(character, source.index);
-        this.#insideSmartSingleQuotes = singleQuotationState(
+        source.single = singleQuotationState(
           source.input,
           source.index,
-          this.#insideSmartSingleQuotes,
+          source.single,
+          source.apostrophes,
         );
         source.index++;
       } else if (character === "'") {
@@ -352,10 +377,16 @@ export function sentenceSegment(
 
   // Scan terminals before applying abbreviation and line-wrap rules.
   const source = input.replace(/\u0085/g, ' ');
-  const chunks = sentenceChunks(source, caseNeutral);
+  const quoteSource = {
+    input: source,
+    index: 0,
+    apostrophes: smartApostrophes(source),
+    double: false,
+    single: false,
+  };
+  const chunks = sentenceChunks(source, caseNeutral, quoteSource.apostrophes);
 
   const acc: string[] = [];
-  const quoteSource = { input: source, index: 0 };
   let pending: SentenceBuffer | undefined;
   for (let idx = 0; idx < chunks.length; idx++) {
     if (pending || chunks[idx]) {
@@ -548,7 +579,7 @@ export interface SentenceSegmentOptions {
 }
 
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
-function sentenceChunks(input: string, caseNeutral: boolean): string[] {
+function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Set<number>): string[] {
   const chunks: string[] = [];
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
@@ -561,7 +592,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
     const char = input[index];
     quotes.double = quotationState(input, index, quotes.double);
     quotes.smartDouble = char === '“' || (quotes.smartDouble && char !== '”');
-    quotes.single = singleQuotationState(input, index, quotes.single);
+    quotes.single = singleQuotationState(input, index, quotes.single, apostrophes);
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
         brackets.standalone = start === -1;
@@ -662,7 +693,7 @@ function closingDelimiterEnd(
   let smartDoublePending = quotes.smartDouble;
   let singlePending = quotes.single;
   while (end < input.length) {
-    if (closingDelimiterReg.test(input[end])) {
+    if (closingDelimiterReg.test(input[end]) && (input[end] !== '’' || singlePending)) {
       doublePending &&= input[end] !== '"';
       smartDoublePending &&= input[end] !== '”';
       singlePending &&= input[end] !== '’';
