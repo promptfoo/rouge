@@ -719,6 +719,72 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each(['#1', '(best)', '$5', '— best'])(
+      'confirms punctuation-led possessive modifiers inside a quotation: %s',
+      (modifier) => {
+        for (const [opening, closing] of [
+          ["'", "'"],
+          ['‘', '’'],
+        ]) {
+          const input = `He said ${opening}The students${closing} ${modifier} choices were a) Alpha and b) Beta.${closing}`;
+          const reordered = `He said ${opening}The students${closing} ${modifier} choices were b) Beta and a) Alpha.${closing}`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+          expect(rouge.l(input, reordered)).toBeLessThan(1);
+        }
+      },
+    );
+
+    test.each([
+      "He said 'The year '99 saw a) Alpha and b) Beta.'",
+      "He said '100 years after '99 we saw a) Alpha and b) Beta.'",
+      "He said 'The students' choices in '99 were a) Alpha and b) Beta.'",
+    ])('retains nested numeric elisions without replacing the outer quote: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test('recovers a later numeric quote after an earlier unpaired numeric elision', () => {
+      const input = "In '99, a) Alpha b) Beta. He said '100 options a) One b) Two.'";
+      const expected = ["In '99,", 'a) Alpha', 'b) Beta.', "He said '100 options a) One b) Two.'"];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('recognizes a separate numeric quotation after an ordinary quote closes', () => {
+      const first = "He said 'No.'";
+      const second = "Then said '99 choices were a) Alpha and b) Beta.'";
+      const input = `${first} ${second} Options: a) First b) Last.`;
+      const expected = [first, second, 'Options:', 'a) First', 'b) Last.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('retains a contiguous author-name chain while anchoring its current initial', () => {
+      const authors = 'Authors: A. Smith and B. Jones and C. Adams.';
+      expect(ss(authors)).toEqual([authors]);
+      expect(segmentCaseNeutrally(authors)).toEqual([authors]);
+      expect(segmentCaseNeutrally(`${authors} Finally, D. is important.`)).toEqual([
+        authors,
+        'Finally, D.',
+        'is important.',
+      ]);
+    });
+
+    test.each(['Finally, C. is important.', 'Finally, C. Is important.'])(
+      'does not borrow earlier author initials for a later boundary: %s',
+      (later) => {
+        const authors = 'Authors: A. Smith and B. Jones.';
+        expect(ss(`${authors} ${later}`)).toEqual([authors, ...ss(later)]);
+        expect(segmentCaseNeutrally(`${authors} ${later}`)).toEqual([
+          authors,
+          ...segmentCaseNeutrally(later),
+        ]);
+      },
+    );
+
     test('keeps a numeric-leading single quotation around apparent list markers', () => {
       const input = "He said '100 options were a) Alpha and b) Beta.'";
       expect(ss(input)).toEqual([input]);

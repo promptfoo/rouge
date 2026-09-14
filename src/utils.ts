@@ -524,6 +524,7 @@ function confirmedListQuoteFlags(
     const character = quote[0];
     const closer = character === "'" ? "'" : '’';
     const state = pending[closer];
+    markNestedNumericQuote(flags, index, state.opening >= 0);
     if (flags?.[index] === 2 || isListApostrophe(input, index)) {
       continue;
     }
@@ -536,9 +537,7 @@ function confirmedListQuoteFlags(
       continue;
     }
     if (isListPossessiveCandidate(input, index)) {
-      if (state.candidate < 0) {
-        state.candidate = index;
-      }
+      state.candidate = state.candidate < 0 ? index : state.candidate;
       continue;
     }
     if (opening && /\S/.test(input[index + 1] ?? '') && !/[.!?]/.test(input[index - 1] ?? '')) {
@@ -556,10 +555,24 @@ function confirmedListQuoteFlags(
   return flags;
 }
 
+/** A numeric opener inside a pending quote retains the existing outer span. */
+function markNestedNumericQuote(
+  flags: Uint8Array | undefined,
+  index: number,
+  insideQuote: boolean,
+): void {
+  if (insideQuote && flags?.[index] === 1) {
+    flags[index] = 2;
+  }
+}
+
 function isListPossessiveCandidate(input: string, index: number): boolean {
   return (
     /s/iu.test(input[index - 1] ?? '') &&
-    /^\s+[\p{Letter}\p{Mark}\p{Number}]/u.test(input.slice(index + 1))
+    // Stop at quote or sentence punctuation: each modifier scan ends before another candidate.
+    /^\s(?:(?![.!?,;:"'`‘’“”«»‹›])[\s\p{Punctuation}\p{Symbol}])*[\p{Letter}\p{Mark}\p{Number}]/u.test(
+      input.slice(index + 1),
+    )
   );
 }
 
@@ -1276,14 +1289,16 @@ function colonIntroducedNameBoundary(input: string, index: number): number {
   if (input[index] !== '.') {
     return index + 1;
   }
-  const joinsName =
-    /(?:[:,;&]|\b(?:and|or)\b)\s+\p{Cased}\p{M}*\.$/iu.test(
-      input.slice(Math.max(0, index - 40), index + 1),
-    ) &&
-    /^\s+\p{Cased}\p{Letter}/u.test(input.slice(index + 1, index + 40)) &&
-    /:\s+\p{Cased}\p{M}*\.\s+\p{Letter}+(?:\s+(?:and|or|&)|[,;])\s+\p{Cased}\p{M}*\.\s+\p{Letter}/iu.test(
-      input.slice(Math.max(0, index - 96), index + 96),
+  const before = input.slice(Math.max(0, index - 96), index + 1);
+  const after = input.slice(index + 1, index + 96);
+  const firstInitial =
+    /:\s+\p{Cased}\p{M}*\.$/iu.test(before) &&
+    /^\s+\p{Letter}+(?:\s+(?:and|or|&)|[,;])\s+\p{Cased}\p{M}*\.\s+\p{Letter}/iu.test(after);
+  const laterInitial =
+    /:\s+\p{Cased}\p{M}*\.(?:\s+\p{Letter}+(?:\s+(?:and|or|&)|[,;])\s+\p{Cased}\p{M}*\.)+$/iu.test(
+      before,
     );
+  const joinsName = (firstInitial || laterInitial) && /^\s+\p{Cased}\p{Letter}/u.test(after);
   return joinsName ? -1 : index + 1;
 }
 
