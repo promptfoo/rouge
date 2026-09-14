@@ -481,7 +481,7 @@ function numericQuoteFlags(input: string): Uint8Array | undefined {
     const index = quote.index;
     const previous = input[index - 1] ?? '';
     const following = characterAt(input, index + 1);
-    const opener = index === 0 || /^[\s\p{Punctuation}<]$/u.test(previous);
+    const opener = index === 0 || /^[\s\p{Punctuation}<=]$/u.test(previous);
     if (opener && /^\p{Number}$/u.test(following)) {
       candidate = index;
     } else if (candidate !== undefined) {
@@ -591,11 +591,11 @@ function listQuoteCloser(
     return "''";
   }
   if (character === '"') {
-    return index === 0 || /^[\s\p{Punctuation}<]$/u.test(input[index - 1]) ? '"' : undefined;
+    return index === 0 || /^[\s\p{Punctuation}<=]$/u.test(input[index - 1]) ? '"' : undefined;
   }
   if (
     character === "'" &&
-    (index === 0 || /^[\s\p{Punctuation}<]$/u.test(input[index - 1])) &&
+    (index === 0 || /^[\s\p{Punctuation}<=]$/u.test(input[index - 1])) &&
     (quoteFlags?.[index] === 1 || !/^\p{Number}$/u.test(characterAt(input, index + 1))) &&
     !singleQuoteElisionReg.test(input.slice(index + 1, index + 32))
   ) {

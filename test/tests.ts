@@ -1093,6 +1093,17 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each(['"', "'"])('preserves assignment-style quoted values with %s', (quote) => {
+      const input = `Set value=${quote}x a) Alpha b) Beta c) Gamma${quote}.`;
+      const reordered = `Set value=${quote}x c) Gamma b) Beta a) Alpha${quote}.`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(rouge.l(input, reordered)).toBeLessThan(1);
+      const numeric = `Set value=${quote}99 a) Alpha b) Beta${quote}.`;
+      expect(ss(numeric)).toEqual([numeric]);
+      expect(segmentCaseNeutrally(numeric)).toEqual([numeric]);
+    });
+
     test('does not score reordered parenthetical labels as reordered independent sentences', () => {
       const first = 'This note (uses labels a) Alpha, b) Beta, and c) Gamma.)';
       const second = 'This note (uses labels c) Gamma, b) Beta, and a) Alpha.)';
