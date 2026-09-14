@@ -463,6 +463,7 @@ interface ListScanState {
   bracketDepth: number[];
   quote: string | undefined;
   numericQuoteOpeners?: Uint8Array;
+  angleOpeners?: Uint8Array;
 }
 
 /** Confirm numeric quote openers without treating unpaired year elisions as quotes. */
@@ -534,6 +535,38 @@ function isListApostrophe(input: string, index: number): boolean {
   );
 }
 
+/** Only paired, unquoted angle marks form delimiters; unmatched comparisons stay prose. */
+function matchedAngleOpeners(
+  input: string,
+  numericOpenings: Uint8Array | undefined,
+): Uint8Array | undefined {
+  const pending: number[] = [];
+  let matched: Uint8Array | undefined;
+  let quote: string | undefined;
+  for (let index = 0; index < input.length; index++) {
+    if (quote !== undefined) {
+      if (input.startsWith(quote, index) && !isListApostrophe(input, index)) {
+        index += quote.length - 1;
+        quote = undefined;
+      }
+      continue;
+    }
+    quote = listQuoteCloser(input, index, numericOpenings);
+    if (quote !== undefined) {
+      index += quote.length - 1;
+    } else if (input[index] === '<') {
+      pending.push(index);
+    } else if (input[index] === '>') {
+      const opening = pending.pop();
+      if (opening !== undefined) {
+        matched ??= new Uint8Array(input.length);
+        matched[opening] = 1;
+      }
+    }
+  }
+  return matched;
+}
+
 function advanceListScan(input: string, end: number, state: ListScanState): void {
   while (state.cursor < end) {
     const index = state.cursor++;
@@ -554,7 +587,7 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
     }
     const opening = '([{<'.indexOf(character);
     const closing = ')]}>'.indexOf(character);
-    if (opening !== -1) {
+    if (opening !== -1 && (character !== '<' || state.angleOpeners?.[index] === 1)) {
       state.bracketDepth[opening]++;
     } else if (closing !== -1) {
       state.bracketDepth[closing] = Math.max(0, state.bracketDepth[closing] - 1);
@@ -790,11 +823,13 @@ function segmentList(input: string, caseNeutral: boolean, depth: number): string
     return undefined;
   }
   const expression = new RegExp(listMarkerReg);
+  const numericOpenings = numericQuoteOpeners(input);
   const state: ListScanState = {
     cursor: 0,
     bracketDepth: [0, 0, 0, 0],
     quote: undefined,
-    numericQuoteOpeners: numericQuoteOpeners(input),
+    numericQuoteOpeners: numericOpenings,
+    angleOpeners: matchedAngleOpeners(input, numericOpenings),
   };
   const candidate = findListCandidate(input, caseNeutral, expression, state);
   if (candidate === undefined) {

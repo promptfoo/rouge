@@ -3421,3 +3421,41 @@ describe('Core Functions', () => {
     });
   });
 });
+
+// Comparison operators follow the buffer's existing angle-delimiter context.
+describe('list markers after comparisons', () => {
+  test.each(['Score < 5. Options: a) Cold b) Warm.', 'Score <5. Options: a) Cold b) Warm.'])(
+    '%s',
+    (input) => {
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          input.slice(0, input.indexOf(' Options:')),
+          'Options:',
+          'a) Cold',
+          'b) Warm.',
+        ]);
+      }
+    },
+  );
+});
+
+test.each(['< team A) Alice and team B) Bob >', '<team A) Alice and team B) Bob>'])(
+  'preserves matched angle literals: %s',
+  (input) => {
+    expect(rouge.sentenceSegment(input)).toEqual([input]);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
+  },
+);
+
+test('does not pair comparisons with quoted greater-than signs', () => {
+  const input = 'Score < 5. He said ">". Options: a) Cold b) Warm.';
+  for (const caseNeutral of [false, true]) {
+    expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+      'Score < 5.',
+      'He said ">".',
+      'Options:',
+      'a) Cold',
+      'b) Warm.',
+    ]);
+  }
+});
