@@ -37,6 +37,7 @@ export function treeBankTokenize(input: string): string[] {
     insideQuotes =
       quote === '``' ||
       (opensDoubleQuote(text, index, insideQuotes) &&
+        !/[.!?]/.test(text[index - 1] ?? '') &&
         (quote === '"' ||
           (index > 0 &&
             /^[\p{Letter}\p{Number}\p{Sc}\p{Ps}]$/u.test(characterAt(text, index + 2)) &&
@@ -97,18 +98,15 @@ function remainsInsideNestedQuotation(
 
 function singleQuotationState(input: string, index: number, insideQuotes: boolean): boolean {
   const previous = input[index - 1] ?? '';
-  const following = input[index + 1] ?? '';
+  const following = characterAt(input, index + 1);
   if (insideQuotes) {
     if (/[.!?]/.test(previous) && !/^'(?:s|m|d|ll|re|ve)\b/i.test(input.slice(index, index + 4))) {
       return false;
     }
-    const possessive =
-      previous.toLowerCase() === 's' &&
-      /\s/.test(following) &&
-      /^(?:\p{Lu}\p{Ll}*\s+\p{Lu}|(?!(?:in|on|at|from|to|of|for|with|by)\b)\p{Ll}+\s+\p{Lu})/u.test(
-        input.slice(index + 1).trimStart(),
-      );
-    return possessive || (following.length > 0 && !/[\s.,!?;:)\]}"”»\p{Pd}]/u.test(following));
+    if (/^\p{Number}$/u.test(following)) {
+      return numericQuoteIsElision(input, index);
+    }
+    return following.length > 0 && !/[\s.,!?;:)\]}"”»\p{Pd}]/u.test(following);
   }
   return (
     (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) &&
@@ -119,6 +117,10 @@ function singleQuotationState(input: string, index: number, insideQuotes: boolea
 
 const leadingElisionReg =
   /^(?:t(?:is|was|were|will|would|il|ill)|em|cause|cos|round|bout|neath|fore|tween|gainst|cept|(?:twen|thir|for|fif|six|seven|eigh|nine)ties|\d{2}s?)\b/i;
+
+function isLeadingElision(input: string, index: number | undefined): boolean {
+  return index !== undefined && leadingElisionReg.test(input.slice(index + 1, index + 12));
+}
 
 function previousNonClosingIndex(input: string, index: number): number {
   let previous = index - 1;
@@ -142,6 +144,39 @@ function singleQuoteApostrophes(input: string): Uint8Array {
   return apostrophes;
 }
 
+function numericQuoteIsElision(input: string, index: number): boolean {
+  if (!/^\p{Number}$/u.test(characterAt(input, index + 1))) {
+    return false;
+  }
+  const previous = previousNonClosingIndex(input, index);
+  return (
+    !/[.!?]/.test(input[previous] ?? '') &&
+    (/\s/.test(input[index - 1] ?? '') ||
+      !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
+        input.slice(Math.max(0, previous - 1), previous + 1),
+      ))
+  );
+}
+
+function rightCurlyIsApostrophe(input: string, index: number): boolean {
+  const following = characterAt(input, index + 1);
+  const previous = previousNonClosingIndex(input, index);
+  const afterTerminal = /[.!?]/.test(input[previous] ?? '');
+  return (
+    (/^[\p{Letter}\p{Mark}]$/u.test(following) &&
+      (!afterTerminal || /^’(?:s|m|d|ll|re|ve)\b/i.test(input.slice(index, index + 4)))) ||
+    numericQuoteIsElision(input, index) ||
+    input.slice(index - 2, index).toLowerCase() === '’n'
+  );
+}
+
+function isPossessiveCandidate(input: string, index: number): boolean {
+  return (
+    /s/iu.test(input[index - 1] ?? '') &&
+    /^\s+[\p{Letter}\p{Mark}\p{Number}]/u.test(input.slice(index + 1))
+  );
+}
+
 function markCurlyApostrophes(input: string, apostrophes: Uint8Array): void {
   let candidateStart: number | undefined;
   let opening: number | undefined;
@@ -154,7 +189,9 @@ function markCurlyApostrophes(input: string, apostrophes: Uint8Array): void {
       const wordInternal =
         /[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
         /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following);
+      const openingIsElision = isLeadingElision(input, opening);
       const leadingElision =
+        !openingIsElision &&
         (opening !== undefined || candidateStart !== undefined) &&
         /^‘(?:(?:t(?:is|was)|em)\b|\p{Number})/iu.test(input.slice(index, index + 6));
       if (!(wordInternal || leadingElision)) {
@@ -164,20 +201,12 @@ function markCurlyApostrophes(input: string, apostrophes: Uint8Array): void {
       continue;
     }
 
-    const previous = previousNonClosingIndex(input, index);
-    const afterTerminal = /[.!?]/.test(input[previous] ?? '');
-    if (
-      (/^[\p{Letter}\p{Mark}]$/u.test(following) &&
-        (!afterTerminal || /^’(?:s|m|d|ll|re|ve)\b/i.test(input.slice(index, index + 4)))) ||
-      (/^\p{Number}$/u.test(following) &&
-        !afterTerminal &&
-        (/\s/.test(input[index - 1] ?? '') ||
-          !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
-            input.slice(Math.max(0, previous - 1), previous + 1),
-          ))) ||
-      input.slice(index - 2, index).toLowerCase() === '’n'
-    ) {
+    if (rightCurlyIsApostrophe(input, index)) {
       apostrophes[index] = 1;
+      continue;
+    }
+    if (isLeadingElision(input, opening) && isPossessiveCandidate(input, index)) {
+      candidateStart ??= index;
       continue;
     }
 
@@ -203,7 +232,7 @@ function markUnpairedElisions(input: string, apostrophes: Uint8Array): void {
   let elisionOpening: number | undefined;
   for (const quote of input.matchAll(/'/g)) {
     const index = quote.index;
-    const elision = leadingElisionReg.test(input.slice(index + 1, index + 12));
+    const elision = isLeadingElision(input, index);
     if (
       elisionOpening !== undefined &&
       !/[.!?]/.test(input[index - 1] ?? '') &&
@@ -212,6 +241,9 @@ function markUnpairedElisions(input: string, apostrophes: Uint8Array): void {
     ) {
       elisionOpening = undefined;
       insideStraight = false;
+    }
+    if (elisionOpening !== undefined && isPossessiveCandidate(input, index)) {
+      continue;
     }
     const nextState = singleQuotationState(input, index, insideStraight);
     if (nextState && !insideStraight && elision) {
@@ -295,6 +327,8 @@ class QuotationPairing {
   #nextEnglishClose = -1;
   #nextCurlyBoundary = -1;
   #nextTreebankClose = -1;
+  #contextCursor = 0;
+  #precedingContent = '';
 
   constructor(input: string, apostrophes: Uint8Array) {
     this.#input = input;
@@ -308,7 +342,7 @@ class QuotationPairing {
     }
     const character = this.#input[index];
     if (character === '"') {
-      if (this.#openings.straightDouble >= 0) {
+      if (this.#openings.straightDouble >= 0 && !this.#opensAfterUnmatched(index)) {
         this.#close('straightDouble', index);
       } else if (opensDoubleQuote(this.#input, index, false)) {
         this.#openings.straightDouble = index;
@@ -329,6 +363,27 @@ class QuotationPairing {
         this.#close(kind, index);
       }
     }
+  }
+
+  #opensAfterUnmatched(index: number): boolean {
+    if (
+      !(
+        opensDoubleQuote(this.#input, index, false) &&
+        /^[\p{Letter}\p{Mark}\p{Number}\p{Symbol}\p{Ps}'‘“„`]$/u.test(
+          characterAt(this.#input, index + 1),
+        )
+      )
+    ) {
+      return false;
+    }
+    // Reuse significant left context even across long runs of nested/spaced closers.
+    while (this.#contextCursor < index) {
+      const character = this.#input[this.#contextCursor++];
+      if (!/[\s"'”’“\])}>]/.test(character)) {
+        this.#precedingContent = character;
+      }
+    }
+    return !/[.!?]/.test(this.#precedingContent);
   }
 
   #close(kind: QuotationKind, index: number): void {
@@ -1108,6 +1163,7 @@ function isDialogueAttribution(
 function unquotedTerminalScanner(
   input: string,
   pairs: Int32Array,
+  caseNeutral: boolean,
 ): (start: number) => RegExpExecArray | null {
   const terminals = /\.{2,}|[.!?]/g;
   let quoteCursor = 0;
@@ -1125,12 +1181,42 @@ function unquotedTerminalScanner(
       if (terminal.index >= quotedThrough) {
         return terminal;
       }
-      terminals.lastIndex = quotedThrough + 1;
+      const question = quotedQuestionTerminal(input, quotedThrough, caseNeutral);
       quoteCursor = quotedThrough + 1;
+      if (question >= terminal.index) {
+        terminals.lastIndex = question;
+        return terminals.exec(input);
+      }
+      terminals.lastIndex = quotedThrough + 1;
       terminal = terminals.exec(input);
     }
     return null;
   };
+}
+
+/** A question at the end of a quoted span can terminate its surrounding question. */
+function quotedQuestionTerminal(input: string, quoteEnd: number, caseNeutral: boolean): number {
+  let terminal = quoteEnd - 1;
+  while (terminal >= 0 && /[\s"'”’“\])}>]/.test(input[terminal])) {
+    terminal--;
+  }
+  if (input[terminal] !== '?') {
+    return -1;
+  }
+  let end = quoteEnd + 1;
+  while (end < input.length && /['”’“\])}>]/.test(input[end])) {
+    end++;
+  }
+  let next = end;
+  while (next < input.length && /[\s"'“„‘([{<]/.test(input[next])) {
+    next++;
+  }
+  const character = characterAt(input, next);
+  return next === input.length ||
+    (caseNeutral ? isNeutralSentenceStart(input, end, next) : charIsUpperCase(character)) ||
+    isNumericSentenceStart(input, next, character, '?')
+    ? terminal
+    : -1;
 }
 
 /** Reuse the next real terminal across monotone quotation-boundary lookaheads. */
@@ -1140,7 +1226,7 @@ function questionTerminalChecker(
   caseNeutral: boolean,
   pairs: Int32Array,
 ): (start: number) => boolean {
-  const nextTerminal = unquotedTerminalScanner(input, pairs);
+  const nextTerminal = unquotedTerminalScanner(input, pairs, caseNeutral);
   const ellipsisCursor = { index: 0 };
   let through = -1;
   let question = false;

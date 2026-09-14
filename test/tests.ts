@@ -1396,6 +1396,139 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each([
+      [
+        '‘Til tomorrow. He said ‘Twas strange. Really.’ Next.',
+        ['‘Til tomorrow.', 'He said ‘Twas strange. Really.’', 'Next.'],
+      ],
+      [
+        "The word 'news' after Alice is useful. She said 'No.' Next.",
+        ["The word 'news' after Alice is useful.", "She said 'No.'", 'Next.'],
+      ],
+      ["She said 'First. Dogs'² Next sentence.", ["She said 'First. Dogs'² Next sentence."]],
+      ["She said 'First. Dogs'𝟚 Next sentence.", ["She said 'First. Dogs'𝟚 Next sentence."]],
+    ])('preserves reviewed elision and closing-context distinctions: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['regarding Alice', 'concerning Alice', 'Alice Smith selected'])(
+      'closes s-ending words without guessing possessives from following word casing: %s',
+      (continuation) => {
+        const input = `The word 'news' ${continuation} is useful. She said 'No.' Next.`;
+        const expected = [`The word 'news' ${continuation} is useful.`, "She said 'No.'", 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((text) => text.toLowerCase()),
+        );
+      },
+    );
+
+    test.each([
+      ["'", "'"],
+      ['‘', '’'],
+    ])(
+      'does not confirm an elision-led opener with an unrelated possessive %s',
+      (opening, closing) => {
+        const input = `${opening}Til tomorrow. The dogs${closing} toys Alice bought. Next.`;
+        const expected = [
+          `${opening}Til tomorrow.`,
+          `The dogs${closing} toys Alice bought.`,
+          'Next.',
+        ];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((text) => text.toLowerCase()),
+        );
+      },
+    );
+
+    test.each([
+      ["'", "'"],
+      ['‘', '’'],
+    ])('confirms elision-led quotes around interior possessives %s', (opening, closing) => {
+      const quoted = `She said ${opening}Til the dogs${closing} toys were packed. Take them.${closing}`;
+      expect(ss(`${quoted} Next.`)).toEqual([quoted, 'Next.']);
+      expect(segmentCaseNeutrally(`${quoted} Next.`)).toEqual([quoted, 'Next.']);
+    });
+
+    test.each([
+      ["She said 'First. In '99 we left.' Next.", ["She said 'First. In '99 we left.'", 'Next.']],
+      ["She said 'First. (Dogs)'² Next sentence.", ["She said 'First. (Dogs)'² Next sentence."]],
+    ])('distinguishes numeric elisions from quotation footnotes: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      [
+        'He typed "hello. Next sentence says "Stop." Last.',
+        ['He typed "hello.', 'Next sentence says "Stop."', 'Last.'],
+      ],
+      [
+        'He typed "hello. Next sentence says "‘Stop.’" Last.',
+        ['He typed "hello.', 'Next sentence says "‘Stop.’"', 'Last.'],
+      ],
+      ['"Alpha. "Next.', ['"Alpha. "', 'Next.']],
+      ['"‘No.’ "Next.', ['"‘No.’ "', 'Next.']],
+      ['"Alpha "Next." Last.', ['"Alpha "Next."', 'Last.']],
+    ])(
+      'recovers a later double opener while retaining terminal-led closers: %s',
+      (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each([
+      [
+        '"It ended." Was Alice asking "Really?" Next.',
+        ['"It ended."', 'Was Alice asking "Really?"', 'Next.'],
+      ],
+      ['"It ended." Was Alice asking "Really?"', ['"It ended."', 'Was Alice asking "Really?"']],
+      [
+        '"It ended." Was Alice asking “First. Really?” Next.',
+        ['"It ended."', 'Was Alice asking “First. Really?”', 'Next.'],
+      ],
+      [
+        '"It ended." Was Alice asking ``Really?\'\' Next.',
+        ['"It ended."', "Was Alice asking ``Really?''", 'Next.'],
+      ],
+      [
+        '"It ended." Was Alice asking “Really?” 2 people replied.',
+        ['"It ended."', 'Was Alice asking “Really?”', '2 people replied.'],
+      ],
+      [
+        '"It ended." Was Alice asking “She said ‘Really?’” Next.',
+        ['"It ended."', 'Was Alice asking “She said ‘Really?’”', 'Next.'],
+      ],
+    ])(
+      'recognizes a quoted question at the end of its surrounding question: %s',
+      (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each([
+      '"Hello." was the title of "Really?" as she remembered it. Next.',
+      '"Hello." was the title of “What? he asked” in the book. Next.',
+    ])('keeps internal quoted questions inside a continued predicate: %s', (input) => {
+      const boundary = input.lastIndexOf(' Next.');
+      expect(ss(input)).toEqual([input.slice(0, boundary), 'Next.']);
+      expect(segmentCaseNeutrally(input)).toEqual([input.slice(0, boundary), 'Next.']);
+    });
+
+    test('recovers repeated unmatched straight openers in a single pass', () => {
+      const fragment = 'He typed "word.';
+      const input = `${`${fragment} `.repeat(10_000)}He said "Stop." Last.`;
+      const expected = [...new Array<string>(10_000).fill(fragment), 'He said "Stop."', 'Last.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
     test('recovers after an abbreviation possessive without changing neutral abbreviation policy', () => {
       const input = "That is JFK Jr.'s book. Next.";
       expect(ss(input)).toEqual(["That is JFK Jr.'s book.", 'Next.']);
@@ -2199,6 +2332,13 @@ describe('Utility Functions', () => {
     ])('should apply Treebank comma and colon rules to %s', (input, expected) => {
       expect(tbt(input)).toEqual(expected);
     });
+
+    test.each(['.', '!', '?'])(
+      'tokenizes an unmatched quote after terminal %s as closing',
+      (terminal) => {
+        expect(tbt(`hello${terminal}"`)).toEqual(['hello', terminal, "''"]);
+      },
+    );
 
     test('should handle double quotation marks', () => {
       expect(tbt('"We beat some pretty good teams to get here," Slocum said.')).toEqual([
