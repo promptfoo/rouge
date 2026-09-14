@@ -711,6 +711,114 @@ describe('Utility Functions', () => {
       );
     });
 
+    test.each([
+      'https://example.com/release.1',
+      'https://example.com/release.𝟙',
+      `https://example.com/${'path/'.repeat(100)}release.1`,
+      'www.example.com/release.1',
+      'example.com/release.1',
+      'alice@example.com.1',
+    ])('preserves numeric URL and email components: %s', (address) => {
+      const input = `Download ${address} Candidate builds remain.`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test('keeps an explicit citation after a quoted URL', () => {
+      const first = 'He cited "https://example.com/release."1';
+      const input = `${first} Next sentence.`;
+      expect(ss(input)).toEqual([first, 'Next sentence.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+    });
+
+    test('classifies a citation-like URL token once', () => {
+      const input = `Download https://example.com/${'release.1/'.repeat(20_000)}final.1 Candidate builds remain.`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each(['See p.(10) Next.', 'See P.(10) Next.'])(
+      'retains parenthesized page-reference continuation: %s',
+      (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
+
+    test.each(["'Tis", "'round", '‘Tis', '‘round'])(
+      'confirms a citation-bearing quotation beginning with %s',
+      (opening) => {
+        const closer = opening.startsWith('‘') ? '’' : "'";
+        // Curly closing periods alone retain the existing non-citation boundary behavior.
+        const lastCitation = opening.startsWith('‘') ? '[2]' : '';
+        const first = `She said ${opening} Alpha.[1] Beta.${lastCitation}${closer}`;
+        expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+      },
+    );
+
+    test.each(['‘90s', '‘tis', "'90s", "'tis"])(
+      'does not open a quotation for the unpaired elision %s',
+      (elision) => {
+        const first = `In the ${elision}, Alpha.[1]`;
+        expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+      },
+    );
+
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+      ['«', '»'],
+      ["'", "'"],
+    ])('consumes spaced compatible citation closers %s%s', (opening, closing) => {
+      for (const gap of [' ', '\t', '\n']) {
+        const first = `He said ${opening}Alpha.[1]${gap}${closing}`;
+        const expected = [first.replaceAll('\n', ' '), 'Next.'];
+        expect(ss(`${first} Next.`)).toEqual(expected);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual(expected);
+      }
+    });
+
+    test.each([
+      ["'", "'"],
+      ['‘', '’'],
+    ])('preserves an existing %s%s quotation around an internal elision', (opening, closing) => {
+      for (const elision of ['90s', 'tis']) {
+        const first = `She said ${opening}In the ${opening}${elision}, Alpha.[1] Beta.[2]${closing}`;
+        expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+      }
+    });
+
+    test('retains a citation boundary after an unquoted plural possessive', () => {
+      const first = 'The dogs’ owners said Alpha.[1]';
+      expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+    });
+
+    test.each([
+      'She said ‘He called ‘twas odd’ rude Alpha.[1] Beta.’ aloud.',
+      'She said ‘The dogs’ owners recalled the ‘90s, Alpha.[1] Beta.’ aloud.',
+    ])('preserves nested elision and possessive quotation context: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test('does not borrow a later separate quotation closer for an elision', () => {
+      const first = 'She said ‘In the ‘90s, Alpha.[1] Beta.[2]’';
+      const second = 'Later ‘other words.’ Gamma.[3]';
+      const input = `${first} ${second} Next.`;
+      expect(ss(input)).toEqual([first, second, 'Next.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, second, 'Next.']);
+    });
+
+    test('keeps many unpaired elisions source-aligned without quotation nesting', () => {
+      const first = `In the ${'‘90s, ‘tis familiar, '.repeat(40)}Alpha.[1]`;
+      expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+    });
+
     test('does not mistake decimal numbers for numeric citation suffixes', () => {
       const input = 'She has $100.00 in her bag.';
       expect(ss(input)).toEqual([input]);
@@ -722,6 +830,8 @@ describe('Utility Functions', () => {
       'Appendix IV.1 Introduction',
       'Section ABC.1 Introduction',
       'I work for the U.S.[1] Government agency.',
+      'I work for the U.S.A.[1] Government agency.',
+      'I work for the E.U.[1] Government agency.',
     ])('preserves dotted section identifiers and cited abbreviation continuations: %s', (input) => {
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);

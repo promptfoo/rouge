@@ -1,4 +1,9 @@
-import { GATE_EXCEPTIONS, GATE_SUBSTITUTIONS, TREEBANK_CONTRACTIONS } from './constants';
+import {
+  ABBR_PLACES,
+  GATE_EXCEPTIONS,
+  GATE_SUBSTITUTIONS,
+  TREEBANK_CONTRACTIONS,
+} from './constants';
 import { lcsIndices } from './lcs';
 import {
   validateBeta,
@@ -126,6 +131,12 @@ const listMarkerReg =
   /(?:^|\s)(?:(?:[•⁃]\s*)?\d+(?:\.\)|[.)])|\p{Cased}\.)(?=\s+["'([{<]*\p{Cased})/gu;
 const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
 const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
+const citedPlaceAcronymReg = new RegExp(
+  `\\b(?:${ABBR_PLACES.filter((place) => place.includes('.'))
+    .map(escapeRegExp)
+    .join('|')})\\.$`,
+  'i',
+);
 const sentenceContinuationReg =
   /^(?:and|or|but|nor|for|yet|so|at|in|on|of|to|from|with|by|as|then|because|while|after|before|although|though|since|unless|until|when|where|whether|if|once|whereas)\b/i;
 const independentSentenceReg =
@@ -519,6 +530,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const brackets = { depth: 0, standalone: false };
   const { apostrophes, overflowed } = citationApostrophes(input);
   const citationQuotes: CitationQuotationState = { closers: [], overflowed };
+  const isNetworkToken = networkTokenChecker(input);
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
@@ -550,8 +562,15 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       char === '!'
     ) {
       const end =
-        citationEnd(input, index, caseNeutral, insideQuotes, brackets, citationQuotes) ??
-        sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
+        citationEnd(
+          input,
+          index,
+          caseNeutral,
+          insideQuotes,
+          brackets,
+          citationQuotes,
+          isNetworkToken,
+        ) ?? sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
       if (end === -1) {
         continue;
       }
@@ -567,9 +586,62 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
 }
 
 const singleQuoteClosingContextReg = /^[\s.,!?;:)\]}”’»\p{Pd}]$/u;
+const citationElisionReg =
+  /^(?:\d{2}s|t(?:is|was|were|will|would|il|ill)|em|cause|cos|round|bout|neath|fore|tween|gainst|cept|(?:twen|thir|for|fif|six|seven|eigh|nine)ties)\b/i;
+
+function isCitationElision(input: string, index: number): boolean {
+  return citationElisionReg.test(input.slice(index + 1, index + 32));
+}
+
+/** Reserve required curly closers before deciding whether an elision opens a quote. */
+class CurlyCitationElisions {
+  #entries = new Uint32Array(32);
+  #length = 0;
+
+  constructor(input: string) {
+    let available = 0;
+    for (let index = input.length - 1; index >= 0; index--) {
+      const character = input[index];
+      if (!/[‘’]/.test(character) || isWordInternalApostrophe(input, index)) {
+        continue;
+      }
+      if (character === '’') {
+        if (!/[sS]/.test(input[index - 1] ?? '')) {
+          available++;
+        }
+      } else if (isCitationElision(input, index)) {
+        this.#add(available);
+      } else {
+        available = Math.max(0, available - 1);
+      }
+    }
+  }
+
+  #add(available: number): void {
+    if (this.#length === this.#entries.length) {
+      const expanded = new Uint32Array(this.#entries.length * 2);
+      expanded.set(this.#entries);
+      this.#entries = expanded;
+    }
+    this.#entries[this.#length++] = available;
+  }
+
+  nextAvailable(): number {
+    // The forward pass visits the same filtered elision marks in reverse storage order.
+    return this.#entries[--this.#length];
+  }
+}
+
+function isWordInternalApostrophe(input: string, index: number): boolean {
+  return (
+    /[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+    /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1))
+  );
+}
 
 interface CurlyCitationCandidates {
   positions: Uint32Array;
+  openers: Uint32Array;
   depth: number;
   overflowed: boolean;
 }
@@ -577,39 +649,64 @@ interface CurlyCitationCandidates {
 /** A later unambiguous closer confirms candidates at the same tentative depth. */
 function citationApostrophes(input: string): { apostrophes: Uint8Array; overflowed: boolean } {
   const apostrophes = new Uint8Array(input.length);
+  const elisions = new CurlyCitationElisions(input);
   const curly: CurlyCitationCandidates = {
     positions: new Uint32Array(64),
+    openers: new Uint32Array(64),
     depth: 0,
     overflowed: false,
   };
-  let straightCandidate: number | undefined;
+  const straight: { candidate?: number; opening?: number } = {};
   for (const quote of input.matchAll(/['‘’]/g)) {
     const index = quote.index;
     const family = quote[0] === "'" ? 1 : 0;
-    const previous = input.slice(Math.max(0, index - 2), index);
-    const following = characterAt(input, index + 1);
-    if (/[\p{Letter}\p{Mark}]$/u.test(previous) && /^[\p{Letter}\p{Mark}]$/u.test(following)) {
+    if (isWordInternalApostrophe(input, index)) {
       apostrophes[index] |= 1 << family;
     } else if (family === 0) {
-      updateCurlyCitationCandidates(input, index, curly, apostrophes);
-    } else if (
-      (index === 0 || /[\s\p{Punctuation}]$/u.test(previous)) &&
-      following.length > 0 &&
-      !singleQuoteClosingContextReg.test(following)
-    ) {
-      straightCandidate = undefined;
-    } else if (/[sS]$/.test(previous)) {
-      straightCandidate ??= index;
+      updateCurlyCitationCandidates(input, index, curly, apostrophes, elisions);
     } else {
-      if (straightCandidate !== undefined) {
-        for (let position = straightCandidate; position < index; position++) {
-          apostrophes[position] |= 2;
-        }
-      }
-      straightCandidate = undefined;
+      updateStraightCitationCandidates(input, index, straight, apostrophes);
     }
   }
   return { apostrophes, overflowed: curly.overflowed };
+}
+
+function updateStraightCitationCandidates(
+  input: string,
+  index: number,
+  state: { candidate?: number; opening?: number },
+  apostrophes: Uint8Array,
+): void {
+  const previous = input[index - 1] ?? '';
+  const following = characterAt(input, index + 1);
+  const elision = isCitationElision(input, index);
+  if (
+    (index === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) &&
+    following.length > 0 &&
+    !singleQuoteClosingContextReg.test(following)
+  ) {
+    if (elision) {
+      apostrophes[index] |= 2;
+      if (state.opening !== undefined) {
+        return;
+      }
+    }
+    state.opening = index;
+    state.candidate = undefined;
+  } else if (/[sS]/.test(previous)) {
+    state.candidate ??= index;
+  } else {
+    if (state.opening !== undefined) {
+      apostrophes[state.opening] &= ~2;
+    }
+    if (state.candidate !== undefined) {
+      for (let position = state.candidate; position < index; position++) {
+        apostrophes[position] |= 2;
+      }
+    }
+    state.opening = undefined;
+    state.candidate = undefined;
+  }
 }
 
 function updateCurlyCitationCandidates(
@@ -617,15 +714,23 @@ function updateCurlyCitationCandidates(
   index: number,
   candidates: CurlyCitationCandidates,
   apostrophes: Uint8Array,
+  elisions: CurlyCitationElisions,
 ): void {
   if (candidates.overflowed) {
     return;
   }
   if (input[index] === '‘') {
+    if (isCitationElision(input, index)) {
+      apostrophes[index] |= 1;
+      if (elisions.nextAvailable() <= candidates.depth) {
+        return;
+      }
+    }
     if (candidates.depth === candidates.positions.length) {
       // More than 64 tentative frames disables citation inference for this input.
       candidates.overflowed = true;
     } else {
+      candidates.openers[candidates.depth] = index;
       candidates.positions[candidates.depth++] = 0;
     }
     return;
@@ -638,6 +743,7 @@ function updateCurlyCitationCandidates(
     return;
   }
   const candidate = candidates.positions[--candidates.depth];
+  apostrophes[candidates.openers[candidates.depth]] &= ~1;
   if (candidate > 0) {
     confirmCurlyCitationCandidates(input, candidate - 1, index, apostrophes);
   }
@@ -720,13 +826,7 @@ function updateCitationQuotationState(
     }
     return;
   }
-  if (
-    (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) &&
-    /\S/.test(following) &&
-    !/^(?:\d{2}s|t(?:is|was|were|will|would|il|ill)|em|cause|cos|round|bout|neath|fore|tween|gainst|cept|(?:twen|thir|for|fif|six|seven|eigh|nine)ties)\b/i.test(
-      input.slice(index + 1, index + 32),
-    )
-  ) {
+  if ((previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) && /\S/.test(following)) {
     pushCitationQuotation(quotes, "'");
   }
 }
@@ -886,6 +986,7 @@ function citationEnd(
   insideQuotes: boolean,
   brackets: { depth: number; standalone: boolean },
   quotationQuotes: CitationQuotationState,
+  isNetworkToken: (index: number) => boolean,
 ): number | undefined {
   if (quotationQuotes.overflowed) {
     return undefined;
@@ -898,12 +999,20 @@ function citationEnd(
     return undefined;
   }
 
-  const delimiterEnd = citationDelimiterEnd(input, index, insideQuotes);
+  const pendingClosers = [...quotationQuotes.closers];
+  const delimiterEnd = citationDelimiterEnd(input, index, insideQuotes, pendingClosers);
   let citationStart = delimiterEnd;
   while (citationStart < input.length && /[^\S\r\n]/.test(input[citationStart])) {
     citationStart++;
   }
   if (citationStart > delimiterEnd && input[citationStart] !== '[') {
+    return undefined;
+  }
+  if (
+    citationStart === index + 1 &&
+    /^\p{Number}$/u.test(characterAt(input, citationStart)) &&
+    isNetworkToken(index)
+  ) {
     return undefined;
   }
   const contentEnd = numericCitationEnd(input, citationStart);
@@ -913,7 +1022,12 @@ function citationEnd(
 
   const leadingClosers = input.slice(index + 1, delimiterEnd);
   const closedQuote = insideQuotes && /"|''/.test(leadingClosers);
-  const end = citationDelimiterEnd(input, contentEnd - 1, insideQuotes && !closedQuote);
+  const end = citationDelimiterEnd(
+    input,
+    contentEnd - 1,
+    insideQuotes && !closedQuote,
+    pendingClosers,
+  );
   const closing = leadingClosers + input.slice(contentEnd, end);
   if (!closesCitationQuotations(closing, insideQuotes, quotationQuotes.closers)) {
     return undefined;
@@ -957,7 +1071,7 @@ function isCitationSentenceStart(
   if (
     abbrvReg.test(gateSuffix) &&
     (excepReg.test(gateSuffix) ||
-      (geographicAcronymReg.test(gateSuffix) && geographicContinuationReg.test(continuation)))
+      (citedPlaceAcronymReg.test(gateSuffix) && geographicContinuationReg.test(continuation)))
   ) {
     return false;
   }
@@ -1000,12 +1114,40 @@ function numericCitationEnd(input: string, start: number): number | undefined {
   return end;
 }
 
-function citationDelimiterEnd(input: string, index: number, insideQuotes: boolean): number {
-  let end = closingDelimiterEnd(input, index, insideQuotes);
-  while (end < input.length && /[”’»]/.test(input[end])) {
-    end = closingDelimiterEnd(input, end, false);
+function citationDelimiterEnd(
+  input: string,
+  index: number,
+  insideQuotes: boolean,
+  pending: string[],
+): number {
+  let end = index + 1;
+  let doublePending = insideQuotes;
+  for (;;) {
+    const nextEnd = closingDelimiterEnd(input, end - 1, doublePending);
+    for (let position = end; position < nextEnd; position++) {
+      if (input[position] === pending.at(-1)) {
+        pending.pop();
+      }
+      if (input[position] === '"' || input.startsWith("''", position)) {
+        doublePending = false;
+      }
+    }
+    end = nextEnd;
+    let next = end;
+    while (next < input.length && /\s/.test(input[next])) {
+      next++;
+    }
+    if (next > end && input[next] !== pending.at(-1)) {
+      return end;
+    }
+    if (!(/[”’»]/.test(input[next] ?? '') || (input[next] === "'" && pending.at(-1) === "'"))) {
+      return end;
+    }
+    if (input[next] === pending.at(-1)) {
+      pending.pop();
+    }
+    end = next + 1;
   }
-  return end;
 }
 
 function closesCitationQuotations(
@@ -1032,6 +1174,31 @@ function closesCitationQuotations(
   return remaining === 0 && !doublePending;
 }
 
+/** Classify each whitespace-delimited token once across monotone citation lookaheads. */
+function networkTokenChecker(input: string): (index: number) => boolean {
+  let end = 0;
+  let network = false;
+  return (index) => {
+    if (index < end) {
+      return network;
+    }
+    let start = index;
+    while (start > 0 && !/\s/.test(input[start - 1])) {
+      start--;
+    }
+    end = index;
+    while (end < input.length && !/\s/.test(input[end])) {
+      end++;
+    }
+    const token = input.slice(start, end).replace(/^["'“‘([{<]+/, '');
+    network =
+      /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i.test(token) ||
+      token.includes('@') ||
+      /^[\p{Letter}\p{Number}._-]+\.[\p{Letter}]{2,}\//u.test(token);
+    return network;
+  };
+}
+
 function isCitationContext(
   input: string,
   index: number,
@@ -1044,7 +1211,9 @@ function isCitationContext(
     return false;
   }
   if (bracketed) {
-    return true;
+    const lastWord =
+      input.slice(Math.max(0, index - sentenceSuffixLength), index + 1).match(/\S+$/)?.[0] ?? '';
+    return !(following === '(' && isPageNumberContinuation(lastWord, input.slice(index + 1)));
   }
 
   const previous = Array.from(input.slice(Math.max(0, index - 2), index)).at(-1) ?? '';
