@@ -133,6 +133,62 @@ const sentenceContinuationReg =
 const independentSentenceReg =
   /^(?:in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
+/** Store exact nesting in one byte per opener without per-element heap objects. */
+class TypographicQuotationStack {
+  #quotes = new Uint8Array(32);
+  length = 0;
+
+  at(index: number): string | undefined {
+    const position = index < 0 ? this.length + index : index;
+    return position >= 0 && position < this.length ? '”’»“'[this.#quotes[position]] : undefined;
+  }
+
+  push(quote: string): void {
+    if (this.length === this.#quotes.length) {
+      const expanded = new Uint8Array(this.#quotes.length * 2);
+      expanded.set(this.#quotes);
+      this.#quotes = expanded;
+    }
+    this.#quotes[this.length++] = '”’»“'.indexOf(quote);
+  }
+
+  pop(): void {
+    if (this.length > 0) {
+      this.length--;
+    }
+  }
+}
+
+interface TypographicQuotationSource {
+  input: string;
+  index: number;
+  apostrophes: Uint8Array;
+}
+
+/** Confirm ambiguous possessives with a later unambiguous closer in one scan. */
+function typographicApostrophes(input: string): Uint8Array {
+  const apostrophes = new Uint8Array(input.length);
+  let candidate: number | undefined;
+  for (const quote of input.matchAll(/[‘’]/g)) {
+    const index = quote.index;
+    const previous = input.slice(Math.max(0, index - 2), index);
+    const following = characterAt(input, index + 1);
+    const wordInternal =
+      /[\p{Letter}\p{Mark}]$/u.test(previous) && /^[\p{Letter}\p{Mark}]$/u.test(following);
+    if (wordInternal) {
+      apostrophes[index] = 1;
+    } else if (quote[0] === '‘') {
+      candidate = undefined;
+    } else if (/[sS]$/.test(previous)) {
+      candidate ??= index;
+    } else if (candidate !== undefined) {
+      apostrophes.fill(1, candidate, index);
+      candidate = undefined;
+    }
+  }
+  return apostrophes;
+}
+
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
   readonly #caseNeutral: boolean;
@@ -140,15 +196,17 @@ class SentenceBuffer {
   #normalizedThrough = 0;
   #words: { titleCase: boolean; lowerCase: boolean }[] = [];
   #openingDelimiters: string[] = [];
-  #typographicQuoteClosers: string[] = [];
+  #typographicQuoteClosers = new TypographicQuotationStack();
+  readonly #quotationSource: TypographicQuotationSource;
   #insideDoubleQuotes = false;
   #insideSingleQuotes = false;
   #lastCharacter = '';
   hasLineBreaks = false;
   startsWithTitleCase = false;
 
-  constructor(text: string, caseNeutral: boolean) {
+  constructor(text: string, caseNeutral: boolean, quotationSource: TypographicQuotationSource) {
     this.#caseNeutral = caseNeutral;
+    this.#quotationSource = quotationSource;
     this.append(trimSpaces(text));
   }
 
@@ -217,7 +275,14 @@ class SentenceBuffer {
     for (let index = 0; index < text.length; index++) {
       const character = text[index];
       const previous = text[index - 1] ?? this.#lastCharacter;
-      if (trackTypographicQuote(text, index, this.#typographicQuoteClosers, previous)) {
+      let apostrophe = false;
+      if (/[‘’]/.test(character)) {
+        const source = this.#quotationSource;
+        const position = source.input.indexOf(character, source.index);
+        apostrophe = source.apostrophes[position] === 1;
+        source.index = position + 1;
+      }
+      if (trackTypographicQuote(text, index, this.#typographicQuoteClosers, apostrophe)) {
         continue;
       }
       if (character === '"') {
@@ -324,13 +389,19 @@ export function sentenceSegment(
   }
 
   // Scan terminals before applying abbreviation and line-wrap rules.
-  const chunks = sentenceChunks(input.replace(/\u0085/g, ' '), caseNeutral);
+  const sourceInput = input.replace(/\u0085/g, ' ');
+  const quotationSource = {
+    input: sourceInput,
+    index: 0,
+    apostrophes: typographicApostrophes(sourceInput),
+  };
+  const chunks = sentenceChunks(sourceInput, caseNeutral, quotationSource.apostrophes);
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
   for (let idx = 0; idx < chunks.length; idx++) {
     if (pending || chunks[idx]) {
-      const chunk = pending ?? new SentenceBuffer(chunks[idx], caseNeutral);
+      const chunk = pending ?? new SentenceBuffer(chunks[idx], caseNeutral, quotationSource);
       pending = undefined;
       // Trim only spaces (i.e. preserve line breaks/carriage feeds)
       chunk.trimEnd();
@@ -487,31 +558,20 @@ export function sentenceSegment(
 function trackTypographicQuote(
   text: string,
   index: number,
-  closers: string[],
-  previous: string,
+  closers: TypographicQuotationStack,
+  apostrophe: boolean,
 ): boolean {
   const character = text[index];
+  if (/[‘’]/.test(character) && apostrophe) {
+    return false;
+  }
   if (character === closers.at(-1)) {
-    if (
-      character === '’' &&
-      /^\p{Letter}$/u.test(previous) &&
-      /^\p{Letter}$/u.test(characterAt(text, index + 1))
-    ) {
-      return false;
-    }
     closers.pop();
     return true;
   }
-  if (character === '“' || character === '‘' || character === '«' || character === '„') {
-    if (closers.length < 64) {
-      if (character === '«') {
-        closers.push('»');
-      } else if (character === '„') {
-        closers.push('“');
-      } else {
-        closers.push(character === '“' ? '”' : '’');
-      }
-    }
+  const opening = '“‘«„'.indexOf(character);
+  if (opening !== -1) {
+    closers.push('”’»“'[opening]);
     return true;
   }
   return false;
@@ -524,8 +584,12 @@ function hasInlineParenthetical(input: string, caseNeutral: boolean): boolean {
     return false;
   }
   const closing = ')]}>"\'”’»“'[openingIndex];
+  const apostrophes = opening === '‘' ? typographicApostrophes(input) : undefined;
   let depth = 1;
   for (let index = 1; index < input.length; index++) {
+    if (apostrophes?.[index] === 1 && /[‘’]/.test(input[index])) {
+      continue;
+    }
     if (
       input[index] === closing &&
       /['’]/.test(closing) &&
@@ -599,7 +663,7 @@ export interface SentenceSegmentOptions {
 }
 
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
-function sentenceChunks(input: string, caseNeutral: boolean): string[] {
+function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8Array): string[] {
   const chunks: string[] = [];
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
@@ -607,12 +671,12 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   let start = -1;
   let insideQuotes = false;
   const brackets = { depth: 0, standalone: false };
-  const typographicQuoteClosers: string[] = [];
+  const typographicQuoteClosers = new TypographicQuotationStack();
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     insideQuotes = quotationState(input, index, insideQuotes);
-    trackTypographicQuote(input, index, typographicQuoteClosers, input[index - 1] ?? '');
+    trackTypographicQuote(input, index, typographicQuoteClosers, apostrophes[index] === 1);
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
         brackets.standalone = start === -1;
@@ -714,13 +778,13 @@ function closingDelimiterEnd(
   input: string,
   index: number,
   insideQuotes: boolean,
-  typographicQuoteClosers: readonly string[] = [],
+  typographicQuoteClosers?: TypographicQuotationStack,
 ): number {
   let end = index + 1;
   let quotePending = insideQuotes;
-  let remaining = typographicQuoteClosers.length;
+  let remaining = typographicQuoteClosers?.length ?? 0;
   while (end < input.length) {
-    if (remaining > 0 && input[end] === typographicQuoteClosers[remaining - 1]) {
+    if (remaining > 0 && input[end] === typographicQuoteClosers?.at(remaining - 1)) {
       remaining--;
       end++;
       continue;
@@ -739,7 +803,9 @@ function closingDelimiterEnd(
     if (
       next > end &&
       next < input.length &&
-      (closingBracketReg.test(input[next]) || (quotePending && input[next] === '"'))
+      (closingBracketReg.test(input[next]) ||
+        (quotePending && input[next] === '"') ||
+        (remaining > 0 && input[next] === typographicQuoteClosers?.at(remaining - 1)))
     ) {
       end = next;
       continue;
@@ -756,7 +822,7 @@ function sentenceEnd(
   insideQuotes: boolean,
   brackets: { depth: number; standalone: boolean },
   caseNeutral: boolean,
-  typographicQuoteClosers: readonly string[],
+  typographicQuoteClosers: TypographicQuotationStack,
 ): number {
   if (
     !insideQuotes &&
@@ -771,7 +837,7 @@ function sentenceEnd(
     input,
     index,
     insideQuotes,
-    terminalEllipsis ? typographicQuoteClosers : [],
+    terminalEllipsis ? typographicQuoteClosers : undefined,
   );
   if (end === -1) {
     return -1;
@@ -802,7 +868,7 @@ function sentenceEnd(
   }
   const nextCharacter = characterAt(input, next);
   const startsWithLetter = caseNeutral
-    ? isNeutralSentenceStart(input, end, next)
+    ? isNeutralEllipsisSentenceStart(input, end, next, suffix)
     : charIsUpperCase(nextCharacter);
   const startsWithNumber =
     /^\p{Number}$/u.test(nextCharacter) &&
@@ -813,6 +879,18 @@ function sentenceEnd(
     return -1;
   }
   return abbrvReg.test(suffix) && excepReg.test(suffix) ? -1 : end;
+}
+
+function isNeutralEllipsisSentenceStart(
+  input: string,
+  end: number,
+  next: number,
+  suffix: string,
+): boolean {
+  return (
+    isNeutralSentenceStart(input, end, next) &&
+    !(/(?<!\.)\.{3}$/.test(suffix) && /^(?:what|and\s+then)\b/i.test(input.slice(next)))
+  );
 }
 
 function countClosingBrackets(input: string, start: number, end: number): number {

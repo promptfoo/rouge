@@ -1660,6 +1660,83 @@ describe('Utility Functions', () => {
         );
       });
 
+      test.each([
+        [
+          'She said, ‘The students’ work... Alpha matters.’',
+          ['She said, ‘The students’ work... Alpha matters.’'],
+        ],
+        ['He said “Enough... ” Next sentence.', ['He said “Enough... ”', 'Next sentence.']],
+        ['He said ‘Enough...’ and then continued.', ['He said ‘Enough...’ and then continued.']],
+      ])('preserves reviewed typographic ellipsis context: %s', (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      });
+
+      test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('retains spaced %s%s ellipsis closers in both modes', (open, close) => {
+        for (const gap of [' ', '\t', '\n']) {
+          const first = `He said ${open}Enough...${gap}${close}`;
+          const input = `${first} Next sentence.`;
+          const expected = [first.replaceAll('\n', ' '), 'Next sentence.'];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+            expected.map((sentence) => sentence.toLowerCase()),
+          );
+        }
+      });
+
+      test('preserves four-dot terminal precedence after a quotation', () => {
+        const first = 'He said ‘Enough....’';
+        const second = 'And then continued.';
+        expect(ss(`${first} ${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first} ${second}`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      });
+
+      test.each([
+        'She said, ‘James’, the students’ work... Alpha matters.’',
+        'She said, ‘The students’ work and James’ notes... Alpha matters.’',
+      ])('retains possessive chains through an ellipsis: %s', (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      });
+
+      test('recovers exact mixed-family quote state beyond 64 levels', () => {
+        const opening = '“‘«'.repeat(25);
+        const closing = Array.from(opening)
+          .reverse()
+          .map((quote) => '”’»“'['“‘«„'.indexOf(quote)])
+          .join('');
+        const first = `${opening}Alpha...${closing}`;
+        expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+        const unmatched = `${opening}Alpha...${closing.slice(0, -1)} Next.`;
+        expect(ss(unmatched)).toEqual([unmatched]);
+        expect(segmentCaseNeutrally(unmatched)).toEqual([unmatched]);
+      });
+
+      test('tracks later quoted ellipses after consuming earlier closers', () => {
+        const input = 'He said “Enough...” Next. She said “Later...” Final.';
+        const expected = ['He said “Enough...”', 'Next.', 'She said “Later...”', 'Final.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      });
+
+      test('keeps an unmatched outer quote beyond 64 nested openers', () => {
+        const input = `${'‘'.repeat(65)}Alpha...${'’'.repeat(64)} Next.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      });
+
       test('keeps ellipses inside nested quotes until the outer quote closes', () => {
         const input = 'She said “He said ‘Enough...’ and went.”';
         expect(ss(input)).toEqual([input]);
