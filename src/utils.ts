@@ -1016,16 +1016,15 @@ export function arithmeticMean(input: number[]): number {
   // Sum exact multiples of 2^-1074 only when ordinary addition overflows.
   const view = new DataView(new ArrayBuffer(8));
   const implicitBit = 1n << 52n;
-  let total = 0n;
-  for (const value of input) {
+  const total = input.reduce((acc, value) => {
     view.setFloat64(0, value);
     const bits = view.getBigUint64(0);
     const exponent = Number((bits >> 52n) & 0x7ffn);
     const fraction = bits & (implicitBit - 1n);
     const significand = exponent === 0 ? fraction : fraction + implicitBit;
     const units = significand << BigInt(Math.max(0, exponent - 1));
-    total += value < 0 ? -units : units;
-  }
+    return acc + (value < 0 ? -units : units);
+  }, 0n);
 
   const negative = total < 0n;
   const magnitude = negative ? -total : total;

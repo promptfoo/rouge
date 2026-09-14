@@ -196,6 +196,13 @@ describe('Utility Functions', () => {
       expect(am(values.map((value) => -value))).toBe(-expected);
     });
 
+    test('skips sparse holes consistently when a finite sum overflows', () => {
+      const values = [Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE];
+      values.length = 4;
+      expect(am(values)).toBe(Number.MAX_VALUE / 4);
+      expect(am(values.map((value) => -value))).toBe(-Number.MAX_VALUE / 4);
+    });
+
     test('averages overflowing mixed-sign sums', () => {
       expect(am([1e308, 1e308, -1e308]) / 1e308).toBeCloseTo(1 / 3, 14);
     });
