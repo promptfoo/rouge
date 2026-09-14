@@ -115,7 +115,7 @@ function singleQuotationState(
 function previousNonClosingIndex(input: string, index: number): number {
   let previous = index - 1;
   // Stop at another single quote so adjacent candidates never rescan the same span.
-  while (previous >= 0 && /[\])}>"”]/.test(input[previous])) {
+  while (previous >= 0 && /[\s\])}>"”]/.test(input[previous])) {
     previous--;
   }
   return previous;
@@ -129,23 +129,31 @@ function smartApostrophes(input: string): Uint8Array {
   // One byte per code unit avoids per-apostrophe arrays and hash-table overhead.
   const apostrophes = new Uint8Array(input.length);
   let candidateStart: number | undefined;
+  let opening: number | undefined;
   for (const quote of input.matchAll(/[‘’]/g)) {
     const index = quote.index;
-    const previous = previousNonClosingIndex(input, index);
-    const afterTerminal = /[.!?]/.test(input[previous] ?? '');
+    const following = characterAt(input, index + 1);
     if (quote[0] === '‘') {
+      // A left mark opens a span only after a compatible right mark pairs with it.
+      apostrophes[index] = 1;
       if (
-        /[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
-        /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, index + 1))
+        !(
+          /[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+          /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following)
+        )
       ) {
-        apostrophes[index] = 1;
-      } else {
+        opening = index;
         candidateStart = undefined;
       }
-    } else if (
-      (/^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1)) &&
+      continue;
+    }
+
+    const previous = previousNonClosingIndex(input, index);
+    const afterTerminal = /[.!?]/.test(input[previous] ?? '');
+    if (
+      (/^[\p{Letter}\p{Mark}]$/u.test(following) &&
         (!afterTerminal || smartContractionReg.test(input.slice(index, index + 4)))) ||
-      (/^\p{Number}$/u.test(characterAt(input, index + 1)) &&
+      (/^\p{Number}$/u.test(following) &&
         !afterTerminal &&
         !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
           input.slice(Math.max(0, previous - 1), previous + 1),
@@ -153,8 +161,15 @@ function smartApostrophes(input: string): Uint8Array {
       input.slice(index - 2, index).toLowerCase() === '’n'
     ) {
       apostrophes[index] = 1;
-    } else if (
-      /\s/.test(input[index + 1] ?? '') &&
+      continue;
+    }
+
+    if (opening !== undefined) {
+      apostrophes[opening] = 0;
+      opening = undefined;
+    }
+    if (
+      /\s/.test(following) &&
       (/(?:s|\p{Number})$/iu.test(input.slice(Math.max(0, index - 2), index)) ||
         /\p{Letter}\.\p{Letter}\.$/u.test(input.slice(Math.max(0, index - 8), index)))
     ) {
@@ -389,6 +404,7 @@ class SentenceBuffer {
  *
  * Typographic double quotes use the existing straight-quote boundary heuristics,
  * including their ambiguity around quoted abbreviations and phrase boundaries.
+ * Unpaired left-curly marks do not open a quotation span.
  *
  * Ambiguous smart-single quotes after s-ending words close their span unless a
  * later unambiguous closer confirms a possessive. This conservative rule can

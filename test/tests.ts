@@ -1571,6 +1571,38 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['Class of ‘99', '‘Twas', '‘Tis'])(
+      'does not open an unmatched quotation for the elision %s',
+      (elision) => {
+        const first = `${elision} etc.`;
+        const input = `${first}\nNext sentence. ‘Another.’`;
+        const expected = [first, 'Next sentence.', '‘Another.’'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+        expect(ss(`${first}\nNext sentence.`)).toEqual(expected.slice(0, 2));
+      },
+    );
+
+    test('preserves a paired quotation starting with an abbreviated year', () => {
+      const input = 'She said ‘99 etc.\nMore notes.’';
+      const expected = ['She said ‘99 etc. More notes.’'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['‘Stop. ’', '‘(Stop.) ’'])(
+      'attaches a spaced closer before an unspaced sentence after %s',
+      (first) => {
+        const input = `${first}Next.`;
+        expect(ss(input)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+      },
+    );
+
     test.each(['Hawai‘i', 'don‘t', 'á‘b', '𝒜‘b'])(
       'does not open a quotation at a word-internal left apostrophe: %s',
       (word) => {
