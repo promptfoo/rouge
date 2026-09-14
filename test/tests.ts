@@ -1609,7 +1609,7 @@ describe('Utility Functions', () => {
       'retains an outer quotation around the leading elision %s',
       (elision) => {
         const input = `she said ‘use Acme Co.\n${elision} wisely.’`;
-        const expected = [input.replace('\n', ' ')];
+        const expected = [input.replaceAll('\n', ' ')];
         expect(ss(input)).toEqual(expected);
         expect(segmentCaseNeutrally(input)).toEqual(expected);
         expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
@@ -1620,7 +1620,7 @@ describe('Utility Functions', () => {
 
     test('retains a possessive candidate before a left-curly elision', () => {
       const input = 'she said ‘the students’ project uses Acme Co.\n‘99 materials.’';
-      const expected = [input.replace('\n', ' ')];
+      const expected = [input.replaceAll('\n', ' ')];
       expect(ss(input)).toEqual(expected);
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
@@ -1661,7 +1661,7 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
         expected.map((sentence) => sentence.toLowerCase()),
       );
-      expect(ss(input.replace('\n', ' '))).toEqual(expected);
+      expect(ss(input.replaceAll('\n', ' '))).toEqual(expected);
     });
 
     test.each(['‘Stop. ’', '‘(Stop.) ’'])(
