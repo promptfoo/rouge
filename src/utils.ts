@@ -77,7 +77,7 @@ export function treeBankTokenize(input: string): string[] {
 }
 
 function opensDoubleQuote(input: string, index: number, insideQuotes: boolean): boolean {
-  return !insideQuotes && (index === 0 || /[\s([{<”’]/.test(input[index - 1]));
+  return !insideQuotes && (index === 0 || /[\s([{<“‘”’]/.test(input[index - 1]));
 }
 
 function quotationState(input: string, index: number, insideQuotes: boolean): boolean {
@@ -121,6 +121,14 @@ function previousNonClosingIndex(input: string, index: number): number {
   return previous;
 }
 
+function isAlphabeticFootnote(input: string, index: number): boolean {
+  const following = characterAt(input, index + 1);
+  return (
+    following !== following.normalize('NFKC') &&
+    /^\p{Lm}(?:[.,;:!?]|$)/u.test(input.slice(index + 1, index + 5))
+  );
+}
+
 /**
  * Classify elisions and possessives once. Ambiguous s-ending quotes need a later
  * unambiguous closer; guessing the last candidate can join unrelated sentences.
@@ -156,6 +164,7 @@ function smartApostrophes(input: string): Uint8Array {
     if (
       (leadingElision && /\s/.test(input[index - 1] ?? '')) ||
       (/^[\p{Letter}\p{Mark}]$/u.test(following) &&
+        !isAlphabeticFootnote(input, index) &&
         (!afterTerminal || smartContractionReg.test(input.slice(index, index + 4)))) ||
       (/^\p{Number}$/u.test(following) &&
         !afterTerminal &&
@@ -226,7 +235,7 @@ const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b
 const sentenceContinuationReg =
   /^(?:and|or|but|nor|for|yet|so|at|in|on|of|to|from|with|by|as|then|because|while|after|before|although|though|since|unless|until|when|where|whether|if|once|whereas)\b/i;
 const independentSentenceReg =
-  /^(?:(?:i|we|he|she|they|you|it|who|what|why|how|which|whose|whom)\b|(?:do|does|did|is|are|was|were|has|have|had)\s+(?:i|we|he|she|they|you|it)\b|in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
+  /^(?:(?:i|we|he|she|they|you|it|who|what|why|how|which|whose|whom)\b|(?:do|does|did|is|are|was|were|has|have|had|can|could|will|would|shall|should|may|might|must)\s+(?:i|we|he|she|they|you|it)\b|in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
@@ -411,6 +420,8 @@ class SentenceBuffer {
  * including their ambiguity around quoted abbreviations and phrase boundaries.
  * Case-neutral mode can split dialogue tags because casing is not a boundary cue.
  * Names after wrapped abbreviations can be interpreted as quotation continuations.
+ * Adjacent numeric markers take citation precedence; numeric sentences need whitespace.
+ * Isolated modifier letters with compatibility forms can mark alphabetic footnotes.
  * Unpaired left-curly single marks do not open a quotation span; an unmatched
  * double opening quote keeps its span open.
  *
@@ -812,16 +823,13 @@ function sentenceEnd(
   ) {
     return index + 1;
   }
-  let end = closingDelimiterEnd(input, index, quotes);
-  const closesQuotation = insideQuotes && /(?:["”’]|'')$/.test(input.slice(end - 2, end));
-  if (closesQuotation) {
-    const citationStart = end;
-    while (/^\p{Number}$/u.test(characterAt(input, end))) {
-      end += characterAt(input, end).length;
-    }
-    if (end > citationStart && isCasedCharacter(characterAt(input, end))) {
-      return -1;
-    }
+  const delimiterEnd = closingDelimiterEnd(input, index, quotes);
+  const end = insideQuotes ? quotationCitationEnd(input, index, delimiterEnd) : delimiterEnd;
+  const hasCitation = end > delimiterEnd;
+  const closesQuotation =
+    insideQuotes && (hasCitation || /(?:["”’]|'')$/.test(input.slice(end - 2, end)));
+  if (hasCitation && isCasedCharacter(characterAt(input, end))) {
+    return -1;
   }
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
@@ -832,7 +840,8 @@ function sentenceEnd(
   if (
     closesQuotation &&
     openingBracketReg.test(input[continuation] ?? '') &&
-    abbrvReg.test(gateSuffix)
+    abbrvReg.test(gateSuffix) &&
+    !isIndependentParenthetical(input, continuation)
   ) {
     return -1;
   }
@@ -856,6 +865,26 @@ function sentenceEnd(
   }
 
   return sentenceEndAfterDelimiter(input, end, gateSuffix, closedBrackets, caseNeutral);
+}
+
+/** Attach numeric citations after a consumed quotation, including enclosing brackets. */
+function quotationCitationEnd(input: string, index: number, delimiterEnd: number): number {
+  let end = delimiterEnd;
+  if (!/(?:["”’]|'')[\s)\]}>]*$/.test(input.slice(index + 1, end))) {
+    return end;
+  }
+  while (/^\p{Number}$/u.test(characterAt(input, end))) {
+    end += characterAt(input, end).length;
+  }
+  return end;
+}
+
+function isIndependentParenthetical(input: string, index: number): boolean {
+  const contents = input.slice(index + 1);
+  return (
+    independentSentenceReg.test(contents.trimStart()) &&
+    /^[^()[\]{}<>]*[.!?]\s*[)\]}>]/.test(contents)
+  );
 }
 
 function sentenceEndAfterDelimiter(
