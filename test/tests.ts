@@ -1625,6 +1625,33 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test('does not borrow an unquoted possessive to classify a later year quotation', () => {
+      const first = 'The students’ work.';
+      const quotation = '‘99 etc.\nMore notes.’';
+      const input = `${first} ${quotation}`;
+      const expected = [first, quotation.replaceAll('\n', ' ')];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['’Twas', '’Tis', '’em', '’99'])(
+      'retains sentence-initial elision %s inside an outer smart quotation',
+      (elision) => {
+        const first = 'She said ‘First.';
+        const second = `${elision} Acme Co.\nInternational Holdings.’`;
+        const input = `${first} ${second} Next.`;
+        const expected = [first, second.replaceAll('\n', ' '), 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
     test('keeps a right-curly year elision inside a quotation after a word', () => {
       const first = 'She said ‘Use the ’90s style.';
       const second = 'Keep it.’';
@@ -1649,6 +1676,13 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
     });
 
+    test('keeps a possessive before punctuation inside a smart double quotation', () => {
+      const first = 'He said “the students’.”';
+      const input = `${first} Next.`;
+      expect(ss(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+    });
+
     test.each(['.', ',', ';', ':'])(
       'retains a quoted possessive before %s punctuation',
       (punctuation) => {
@@ -1669,15 +1703,43 @@ describe('Utility Functions', () => {
       ['“', '”'],
     ])('preserves independent sentences inside %s%s quotes across a wrap', (open, close) => {
       const first = `${open}I live in the U.S.`;
-      const second = `How about you?${close}`;
+      for (const question of ['How about you?', 'Was it useful?']) {
+        const second = `${question}${close}`;
+        const input = `${first}\n${second}`;
+        const expected = [first, second];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+        expect(ss(input.replaceAll('\n', ' '))).toEqual(expected);
+      }
+    });
+
+    test.each(['was founded in 1990.', 'is growing.', 'has expanded.'])(
+      'retains a quoted abbreviation wrap before the predicate %s',
+      (predicate) => {
+        const input = `She said “Acme Co.\n${predicate}”`;
+        const expected = [input.replaceAll('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('keeps the conservative name-led wrap rule inside an open quotation', () => {
+      const first = '‘I live in the U.S.';
+      const second = 'Bob moved away.’';
       const input = `${first}\n${second}`;
-      const expected = [first, second];
-      expect(ss(input)).toEqual(expected);
-      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      const joined = [`${first} ${second}`];
+      expect(ss(input)).toEqual(joined);
+      expect(segmentCaseNeutrally(input)).toEqual(joined);
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
-        expected.map((sentence) => sentence.toLowerCase()),
+        joined.map((sentence) => sentence.toLowerCase()),
       );
-      expect(ss(input.replaceAll('\n', ' '))).toEqual(expected);
+      expect(ss(`${first} ${second}`)).toEqual([first, second]);
     });
 
     test.each(['‘Stop. ’', '‘(Stop.) ’'])(
@@ -1768,8 +1830,33 @@ describe('Utility Functions', () => {
             expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
               expected.map((sentence) => sentence.toLowerCase()),
             );
+            const cited = `The result was ${open}Stop${terminal}${close}${citation}`;
+            expect(ss(`${cited} Next sentence.`)).toEqual([cited, 'Next sentence.']);
+            expect(segmentCaseNeutrally(`${cited} Next sentence.`)).toEqual([
+              cited,
+              'Next sentence.',
+            ]);
+            expect(segmentCaseNeutrally(`${cited} Next sentence.`.toLowerCase())).toEqual([
+              cited.toLowerCase(),
+              'next sentence.',
+            ]);
           }
         }
+      },
+    );
+
+    test('keeps a citation after a spaced smart closer with the quoted sentence', () => {
+      const first = 'She said ‘Stop. ’2';
+      expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+    });
+
+    test.each(['times', 'Times'])(
+      'keeps an unspaced numeric continuation before %s attached to a quote',
+      (word) => {
+        const input = `He repeated “Stop!”2${word}.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
       },
     );
 
@@ -1780,13 +1867,41 @@ describe('Utility Functions', () => {
           ['‘', '’'],
           ['“', '”'],
         ]) {
-          const input = `He works at ${open}Acme Co.${close}${continuation} today.`;
-          expect(ss(input)).toEqual([input]);
-          expect(segmentCaseNeutrally(input)).toEqual([input]);
-          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+          for (const separator of ['', ' ', '\t']) {
+            const input = `He works at ${open}Acme Co.${close}${separator}${continuation} today.`;
+            expect(ss(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+          }
         }
       },
     );
+
+    test.each(['He said [“Stop.”] Next.', 'The winner was (she said “Wow!”) Alice Smith.'])(
+      'keeps quote-inside-bracket heuristics consistent across quote styles: %s',
+      (input) => {
+        const straightQuotes = (text: string): string => text.replace(/[“”]/g, '"');
+        for (const caseNeutral of [false, true]) {
+          expect(ss(input, { caseNeutral }).map(straightQuotes)).toEqual(
+            ss(straightQuotes(input), { caseNeutral }),
+          );
+        }
+      },
+    );
+
+    test.each([
+      ["'", "'"],
+      ['‘', '’'],
+    ])('recognizes a neutral continuation-word start inside %s%s quotes', (open, close) => {
+      const first = 'He said "No."';
+      const second = `${open}and more work.${close}`;
+      const input = `${first} ${second}`;
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+    });
 
     test.each(['“Stop!” she shouted.', 'He asked “Why?” repeatedly.'])(
       'keeps dialogue-tag heuristics consistent across quote styles: %s',
@@ -1832,6 +1947,8 @@ describe('Utility Functions', () => {
       ['He said “Stop.”', '‘Next.’'],
       ['He said “Stop.”', '“Next.”'],
       ['He said ‘Stop.’', '(Next.)'],
+      ['He said ‘Stop.’', '"Next."'],
+      ['He said “Stop.”', '"Next."'],
     ])('separates %s from an adjacent delimited sentence', (first, second) => {
       const input = `${first}${second}`;
       const expected = [first, second];

@@ -77,7 +77,7 @@ export function treeBankTokenize(input: string): string[] {
 }
 
 function opensDoubleQuote(input: string, index: number, insideQuotes: boolean): boolean {
-  return !insideQuotes && (index === 0 || /[\s([{<]/.test(input[index - 1]));
+  return !insideQuotes && (index === 0 || /[\s([{<”’]/.test(input[index - 1]));
 }
 
 function quotationState(input: string, index: number, insideQuotes: boolean): boolean {
@@ -133,15 +133,17 @@ function smartApostrophes(input: string): Uint8Array {
   for (const quote of input.matchAll(/[‘’]/g)) {
     const index = quote.index;
     const following = characterAt(input, index + 1);
+    const leadingElision =
+      opening !== undefined &&
+      /^[‘’](?:(?:t(?:is|was)|em)\b|\p{Number}{2}(?!\p{Number}))/iu.test(
+        input.slice(index, index + 8),
+      );
     if (quote[0] === '‘') {
       // A left mark opens a span only after a compatible right mark pairs with it.
       apostrophes[index] = 1;
-      const wordInternal =
-        /[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
-        /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following);
-      const leadingElision =
-        (opening !== undefined || candidateStart !== undefined) &&
-        /^‘(?:(?:t(?:is|was)|em)\b|\p{Number})/iu.test(input.slice(index, index + 6));
+      const wordInternal = /[\p{Letter}\p{Mark}\p{Number}]‘[\p{Letter}\p{Mark}\p{Number}]/u.test(
+        input.slice(Math.max(0, index - 2), index + 3),
+      );
       if (!(wordInternal || leadingElision)) {
         opening = index;
         candidateStart = undefined;
@@ -152,6 +154,7 @@ function smartApostrophes(input: string): Uint8Array {
     const previous = previousNonClosingIndex(input, index);
     const afterTerminal = /[.!?]/.test(input[previous] ?? '');
     if (
+      (leadingElision && /\s/.test(input[index - 1] ?? '')) ||
       (/^[\p{Letter}\p{Mark}]$/u.test(following) &&
         (!afterTerminal || smartContractionReg.test(input.slice(index, index + 4)))) ||
       (/^\p{Number}$/u.test(following) &&
@@ -168,7 +171,6 @@ function smartApostrophes(input: string): Uint8Array {
 
     if (opening !== undefined) {
       apostrophes[opening] = 0;
-      opening = undefined;
     }
     if (
       /(?:s|\p{Number}|\p{Letter}\.\p{Letter}\.)$/iu.test(
@@ -176,10 +178,13 @@ function smartApostrophes(input: string): Uint8Array {
       )
     ) {
       candidateStart ??= index;
-    } else if (candidateStart !== undefined) {
-      apostrophes.fill(1, candidateStart, index);
-      candidateStart = undefined;
+      continue;
     }
+    if (candidateStart !== undefined) {
+      apostrophes.fill(1, candidateStart, index);
+    }
+    candidateStart = undefined;
+    opening = undefined;
   }
   return apostrophes;
 }
@@ -221,7 +226,7 @@ const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b
 const sentenceContinuationReg =
   /^(?:and|or|but|nor|for|yet|so|at|in|on|of|to|from|with|by|as|then|because|while|after|before|although|though|since|unless|until|when|where|whether|if|once|whereas)\b/i;
 const independentSentenceReg =
-  /^(?:(?:i|we|he|she|they|you|it|who|what|why|how|which|whose|whom|do|does|did|is|are|was|were|has|have|had)\b|in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
+  /^(?:(?:i|we|he|she|they|you|it|who|what|why|how|which|whose|whom)\b|(?:do|does|did|is|are|was|were|has|have|had)\s+(?:i|we|he|she|they|you|it)\b|in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
@@ -405,6 +410,7 @@ class SentenceBuffer {
  * Typographic double quotes use the existing straight-quote boundary heuristics,
  * including their ambiguity around quoted abbreviations and phrase boundaries.
  * Case-neutral mode can split dialogue tags because casing is not a boundary cue.
+ * Names after wrapped abbreviations can be interpreted as quotation continuations.
  * Unpaired left-curly single marks do not open a quotation span; an unmatched
  * double opening quote keeps its span open.
  *
@@ -759,6 +765,7 @@ function closingDelimiterEnd(input: string, index: number, quotes: QuoteState): 
   while (end < input.length) {
     if (
       closingDelimiterReg.test(input[end]) &&
+      (input[end] !== '"' || doublePending) &&
       (input[end] !== '’' || (singlePending && quotes.apostrophes[end] !== 1))
     ) {
       doublePending &&= input[end] !== '"';
@@ -805,14 +812,27 @@ function sentenceEnd(
   ) {
     return index + 1;
   }
-  const end = closingDelimiterEnd(input, index, quotes);
+  let end = closingDelimiterEnd(input, index, quotes);
   const closesQuotation = insideQuotes && /(?:["”’]|'')$/.test(input.slice(end - 2, end));
+  if (closesQuotation) {
+    const citationStart = end;
+    while (/^\p{Number}$/u.test(characterAt(input, end))) {
+      end += characterAt(input, end).length;
+    }
+    if (end > citationStart && isCasedCharacter(characterAt(input, end))) {
+      return -1;
+    }
+  }
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  let continuation = end;
+  while (continuation < input.length && /\s/.test(input[continuation])) {
+    continuation++;
+  }
   if (
     closesQuotation &&
-    (/^\p{Number}$/u.test(characterAt(input, end)) ||
-      (openingBracketReg.test(input[end] ?? '') && abbrvReg.test(gateSuffix)))
+    openingBracketReg.test(input[continuation] ?? '') &&
+    abbrvReg.test(gateSuffix)
   ) {
     return -1;
   }
@@ -974,7 +994,7 @@ function isNeutralSentenceStart(input: string, previousEnd: number, next: number
   return (
     !sentenceContinuationReg.test(continuation) ||
     independentSentenceReg.test(continuation) ||
-    /["“‘]/.test(input.slice(previousEnd, next))
+    /["'“‘]/.test(input.slice(previousEnd, next))
   );
 }
 
