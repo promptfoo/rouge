@@ -529,13 +529,19 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   let insideQuotes = false;
   const brackets = { depth: 0, standalone: false };
   const { apostrophes, overflowed } = citationApostrophes(input);
-  const citationQuotes: CitationQuotationState = { closers: [], overflowed };
+  const citationQuotes: CitationQuotationState = {
+    closers: [],
+    overflowed,
+    doubleDepth: -1,
+    pairThrough: 0,
+  };
   const isPathOrAddress = pathOrAddressTokenChecker(input);
   const isNumericContinuation = numericContinuationChecker(input);
   let citationThrough = 0;
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
+    const previousQuotes = insideQuotes;
     insideQuotes = quotationState(input, index, insideQuotes);
     updateCitationQuotationState(
       input,
@@ -543,6 +549,8 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       citationQuotes,
       apostrophes,
       index < citationThrough,
+      previousQuotes,
+      insideQuotes,
     );
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
@@ -800,6 +808,8 @@ function confirmCurlyCitationCandidates(
 interface CitationQuotationState {
   closers: string[];
   overflowed: boolean;
+  doubleDepth: number;
+  pairThrough: number;
 }
 
 function updateCitationQuotationState(
@@ -808,16 +818,19 @@ function updateCitationQuotationState(
   quotes: CitationQuotationState,
   apostrophes: Uint8Array,
   confirmedClosing: boolean,
+  previousQuotes: boolean,
+  insideQuotes: boolean,
 ): void {
-  if (quotes.overflowed) {
+  if (
+    quotes.overflowed ||
+    updateCitationDoubleQuote(input, index, quotes, previousQuotes, insideQuotes)
+  ) {
     return;
   }
   const character = input[index];
   const closers = quotes.closers;
-  if (
-    ((character === '‘' || character === '’') && (apostrophes[index] & 1) !== 0) ||
-    (character === "'" && (apostrophes[index] & 2) !== 0)
-  ) {
+  const apostropheFlag = character === "'" ? 2 : 1;
+  if (/['‘’]/.test(character) && (apostrophes[index] & apostropheFlag) !== 0) {
     return;
   }
   if (character === '“' || character === '‘') {
@@ -852,9 +865,46 @@ function updateCitationQuotationState(
     }
     return;
   }
-  if ((previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) && /\S/.test(following)) {
+  const afterTreebankOpening = quotes.doubleDepth >= 0 && index === quotes.pairThrough;
+  const opensSingle = afterTreebankOpening || /^[\s\p{Punctuation}]?$/u.test(previous);
+  if (opensSingle && /\S/.test(following)) {
     pushCitationQuotation(quotes, "'");
   }
+}
+
+/** Keep the double family's position relative to the bounded single/smart stack. */
+function updateCitationDoubleQuote(
+  input: string,
+  index: number,
+  quotes: CitationQuotationState,
+  previousQuotes: boolean,
+  insideQuotes: boolean,
+): boolean {
+  if (index < quotes.pairThrough) {
+    return true;
+  }
+  if (input[index] === '"') {
+    quotes.doubleDepth = !previousQuotes && insideQuotes ? quotes.closers.length : -1;
+    return true;
+  }
+  if (
+    quotes.doubleDepth >= 0 &&
+    quotes.closers.length <= quotes.doubleDepth &&
+    input.startsWith("''", index)
+  ) {
+    quotes.doubleDepth = -1;
+    quotes.pairThrough = index + 2;
+    return true;
+  }
+  if (
+    input.startsWith('``', index) ||
+    (!previousQuotes && insideQuotes && input.startsWith("''", index))
+  ) {
+    quotes.doubleDepth = quotes.closers.length;
+    quotes.pairThrough = index + 2;
+    return true;
+  }
+  return false;
 }
 
 function pushCitationQuotation(quotes: CitationQuotationState, closing: string): void {
@@ -1027,7 +1077,13 @@ function citationEnd(
   }
 
   const pendingClosers = [...quotationQuotes.closers];
-  const delimiterEnd = citationDelimiterEnd(input, index, insideQuotes, pendingClosers);
+  const delimiterEnd = citationDelimiterEnd(
+    input,
+    index,
+    insideQuotes,
+    pendingClosers,
+    quotationQuotes.doubleDepth,
+  );
   let citationStart = delimiterEnd;
   while (citationStart < input.length && /[^\S\r\n]/.test(input[citationStart])) {
     citationStart++;
@@ -1054,10 +1110,18 @@ function citationEnd(
     contentEnd - 1,
     insideQuotes && !closedQuote,
     pendingClosers,
+    quotationQuotes.doubleDepth,
     true,
   );
   const closing = leadingClosers + input.slice(contentEnd, end);
-  if (!closesCitationQuotations(closing, insideQuotes, quotationQuotes.closers)) {
+  if (
+    !closesCitationQuotations(
+      closing,
+      insideQuotes,
+      quotationQuotes.closers,
+      quotationQuotes.doubleDepth,
+    )
+  ) {
     return undefined;
   }
   const closedBrackets =
@@ -1183,10 +1247,11 @@ function citationDelimiterEnd(
   index: number,
   insideQuotes: boolean,
   pending: string[],
+  doubleDepth: number,
   preserveOpeners = false,
 ): number {
   let end = index + 1;
-  const state = { doublePending: insideQuotes, pending, preserveOpeners };
+  const state = { doublePending: insideQuotes, doubleDepth, pending, preserveOpeners };
   for (;;) {
     const nextEnd = closingDelimiterEnd(input, end - 1, state.doublePending);
     const consumed = advanceCitationClosers(input, end, nextEnd, state);
@@ -1197,6 +1262,15 @@ function citationDelimiterEnd(
     let next = end;
     while (next < input.length && /\s/.test(input[next])) {
       next++;
+    }
+    if (
+      next > end &&
+      state.doublePending &&
+      pending.length <= state.doubleDepth &&
+      input.startsWith("''", next)
+    ) {
+      end = next;
+      continue;
     }
     if (next > end && input[next] !== pending.at(-1)) {
       return end;
@@ -1215,7 +1289,12 @@ function advanceCitationClosers(
   input: string,
   start: number,
   end: number,
-  state: { doublePending: boolean; pending: string[]; preserveOpeners: boolean },
+  state: {
+    doublePending: boolean;
+    doubleDepth: number;
+    pending: string[];
+    preserveOpeners: boolean;
+  },
 ): number {
   for (let position = start; position < end; position++) {
     if (
@@ -1225,6 +1304,15 @@ function advanceCitationClosers(
       input[position] !== state.pending.at(-1)
     ) {
       return position;
+    }
+    if (
+      state.doublePending &&
+      state.pending.length <= state.doubleDepth &&
+      input.startsWith("''", position)
+    ) {
+      state.doublePending = false;
+      position++;
+      continue;
     }
     if (input[position] === state.pending.at(-1)) {
       state.pending.pop();
@@ -1244,12 +1332,21 @@ function closesCitationQuotations(
   closing: string,
   insideQuotes: boolean,
   quotationClosers: readonly string[],
+  doubleDepth: number,
 ): boolean {
   let doublePending = insideQuotes;
   let remaining = quotationClosers.length;
   for (let index = 0; index < closing.length; index++) {
     const character = closing[index];
-    if (remaining > 0 && character === quotationClosers[remaining - 1]) {
+    if (
+      doublePending &&
+      remaining <= doubleDepth &&
+      character === "'" &&
+      closing[index + 1] === "'"
+    ) {
+      doublePending = false;
+      index++;
+    } else if (remaining > 0 && character === quotationClosers[remaining - 1]) {
       remaining--;
     } else if (doublePending && character === '"') {
       doublePending = false;

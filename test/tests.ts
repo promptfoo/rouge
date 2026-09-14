@@ -711,6 +711,37 @@ describe('Utility Functions', () => {
       );
     });
 
+    test.each([
+      "He said '``Alpha.''[1]'",
+      "He said ``'Alpha.'[1]''",
+      "He said '``Alpha.'''[1]",
+      "He said ``'Alpha.'''[1]",
+      "He said '``Alpha.''[1] '",
+      "He said ``'Alpha.'[1] ''",
+      "He said '``Alpha. ''[1]'",
+      "He said ``'Alpha. '[1]''",
+      "He said ``'Alpha.' ''[1]",
+    ])('retains mixed single/Treebank closer order around citations: %s', (first) => {
+      for (const segment of [ss, segmentCaseNeutrally]) {
+        expect(segment(first)).toEqual([first]);
+        for (const tail of [' Beta.', "'Beta.'", ' “Beta.”']) {
+          expect(segment(first + tail)).toEqual([first, tail.trim()]);
+        }
+      }
+      expect(segmentCaseNeutrally(`${first} Beta.`.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        'beta.',
+      ]);
+    });
+
+    test.each(["He said '``Alpha.'''", "He said ``'Alpha.'''"])(
+      'preserves uncited mixed quotation closure: %s',
+      (first) => {
+        expect(ss(`${first} Beta.`)).toEqual([first, 'Beta.']);
+        expect(segmentCaseNeutrally(`${first} Beta.`)).toEqual([first, 'Beta.']);
+      },
+    );
+
     test('makes the attached bare-citation ambiguity explicit across casing modes', () => {
       const input = 'Stop!2 people stayed.';
       expect(ss(input)).toEqual(['Stop!', '2 people stayed.']);
