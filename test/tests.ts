@@ -1552,6 +1552,44 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
     });
 
+    test.each([
+      ['The company is “Acme Co.”', 'It closed yesterday.'],
+      ['He lives in the “U.S.”', 'How about you?'],
+      ['The company is ‘Acme Co.’', 'It closed yesterday.'],
+      ['He lives in the ‘U.S.’', 'How about you?'],
+    ])('retains a sentence after the quoted abbreviation in %s', (first, second) => {
+      const input = `${first} ${second}`;
+      const expected = [first, second];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['()', '[]', '{}', '<>'])(
+      'retains an unspaced sentence after bracketed smart quotation %s',
+      (brackets) => {
+        const first = `He said ‘${brackets[0]}Stop.${brackets[1]}’`;
+        const input = `${first}Next.`;
+        const expected = [first, 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+      },
+    );
+
+    test.each(['(significant)', '(significant.)'])(
+      'closes a bracketed smart quotation %s before a citation',
+      (quotation) => {
+        const first = `The result was ‘${quotation}’².`;
+        const input = `${first} We use Acme Co.\nNext.`;
+        const expected = [first, 'We use Acme Co.', 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
     test.each(['2', '²', '𝟚'])(
       'closes a punctuation-ending smart quotation before citation %s',
       (citation) => {

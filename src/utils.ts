@@ -112,6 +112,15 @@ function singleQuotationState(
   return insideQuotes && (input[index] !== '’' || apostrophes[index] === 1);
 }
 
+function previousNonClosingIndex(input: string, index: number): number {
+  let previous = index - 1;
+  // Stop at another single quote so adjacent candidates never rescan the same span.
+  while (previous >= 0 && /[\])}>"”]/.test(input[previous])) {
+    previous--;
+  }
+  return previous;
+}
+
 /**
  * Classify elisions and possessives once. Ambiguous s-ending quotes need a later
  * unambiguous closer; guessing the last candidate can join unrelated sentences.
@@ -122,14 +131,18 @@ function smartApostrophes(input: string): Uint8Array {
   let candidateStart: number | undefined;
   for (const quote of input.matchAll(/[‘’]/g)) {
     const index = quote.index;
+    const previous = previousNonClosingIndex(input, index);
+    const afterTerminal = /[.!?]/.test(input[previous] ?? '');
     if (quote[0] === '‘') {
       candidateStart = undefined;
     } else if (
       (/^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1)) &&
-        (!/[.!?]/.test(input[index - 1] ?? '') ||
-          smartContractionReg.test(input.slice(index, index + 4)))) ||
+        (!afterTerminal || smartContractionReg.test(input.slice(index, index + 4)))) ||
       (/^\p{Number}$/u.test(characterAt(input, index + 1)) &&
-        !/[\p{Letter}\p{Mark}\p{Number}.!?]$/u.test(input.slice(Math.max(0, index - 2), index))) ||
+        !afterTerminal &&
+        !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
+          input.slice(Math.max(0, previous - 1), previous + 1),
+        )) ||
       input.slice(index - 2, index).toLowerCase() === '’n'
     ) {
       apostrophes[index] = 1;
@@ -186,7 +199,7 @@ const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b
 const sentenceContinuationReg =
   /^(?:and|or|but|nor|for|yet|so|at|in|on|of|to|from|with|by|as|then|because|while|after|before|although|though|since|unless|until|when|where|whether|if|once|whereas)\b/i;
 const independentSentenceReg =
-  /^(?:in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
+  /^(?:(?:i|we|he|she|they|you|it|what|who|why|how)\b|in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
@@ -767,8 +780,13 @@ function sentenceEnd(
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const abbreviation = abbrvReg.test(gateSuffix);
-  // Quoting an abbreviation does not make its period a sentence boundary.
-  if (input[index] === '.' && /[”’]/.test(input[end - 1]) && abbreviation) {
+  // Preserve quoted names unless the following text clearly starts another sentence.
+  if (
+    input[index] === '.' &&
+    /[”’]/.test(input[end - 1]) &&
+    abbreviation &&
+    !independentSentenceReg.test(input.slice(end).replace(/^[\s"'“‘’([{<]+/, ''))
+  ) {
     return -1;
   }
   if (end < input.length && !/\s/.test(input[end])) {
