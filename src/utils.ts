@@ -132,7 +132,7 @@ const independentSentenceReg =
 interface SingleQuoteSource {
   input: string;
   index: number;
-  possessives: Set<number>;
+  possessives: Uint8Array;
 }
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
@@ -253,7 +253,7 @@ class SentenceBuffer {
         previous.toLowerCase() === 's' &&
         /\s/.test(following) &&
         (this.#caseNeutral
-          ? source.possessives.has(source.index - 1)
+          ? source.possessives[source.index - 1] === 1
           : /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(continuation));
       this.#insideSingleQuotes =
         possessive || (following.length > 0 && !/[\s.,!?;:)\]}]/.test(following));
@@ -301,29 +301,33 @@ class SentenceBuffer {
 
 // A spaced s' is ambiguous. Keep it open only when an unambiguous closer follows.
 // Classify all candidates once so repeated possessives do not repeat lookahead.
-function possessiveQuotePositions(input: string): Set<number> {
-  const possessives = new Set<number>();
+function possessiveQuotePositions(input: string): Uint8Array {
+  // One byte per code unit avoids per-apostrophe arrays and hash-table overhead.
+  const possessives = new Uint8Array(input.length);
   const ellipses = spacedEllipsisRanges(input, true);
   const ellipsisCursor = { index: 0 };
-  let candidates: number[] = [];
+  let candidateStart: number | undefined;
   for (const boundary of input.matchAll(/['.!?]/g)) {
     const index = boundary.index;
     if (boundary[0] !== "'") {
-      if (candidates.length > 0 && !isQuoteContinuation(input, index, ellipses, ellipsisCursor)) {
-        candidates = [];
+      if (
+        candidateStart !== undefined &&
+        !isQuoteContinuation(input, index, ellipses, ellipsisCursor)
+      ) {
+        candidateStart = undefined;
       }
       continue;
     }
     const following = input[index + 1] ?? '';
     if ((index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1])) && /\S/.test(following)) {
-      candidates = [];
+      candidateStart = undefined;
     } else if (input[index - 1]?.toLowerCase() === 's' && /\s/.test(following)) {
-      candidates.push(index);
+      candidateStart ??= index;
     } else if (following.length === 0 || /[\s.,!?;:)\]}]/.test(following)) {
-      for (const candidate of candidates) {
-        possessives.add(candidate);
+      if (candidateStart !== undefined) {
+        possessives.fill(1, candidateStart, index);
       }
-      candidates = [];
+      candidateStart = undefined;
     }
   }
   return possessives;
@@ -381,7 +385,7 @@ export function sentenceSegment(
   const quoteSource = {
     input: source,
     index: 0,
-    possessives: caseNeutral ? possessiveQuotePositions(source) : new Set<number>(),
+    possessives: caseNeutral ? possessiveQuotePositions(source) : new Uint8Array(),
   };
   let pending: SentenceBuffer | undefined;
   for (let idx = 0; idx < chunks.length; idx++) {

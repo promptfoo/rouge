@@ -1050,6 +1050,21 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual([input.replaceAll('\n', ' ')]);
     });
 
+    test('classifies a million possessives within a small heap', () => {
+      expectBundledScriptToPass(
+        `
+          const input = "A '" + "s' ".repeat(1050000) + "x'.";
+          const sentences = module.exports.sentenceSegment(input, { caseNeutral: true });
+          if (sentences.length !== 1 || sentences[0] !== input) {
+            throw new Error('Possessive segmentation changed');
+          }
+          process.stdout.write('ok');
+        `,
+        15_000,
+        ['--max-old-space-size=64'],
+      );
+    }, 20_000);
+
     test('uses conservative quote pairing when both closing candidates end in s', () => {
       const input = "She reviewed 'the students' Acme Co.\nInternational Success' today.";
       const expected = ["She reviewed 'the students' Acme Co.", "International Success' today."];
