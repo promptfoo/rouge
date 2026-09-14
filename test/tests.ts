@@ -1163,6 +1163,78 @@ describe('Utility Functions', () => {
     });
 
     test.each([
+      [
+        'She said “She called it ‘No.’ Alice left.” Next.',
+        ['She said “She called it ‘No.’ Alice left.”', 'Next.'],
+      ],
+      ['“Stop!” Alice said softly. Next.', ['“Stop!” Alice said softly.', 'Next.']],
+      ['“Stop!” Alice asked him. Next.', ['“Stop!” Alice asked him.', 'Next.']],
+      [
+        'She said ‘The dogs’ toys are here. Take them.’ Next.',
+        ['She said ‘The dogs’ toys are here. Take them.’', 'Next.'],
+      ],
+      [
+        "She said 'Til tomorrow. We can wait.' Next.",
+        ["She said 'Til tomorrow. We can wait.'", 'Next.'],
+      ],
+    ])('preserves reviewed quotation boundaries: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      'She said ‘He answered “No.” Alice left.’',
+      'She said „She called it ‘No.’ Alice left.“',
+      'She said “He answered ‘No.’ ”',
+      'She said ‘The students’.’',
+      'She said ‘John‘s toy broke. Take it.’',
+      'She said ‘Use the 1990s’ style. Keep it.’',
+      'She said ‘Use the ’90s style. Keep it.’',
+      'She said ‘Rock ’n’ roll. Dance.’',
+      'She said ‘That U.S.’s policy changed. Go.’',
+      'She said ‘Use Acme Co. ‘Twas wisely.’',
+      'She said ‘Use Acme Co. ‘em wisely.’',
+      'She said ‘Use Acme Co. ‘90s style.’',
+      "She said 'Tis the season. We can wait.'",
+      "She said '99 was good. We can wait.'",
+      '“Stop!” Alice asked him quietly.',
+      '“Stop!” Alice said softly.',
+    ])('retains paired single-quote context in %s', (quoted) => {
+      expect(ss(`${quoted} Next.`)).toEqual([quoted, 'Next.']);
+      expect(segmentCaseNeutrally(`${quoted} Next.`)).toEqual([quoted, 'Next.']);
+    });
+
+    test.each([
+      [
+        "She said 'Til tomorrow.\nWe can wait.' Next.",
+        ["She said 'Til tomorrow.", "We can wait.'", 'Next.'],
+      ],
+      [
+        'She said ‘The dogs’ toys are here.\nTake them.’ Next.',
+        ['She said ‘The dogs’ toys are here.', 'Take them.’', 'Next.'],
+      ],
+      [
+        'She said ‘use Acme Co.\n‘Twas wisely.’ Next.',
+        ['She said ‘use Acme Co. ‘Twas wisely.’', 'Next.'],
+      ],
+      ['‘Twas late. We left.', ['‘Twas late.', 'We left.']],
+      ['It happened in ’99. Next event.', ['It happened in ’99.', 'Next event.']],
+      ["'Til tomorrow. It's fine.", ["'Til tomorrow.", "It's fine."]],
+      ["'Tis fine. She said 'Hello.' Next.", ["'Tis fine.", "She said 'Hello.'", 'Next.']],
+      ['The result was ‘(significant)’². Next.', ['The result was ‘(significant)’².', 'Next.']],
+    ])('shares quote classification across sentence buffers: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('pairs elision quotations before Unicode next-line separators', () => {
+      const input = "She said 'Til tomorrow. We can wait.'\u0085Next.";
+      const expected = ["She said 'Til tomorrow. We can wait.'", 'Next.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
       "She said 'First! Second!' aloud.",
       'She said "First! Second!" aloud.',
       "'Well?' she thought, 'First! Second!' aloud.",
