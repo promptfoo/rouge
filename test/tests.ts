@@ -1807,6 +1807,18 @@ describe('Utility Functions', () => {
         expect(elapsed).toBeLessThan(TIMEOUT_MS);
       });
 
+      test('scans repeated quoted abbreviations before a question once', () => {
+        expectBundledScriptToPass(
+          `
+            const input = '"Dr." Is Dr. '.repeat(20000) + 'Ready?';
+            const sentences = module.exports.sentenceSegment(input);
+            if (sentences.join(' ') !== input) throw new Error('Quotation content changed');
+            process.stdout.write('ok');
+          `,
+          5000,
+        );
+      }, 10_000);
+
       test('should handle many consecutive exclamation marks quickly', () => {
         // Specifically tests CodeQL alert #1 scenario
         const input = `${'!'.repeat(10_000)}`;

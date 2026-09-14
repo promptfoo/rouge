@@ -757,6 +757,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
   const chunks: string[] = [];
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
+  const questionTerminal = questionTerminalChecker(input);
   let lastEnd = 0;
   let start = -1;
   let insideQuotes = false;
@@ -797,7 +798,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
       char === '!'
     ) {
       const closingQuotes = closingQuotationMarks(insideQuotes, quotations);
-      const end = sentenceEnd(input, index, closingQuotes, brackets, caseNeutral);
+      const end = sentenceEnd(input, index, closingQuotes, brackets, caseNeutral, questionTerminal);
       if (end === -1 || remainsInsideNestedQuotation(input, index, end, closingQuotes)) {
         continue;
       }
@@ -902,6 +903,7 @@ function sentenceEnd(
   closingQuotes: string,
   brackets: { depth: number; standalone: boolean },
   caseNeutral: boolean,
+  questionTerminal: (start: number) => boolean,
 ): number {
   const insideQuotes = closingQuotes.length > 0;
   if (
@@ -939,7 +941,7 @@ function sentenceEnd(
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const continuation = input.slice(next);
-  if (isDialogueAttribution(continuation, closesQuotation)) {
+  if (isDialogueAttribution(continuation, closesQuotation, questionTerminal, next)) {
     return -1;
   }
   const nextCharacter = characterAt(input, next);
@@ -958,13 +960,18 @@ function sentenceEnd(
   return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
 }
 
-function isDialogueAttribution(input: string, closesQuotation: boolean): boolean {
+function isDialogueAttribution(
+  input: string,
+  closesQuotation: boolean,
+  questionTerminal: (start: number) => boolean,
+  start: number,
+): boolean {
   if (
     !closesQuotation ||
     (/^(?:am|is|are|was|were|be|been|being|has|have|had|will|would|can|could|should|must)\b/i.test(
       input,
     ) &&
-      hasQuestionTerminal(input))
+      questionTerminal(start))
   ) {
     return false;
   }
@@ -981,21 +988,37 @@ function isDialogueAttribution(input: string, closesQuotation: boolean): boolean
   );
 }
 
-function hasQuestionTerminal(input: string): boolean {
-  for (const terminal of input.matchAll(/[.!?\r\n]/g)) {
-    if (terminal[0] !== '.') {
-      return terminal[0] === '?';
+/** Reuse the next real terminal across monotone quotation-boundary lookaheads. */
+function questionTerminalChecker(input: string): (start: number) => boolean {
+  const terminals = /[.!?\r\n]/g;
+  let through = -1;
+  let question = false;
+  return (start) => {
+    if (start <= through) {
+      return question;
     }
-    const suffix = input.slice(
-      Math.max(0, terminal.index + 1 - sentenceSuffixLength),
-      terminal.index + 1,
-    );
-    const lastWord = suffix.match(/\S+$/)?.[0] ?? '';
-    if (!(abbrvReg.test(suffix) || matchesAcronymSuffix(suffix, lastWord, true))) {
-      return false;
+    terminals.lastIndex = start;
+    through = input.length;
+    question = false;
+    let terminal = terminals.exec(input);
+    while (terminal !== null) {
+      const suffix = input.slice(
+        Math.max(0, terminal.index + 1 - sentenceSuffixLength),
+        terminal.index + 1,
+      );
+      const lastWord = suffix.match(/\S+$/)?.[0] ?? '';
+      if (
+        terminal[0] !== '.' ||
+        !(abbrvReg.test(suffix) || matchesAcronymSuffix(suffix, lastWord, true))
+      ) {
+        through = terminal.index;
+        question = terminal[0] === '?';
+        break;
+      }
+      terminal = terminals.exec(input);
     }
-  }
-  return false;
+    return question;
+  };
 }
 
 function standaloneTerminalEnd(input: string, end: number, insideQuotes: boolean): number {
