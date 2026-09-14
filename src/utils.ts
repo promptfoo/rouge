@@ -156,9 +156,10 @@ function smartApostrophes(input: string): Uint8Array {
         (!afterTerminal || smartContractionReg.test(input.slice(index, index + 4)))) ||
       (/^\p{Number}$/u.test(following) &&
         !afterTerminal &&
-        !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
-          input.slice(Math.max(0, previous - 1), previous + 1),
-        )) ||
+        (/\s/.test(input[index - 1] ?? '') ||
+          !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
+            input.slice(Math.max(0, previous - 1), previous + 1),
+          ))) ||
       input.slice(index - 2, index).toLowerCase() === '’n'
     ) {
       apostrophes[index] = 1;
@@ -170,8 +171,9 @@ function smartApostrophes(input: string): Uint8Array {
       opening = undefined;
     }
     if (
-      /(?:s|\p{Number})$/iu.test(input.slice(Math.max(0, index - 2), index)) ||
-      /\p{Letter}\.\p{Letter}\.$/u.test(input.slice(Math.max(0, index - 8), index))
+      /(?:s|\p{Number}|\p{Letter}\.\p{Letter}\.)$/iu.test(
+        input.slice(Math.max(0, index - 8), index),
+      )
     ) {
       candidateStart ??= index;
     } else if (candidateStart !== undefined) {

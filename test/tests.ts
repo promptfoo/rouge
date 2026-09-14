@@ -1625,6 +1625,22 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test('keeps a right-curly year elision inside a quotation after a word', () => {
+      const first = 'She said ‘Use the ’90s style.';
+      const second = 'Keep it.’';
+      const input = `${first} ${second} Next.`;
+      const expected = [first, second, 'Next.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+      const wrapped = 'She said ‘Use the ’90s Acme Co.\nInternational style.’ Next.';
+      const joined = ['She said ‘Use the ’90s Acme Co. International style.’', 'Next.'];
+      expect(ss(wrapped)).toEqual(joined);
+      expect(segmentCaseNeutrally(wrapped)).toEqual(joined);
+    });
+
     test('attaches the outer closer after a possessive followed by a period', () => {
       const first = 'She said ‘the students’.’';
       const input = `${first} Next.`;
