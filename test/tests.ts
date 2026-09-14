@@ -675,11 +675,21 @@ describe('Utility Functions', () => {
       ],
       ['Alpha.1 2 people remained.', ['Alpha.1', '2 people remained.']],
       ['Alpha.1 Beta.', ['Alpha.1', 'Beta.']],
+      [
+        'The Hawai‘i report found improvement.[1] Next.',
+        ['The Hawai‘i report found improvement.[1]', 'Next.'],
+      ],
+      [
+        'The 𝒜‘s report found improvement.[1] Next.',
+        ['The 𝒜‘s report found improvement.[1]', 'Next.'],
+      ],
       ['A conclusion (1987).1 The next sentence.', ['A conclusion (1987).1', 'The next sentence.']],
       ['Text𐐀.1 Next.', ['Text𐐀.1', 'Next.']],
       ['He said "Alpha.[1]" Beta.', ['He said "Alpha.[1]"', 'Beta.']],
       ['He said "Alpha."[1] Beta.', ['He said "Alpha."[1]', 'Beta.']],
       ['(Alpha.)[1] Beta.', ['(Alpha.)[1]', 'Beta.']],
+      ['(Alpha.[1]) Beta.', ['(Alpha.[1])', 'Beta.']],
+      ['He said "(Alpha.)"[1] Beta.', ['He said "(Alpha.)"[1]', 'Beta.']],
       ['“Alpha.[1]” Beta.', ['“Alpha.[1]”', 'Beta.']],
       ['«Alpha.[1]» Beta.', ['«Alpha.[1]»', 'Beta.']],
       ['Alpha.[1] “Beta.”', ['Alpha.[1]', '“Beta.”']],
@@ -690,6 +700,8 @@ describe('Utility Functions', () => {
       ['Alpha.[1] 2 people remained.', ['Alpha.[1]', '2 people remained.']],
       ['Really?[1] Next sentence.', ['Really?[1]', 'Next sentence.']],
       ['Really?1 Next sentence.', ['Really?1', 'Next sentence.']],
+      ['Really?!1 Next sentence.', ['Really?!1', 'Next sentence.']],
+      ['Really!?!2 Next sentence.', ['Really!?!2', 'Next sentence.']],
       ['Great![1] Next sentence.', ['Great![1]', 'Next sentence.']],
     ])('keeps numeric citation suffixes with sentence boundaries in %s', (input, expected) => {
       expect(ss(input)).toEqual(expected);
@@ -733,13 +745,16 @@ describe('Utility Functions', () => {
       },
     );
 
-    test.each(['See ABC2.1 Introduction.', 'See ABC_D.1 Introduction.'])(
-      'preserves identifiers with structural evidence in neutral mode: %s',
-      (input) => {
-        expect(segmentCaseNeutrally(input)).toEqual([input]);
-        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
-      },
-    );
+    test.each([
+      'See ABC2.1 Introduction.',
+      'See ABC_D.1 Introduction.',
+      'See abc2d.1 Introduction.',
+      'See abc_d.1 Introduction.',
+    ])('preserves identifiers with structural evidence in both modes: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
 
     test.each([
       'She said "Alpha.[1] Beta." aloud.',
@@ -790,6 +805,37 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each(['[1]', '(1)', '1', '𝟚'])(
+      'synchronizes a closing ASCII quote before citation %s',
+      (citation) => {
+        const input = `He said 'Alpha.'${citation} Next. Gamma.[2] Delta.`;
+        const expected = [`He said 'Alpha.'${citation}`, 'Next.', 'Gamma.[2]', 'Delta.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test('does not read a number in an adjacent quotation as a citation', () => {
+      const input = 'He said "Alpha.""2 people agreed."';
+      // Adjacent quotation segmentation retains the existing generic scanner behavior.
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test('does not absorb a spaced list marker after an explicit citation', () => {
+      const input = 'Alpha.[1] (2) Beta. (3) Gamma.';
+      const expected = ['Alpha.[1]', '(2) Beta.', '(3) Gamma.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('keeps spaced parenthesized list markers with their items', () => {
+      const input = 'Introduction. (1) Install the package. (2) Run it.';
+      const expected = ['Introduction.', '(1) Install the package.', '(2) Run it.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
     test('does not mistake a quoted numeric sentence start for a citation', () => {
       const input = 'Alpha."2 people agreed."';
       const expected = ['Alpha.', '"2 people agreed."'];
@@ -805,6 +851,28 @@ describe('Utility Functions', () => {
       `${'“'.repeat(65)}inside${'”'.repeat(64)} Alpha.[1] Beta.`,
       `${'“'.repeat(64)}‘inside’${'”'.repeat(64)} Alpha.[1] Beta.`,
     ])('keeps citation recognition conservative after quotation depth overflows: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each([
+      'She said ‘The dogs’ owners quoted ‘something’ Alpha.[1] Beta.’ Next.',
+      'She said ‘The dogs’ owners quoted ‘the cats’ owner’ Alpha.[1] Beta.’ Next.',
+    ])('keeps citations inside nested possessive quotations: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test('retains citation boundaries after separate quotations ending in s', () => {
+      const first = 'She said ‘dogs’ and ‘cat’ Alpha.[1]';
+      const second = 'Beta.';
+      expect(ss(`${first} ${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+    });
+
+    test('disables citation inference when tentative possessive frames overflow', () => {
+      const input = `${'‘dogs’ '.repeat(65)}Alpha.[1] Beta.`;
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);
     });
