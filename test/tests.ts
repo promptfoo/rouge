@@ -652,6 +652,33 @@ describe('Utility Functions', () => {
       expect(ss('a) 中文 b) 日文')).toEqual(['a) 中文', 'b) 日文']);
     });
 
+    test.each(['#topic', '@person', '/path', '—aside'])(
+      'accepts punctuation-led list bodies: %s',
+      (body) => {
+        const first = `a) ${body} one`;
+        const second = `b) ${body} two`;
+        expect(ss(`${first} ${second}`)).toEqual([first, second]);
+        expect(rouge.l(`${first} ${second}`, `${second} ${first}`)).toBe(1);
+      },
+    );
+
+    test.each(["'Alice's (team)'", '‘Alice’s (team)’', '‘𝒜’s (team)’'])(
+      'retains list markers after quoted possessives: %s',
+      (label) => {
+        const input = `1) The label ${label} 2) Beta`;
+        const expected = [`1) The label ${label}`, '2) Beta'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['J.', 'J. K.'])('keeps leading initials in dotted list bodies: %s', (initials) => {
+      const input = `A. ${initials} Smith will attend B. K. Brown will attend`;
+      const expected = [`A. ${initials} Smith will attend`, 'B. K. Brown will attend'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
     test('prefers an outer list family over nested marker pairs', () => {
       const input = '1. Alpha a) One b) Two 2. Beta';
       expect(ss(input)).toEqual(['1. Alpha a) One b) Two', '2. Beta']);

@@ -120,8 +120,7 @@ const sentenceSuffixLength = Math.max(10, ...GATE_SUBSTITUTIONS.map((word) => wo
 const closingDelimiterReg = /[\])}>"']/;
 const openingBracketReg = /[([{<]/;
 const closingBracketReg = /[\])}>]/;
-const listMarkerReg =
-  /(?:^|\s)(?:(?:[•⁃]\s*)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+["'([{<]*[\p{Letter}\p{Number}\p{Symbol}])/gu;
+const listMarkerReg = /(?:^|\s)(?:(?:[•⁃]\s*)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+\S)/gu;
 const nestedListDepth = Symbol('nestedListDepth');
 const maxNestedListDepth = 32;
 const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
@@ -485,7 +484,11 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
     const index = state.cursor++;
     const character = input[index];
     if (state.quote !== undefined) {
-      if (character === state.quote) {
+      const apostrophe =
+        /['’]/.test(character) &&
+        /[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+        /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1));
+      if (character === state.quote && !apostrophe) {
         state.quote = undefined;
       }
       continue;
@@ -524,10 +527,17 @@ function nextListMarker(
   expression: RegExp,
   state: ListScanState,
   family?: RegExp,
+  previous?: RegExpExecArray,
 ): RegExpExecArray | null {
+  let bodyStart = previous ? previous.index + previous[0].length : 0;
+  let hasBody = previous === undefined;
   let marker = expression.exec(input);
   while (marker !== null) {
     advanceListScan(input, marker.index, state);
+    if (family === undefined || family.test(marker[0])) {
+      hasBody ||= input.slice(bodyStart, marker.index).trim().length > 0;
+      bodyStart = marker.index + marker[0].length;
+    }
     const closesParenthesis =
       marker[0].endsWith(')') && (state.parenthesisDepth > 0 || state.quote !== undefined);
     const yearInProse =
@@ -539,6 +549,7 @@ function nextListMarker(
       );
     if (
       (family === undefined || family.test(marker[0])) &&
+      hasBody &&
       !closesParenthesis &&
       !yearInProse &&
       !countInProse &&
@@ -584,7 +595,14 @@ function findListCandidate(
 ): ListCandidate | undefined {
   const firstByFamily = new Map<
     string,
-    { marker: RegExpExecArray; emptyPrefix: boolean; identity: string; number: number }
+    {
+      marker: RegExpExecArray;
+      emptyPrefix: boolean;
+      identity: string;
+      number: number;
+      bodyStart: number;
+      hasBody: boolean;
+    }
   >();
   let deferred:
     | { candidate: ListCandidate; expressionIndex: number; state: ListScanState }
@@ -603,8 +621,12 @@ function findListCandidate(
       /(?:\b(?:and|or)|[,;&])\s*$/i.test(
         input.slice(Math.max(0, current.index - 8), current.index),
       );
+    if (first !== undefined) {
+      first.hasBody ||= input.slice(first.bodyStart, current.index).trim().length > 0;
+      first.bodyStart = current.index + current[0].length;
+    }
     const distinctMarker = first?.identity !== identity && !joinedNameInitial;
-    if (first !== undefined && (first.emptyPrefix || distinctMarker)) {
+    if (first?.hasBody && (first.emptyPrefix || distinctMarker)) {
       const candidate: ListCandidate = {
         current: first.marker,
         next: current,
@@ -637,6 +659,8 @@ function findListCandidate(
         emptyPrefix: context.empty,
         identity,
         number: Number(marker.match(/^\d+/)?.[0]),
+        bodyStart: current.index + current[0].length,
+        hasBody: false,
       });
     }
 
@@ -677,15 +701,19 @@ function segmentList(input: string, caseNeutral: boolean, depth: number): string
     const sentences = /[.!?\r\n]/.test(body)
       ? segmentNestedSentence(body, caseNeutral, depth)
       : [body];
-    if (sentences.length > 1 && /^\p{Cased}\p{M}*\.$/u.test(sentences[0])) {
-      sentences.splice(0, 2, `${sentences[0]} ${sentences[1]}`);
+    let firstSentenceEnd = 1;
+    while (
+      firstSentenceEnd < sentences.length &&
+      /^\p{Cased}\p{M}*\.$/u.test(sentences[firstSentenceEnd - 1])
+    ) {
+      firstSentenceEnd++;
     }
-    segments.push(`${current[0].trim()} ${sentences[0]}`);
-    for (let index = 1; index < sentences.length; index++) {
+    segments.push(`${current[0].trim()} ${sentences.slice(0, firstSentenceEnd).join(' ')}`);
+    for (let index = firstSentenceEnd; index < sentences.length; index++) {
       segments.push(sentences[index]);
     }
     current = next;
-    next = nextListMarker(input, expression, state, family);
+    next = current && nextListMarker(input, expression, state, family, current);
   } while (current !== null);
   return segments;
 }
