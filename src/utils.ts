@@ -102,34 +102,35 @@ function singleQuotationState(
   input: string,
   index: number,
   insideQuotes: boolean,
-  apostrophes: Set<number>,
+  apostrophes: Uint8Array,
 ): boolean {
   if (input[index] === '‘') {
     return true;
   }
-  return insideQuotes && (input[index] !== '’' || apostrophes.has(index));
+  return insideQuotes && (input[index] !== '’' || apostrophes[index] === 1);
 }
 
 /** Classify elisions and possessives once, without borrowing an unrelated possessive as a closer. */
-function smartApostrophes(input: string): Set<number> {
-  const apostrophes = new Set<number>();
-  let candidates: number[] = [];
+function smartApostrophes(input: string): Uint8Array {
+  // One byte per code unit avoids per-apostrophe arrays and hash-table overhead.
+  const apostrophes = new Uint8Array(input.length);
+  let candidateStart: number | undefined;
   for (const quote of input.matchAll(/[‘’]/g)) {
     const index = quote.index;
     if (quote[0] === '‘') {
-      candidates = [];
+      candidateStart = undefined;
     } else if (
       /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, index + 1)) ||
       input.slice(index - 2, index).toLowerCase() === '’n'
     ) {
-      apostrophes.add(index);
+      apostrophes[index] = 1;
     } else if (input[index - 1]?.toLowerCase() === 's' && /\s/.test(input[index + 1] ?? '')) {
-      candidates.push(index);
+      candidateStart ??= index;
     } else {
-      for (const candidate of candidates) {
-        apostrophes.add(candidate);
+      if (candidateStart !== undefined) {
+        apostrophes.fill(1, candidateStart, index);
       }
-      candidates = [];
+      candidateStart = undefined;
     }
   }
   return apostrophes;
@@ -138,7 +139,7 @@ function smartApostrophes(input: string): Set<number> {
 interface SmartQuoteSource {
   input: string;
   index: number;
-  apostrophes: Set<number>;
+  apostrophes: Uint8Array;
   double: boolean;
   single: boolean;
 }
@@ -579,7 +580,7 @@ export interface SentenceSegmentOptions {
 }
 
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
-function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Set<number>): string[] {
+function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8Array): string[] {
   const chunks: string[] = [];
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
@@ -801,7 +802,7 @@ function isUnspacedDelimitedSentenceStart(
   caseNeutral: boolean,
 ): boolean {
   let next = index + 1;
-  if (!/["'“‘’([{<]/.test(input[next] ?? '')) {
+  if (!/["'“‘’([{<]/.test(input[next] ?? '') || /^’(?:s|m|d|ll|re|ve)\b/i.test(input.slice(next))) {
     return false;
   }
   if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {

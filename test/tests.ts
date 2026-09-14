@@ -1472,6 +1472,21 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test('classifies a million smart possessives within a small heap', () => {
+      expectBundledScriptToPass(
+        `
+          const input = 'A ‘' + 's’ '.repeat(1050000) + 'x’.';
+          const sentences = module.exports.sentenceSegment(input, { caseNeutral: true });
+          if (sentences.length !== 1 || sentences[0] !== input) {
+            throw new Error('Smart possessive segmentation changed');
+          }
+          process.stdout.write('ok');
+        `,
+        15_000,
+        ['--max-old-space-size=64'],
+      );
+    }, 20_000);
+
     test.each([
       ['The students’ work continues.', ['The students’ work continues.']],
       ['Next sentence. ‘Another.’', ['Next sentence.', '‘Another.’']],
@@ -1495,11 +1510,13 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(`${first}\nNext.`)).toEqual([first, 'Next.']);
     });
 
-    test('keeps unquoted abbreviation possessives inside a sentence', () => {
-      const input = 'The U.S.’ Economy grew.';
-      expect(ss(input)).toEqual([input]);
-      expect(segmentCaseNeutrally(input)).toEqual([input]);
-    });
+    test.each(['The U.S.’ Economy grew.', 'The U.S.’s Economy grew.', 'The U.S.’S Economy grew.'])(
+      'keeps unquoted abbreviation possessives inside a sentence: %s',
+      (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
 
     test.each([
       ['‘', '’'],
