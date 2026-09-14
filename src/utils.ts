@@ -667,6 +667,23 @@ interface QuoteState {
   apostrophes: Uint8Array;
 }
 
+interface BracketState {
+  depth: number;
+  standalone: boolean;
+  inlineStart: number;
+}
+
+function updateBracketState(brackets: BracketState, character: string, standalone: boolean): void {
+  if (openingBracketReg.test(character)) {
+    if (brackets.depth === 0) {
+      brackets.standalone = standalone;
+    }
+    brackets.depth++;
+  } else if (closingBracketReg.test(character)) {
+    brackets.depth = Math.max(0, brackets.depth - 1);
+  }
+}
+
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
 function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8Array): string[] {
   const chunks: string[] = [];
@@ -675,21 +692,14 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
   let lastEnd = 0;
   let start = -1;
   const quotes: QuoteState = { double: false, smartDouble: false, single: false, apostrophes };
-  const brackets = { depth: 0, standalone: false };
+  const brackets = { depth: 0, standalone: false, inlineStart: -1 };
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     quotes.double = quotationState(input, index, quotes.double);
     quotes.smartDouble = char === '“' || (quotes.smartDouble && char !== '”');
     quotes.single = singleQuotationState(input, index, quotes.single, apostrophes);
-    if (openingBracketReg.test(char)) {
-      if (brackets.depth === 0) {
-        brackets.standalone = start === -1;
-      }
-      brackets.depth++;
-    } else if (closingBracketReg.test(char)) {
-      brackets.depth = Math.max(0, brackets.depth - 1);
-    }
+    updateBracketState(brackets, char, start === -1 && index !== brackets.inlineStart);
     if (index < lastEnd || char === '\r' || char === '\n') {
       // Only closing-delimiter lookahead can cross CR/LF; other wraps reset the prefix.
       start = -1;
@@ -816,7 +826,7 @@ function sentenceEnd(
   input: string,
   index: number,
   quotes: QuoteState,
-  brackets: { depth: number; standalone: boolean },
+  brackets: BracketState,
   caseNeutral: boolean,
 ): number {
   const insideQuotes = quotes.double || quotes.smartDouble || quotes.single;
@@ -849,6 +859,8 @@ function sentenceEnd(
     abbrvReg.test(gateSuffix) &&
     !isIndependentParenthetical(input, continuation)
   ) {
+    // Retain this interruption's context even when a line wrap resets the scanner prefix.
+    brackets.inlineStart = continuation;
     return -1;
   }
   if (
@@ -906,6 +918,10 @@ function isIndependentParenthetical(input: string, index: number): boolean {
   const contents = input.slice(index + 1);
   const sentence = contents.match(/^[^()[\]{}<>]*[.!?]\s*[)\]}>]/)?.[0];
   if (sentence === undefined) {
+    return false;
+  }
+  const following = contents.slice(sentence.length).trimStart();
+  if (following.length > 0 && !independentSentenceReg.test(following)) {
     return false;
   }
   const suffix = sentence.slice(0, -1).trimEnd().slice(-sentenceSuffixLength).toLowerCase();

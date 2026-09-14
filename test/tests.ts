@@ -2099,6 +2099,39 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['yesterday.', 'with his brother.', 'after the meeting.'])(
+      'retains a parenthetical interruption before the outer continuation %s',
+      (tail) => {
+        for (const [open, close] of [
+          ['“', '”'],
+          ['‘', '’'],
+          ['"', '"'],
+        ]) {
+          for (const separator of [' ', '\n']) {
+            const input = `He joined ${open}Acme Co.${close}${separator}(Was it the right choice?) ${tail}`;
+            const expected = input.replaceAll('\n', ' ');
+            expect(ss(input)).toEqual([expected]);
+            expect(segmentCaseNeutrally(input)).toEqual([expected]);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([expected.toLowerCase()]);
+          }
+        }
+      },
+    );
+
+    test.each(['He left.', 'Was it worth it?', 'In fact, he stayed.'])(
+      'recognizes a separate parenthetical before the independent sentence %s',
+      (third) => {
+        const first = 'He joined “Acme Co.”';
+        const second = '(Was it the right choice?)';
+        const input = `${first} ${second} ${third}`;
+        expect(ss(input)).toEqual([first, second, third]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second, third]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          [first, second, third].map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
     test.each([
       ['‘', '’'],
       ['“', '”'],
