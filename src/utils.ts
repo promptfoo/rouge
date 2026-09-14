@@ -319,7 +319,13 @@ export function sentenceSegment(input: string, options: SentenceSegmentOptions =
   }
 
   // Scan terminals before applying abbreviation and line-wrap rules.
-  const chunks = sentenceChunks(normalizedInput, caseNeutral);
+  const chunks = sentenceChunks(
+    normalizedInput,
+    caseNeutral,
+    (options as InternalSentenceSegmentOptions)[skipListDetection]
+      ? nestedMarkerPeriods(normalizedInput, caseNeutral)
+      : undefined,
+  );
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -462,8 +468,9 @@ interface ListScanState {
   cursor: number;
   bracketDepth: number[];
   quote: string | undefined;
-  numericQuoteFlags?: Uint8Array;
+  quoteFlags?: Uint8Array;
   angleOpeners?: Uint8Array;
+  parenthesisLabels?: Uint8Array;
 }
 
 /** Confirm numeric quote openers without treating unpaired year elisions as quotes. */
@@ -478,8 +485,7 @@ function numericQuoteFlags(input: string): Uint8Array | undefined {
     if (opener && /^\p{Number}$/u.test(following)) {
       candidate = index;
     } else if (candidate !== undefined) {
-      const possiblePossessive =
-        /s/iu.test(previous) && /^\s+[\p{Letter}\p{Mark}\p{Number}]/u.test(input.slice(index + 1));
+      const possiblePossessive = isListPossessiveCandidate(input, index);
       if (
         !possiblePossessive &&
         (/[.!?]/.test(previous) ||
@@ -503,10 +509,79 @@ function numericQuoteFlags(input: string): Uint8Array | undefined {
   return openings;
 }
 
+/** Confirm ambiguous possessives only within a span with a later unambiguous closer. */
+function confirmedListQuoteFlags(
+  input: string,
+  initialFlags: Uint8Array | undefined,
+): Uint8Array | undefined {
+  let flags = initialFlags;
+  const pending = {
+    "'": { opening: -1, candidate: -1 },
+    '’': { opening: -1, candidate: -1 },
+  };
+  for (const quote of input.matchAll(/['‘’]/g)) {
+    const index = quote.index;
+    const character = quote[0];
+    const closer = character === "'" ? "'" : '’';
+    const state = pending[closer];
+    if (flags?.[index] === 2 || isListApostrophe(input, index)) {
+      continue;
+    }
+    const opening = listQuoteCloser(input, index, flags) === closer;
+    if (character === '‘' || state.opening < 0) {
+      if (opening) {
+        state.opening = index;
+        state.candidate = -1;
+      }
+      continue;
+    }
+    if (isListPossessiveCandidate(input, index)) {
+      if (state.candidate < 0) {
+        state.candidate = index;
+      }
+      continue;
+    }
+    if (opening && /\S/.test(input[index + 1] ?? '') && !/[.!?]/.test(input[index - 1] ?? '')) {
+      state.opening = index;
+      state.candidate = -1;
+      continue;
+    }
+    if (state.candidate >= 0) {
+      flags ??= new Uint8Array(input.length);
+      markListQuoteRange(input, flags, state.candidate, index, closer);
+    }
+    state.opening = -1;
+    state.candidate = -1;
+  }
+  return flags;
+}
+
+function isListPossessiveCandidate(input: string, index: number): boolean {
+  return (
+    /s/iu.test(input[index - 1] ?? '') &&
+    /^\s+[\p{Letter}\p{Mark}\p{Number}]/u.test(input.slice(index + 1))
+  );
+}
+
+function markListQuoteRange(
+  input: string,
+  flags: Uint8Array,
+  start: number,
+  end: number,
+  closer: string,
+): void {
+  // Confirmed ranges are disjoint within each of the two quote families.
+  for (let index = start; index < end; index++) {
+    if (input[index] === closer) {
+      flags[index] = 2;
+    }
+  }
+}
+
 function listQuoteCloser(
   input: string,
   index: number,
-  numericQuotes: Uint8Array | undefined,
+  quoteFlags: Uint8Array | undefined,
 ): string | undefined {
   const character = input[index];
   if (
@@ -521,7 +596,7 @@ function listQuoteCloser(
   if (
     character === "'" &&
     (index === 0 || /^[\s\p{Punctuation}<]$/u.test(input[index - 1])) &&
-    (numericQuotes?.[index] === 1 || !/^\p{Number}$/u.test(characterAt(input, index + 1))) &&
+    (quoteFlags?.[index] === 1 || !/^\p{Number}$/u.test(characterAt(input, index + 1))) &&
     !singleQuoteElisionReg.test(input.slice(index + 1, index + 32))
   ) {
     return "'";
@@ -532,12 +607,12 @@ function listQuoteCloser(
   return character === '‘' ? '’' : undefined;
 }
 
-function isListApostrophe(input: string, index: number, numericQuotes?: Uint8Array): boolean {
+function isListApostrophe(input: string, index: number, quoteFlags?: Uint8Array): boolean {
   if (!/['’]/.test(input[index])) {
     return false;
   }
   return (
-    numericQuotes?.[index] === 2 ||
+    quoteFlags?.[index] === 2 ||
     (/[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
       /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1))) ||
     (!/[.!?]/.test(input[index - 1] ?? '') &&
@@ -548,7 +623,7 @@ function isListApostrophe(input: string, index: number, numericQuotes?: Uint8Arr
 /** Only paired, unquoted angle marks form delimiters; unmatched comparisons stay prose. */
 function matchedAngleOpeners(
   input: string,
-  numericQuotes: Uint8Array | undefined,
+  quoteFlags: Uint8Array | undefined,
 ): Uint8Array | undefined {
   let pending = new Uint32Array(32);
   let depth = 0;
@@ -556,13 +631,13 @@ function matchedAngleOpeners(
   let quote: string | undefined;
   for (let index = 0; index < input.length; index++) {
     if (quote !== undefined) {
-      if (input.startsWith(quote, index) && !isListApostrophe(input, index, numericQuotes)) {
+      if (input.startsWith(quote, index) && !isListApostrophe(input, index, quoteFlags)) {
         index += quote.length - 1;
         quote = undefined;
       }
       continue;
     }
-    quote = listQuoteCloser(input, index, numericQuotes);
+    quote = listQuoteCloser(input, index, quoteFlags);
     if (quote !== undefined) {
       index += quote.length - 1;
     } else if (input[index] === '<') {
@@ -580,19 +655,92 @@ function matchedAngleOpeners(
   return matched;
 }
 
+function* unquotedListParentheses(
+  input: string,
+  quoteFlags: Uint8Array | undefined,
+): Generator<number> {
+  let quote: string | undefined;
+  let skipThrough = -1;
+  for (const token of input.matchAll(/[()"'`“”‘’]/g)) {
+    const index = token.index;
+    if (index <= skipThrough) {
+      continue;
+    }
+    if (quote !== undefined) {
+      if (input.startsWith(quote, index) && !isListApostrophe(input, index, quoteFlags)) {
+        skipThrough = index + quote.length - 1;
+        quote = undefined;
+      }
+      continue;
+    }
+    quote = listQuoteCloser(input, index, quoteFlags);
+    if (quote !== undefined) {
+      skipThrough = index + quote.length - 1;
+    } else if (/[()]/.test(token[0])) {
+      yield index;
+    }
+  }
+}
+
+/** A final structural closer can confirm that earlier label-shaped closers were literal. */
+function parenthesisLabelFlags(
+  input: string,
+  quoteFlags: Uint8Array | undefined,
+): Uint8Array | undefined {
+  const markers = input.matchAll(new RegExp(listMarkerReg));
+  let marker = markers.next().value;
+  let depth = 0;
+  let candidate = -1;
+  let flags: Uint8Array | undefined;
+  for (const index of unquotedListParentheses(input, quoteFlags)) {
+    if (input[index] === '(') {
+      depth++;
+      candidate = -1;
+    } else if (input[index] === ')') {
+      while (marker !== undefined && marker.index + marker[0].length - 1 < index) {
+        marker = markers.next().value;
+      }
+      const label = marker !== undefined && marker.index + marker[0].length - 1 === index;
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && label) {
+          candidate = index;
+        }
+      } else if (!label && candidate >= 0) {
+        flags ??= new Uint8Array(input.length);
+        flags.fill(1, candidate, index);
+        candidate = -1;
+      }
+    }
+  }
+  return flags;
+}
+
+function listScanState(input: string): ListScanState {
+  const quoteFlags = confirmedListQuoteFlags(input, numericQuoteFlags(input));
+  return {
+    cursor: 0,
+    bracketDepth: [0, 0, 0, 0],
+    quote: undefined,
+    quoteFlags,
+    angleOpeners: matchedAngleOpeners(input, quoteFlags),
+    parenthesisLabels: parenthesisLabelFlags(input, quoteFlags),
+  };
+}
+
 function advanceListScan(input: string, end: number, state: ListScanState): void {
   while (state.cursor < end) {
     const index = state.cursor++;
     const character = input[index];
     if (state.quote !== undefined) {
-      const apostrophe = isListApostrophe(input, index, state.numericQuoteFlags);
+      const apostrophe = isListApostrophe(input, index, state.quoteFlags);
       if (input.startsWith(state.quote, index) && !apostrophe) {
         state.cursor += state.quote.length - 1;
         state.quote = undefined;
       }
       continue;
     }
-    const quote = listQuoteCloser(input, index, state.numericQuoteFlags);
+    const quote = listQuoteCloser(input, index, state.quoteFlags);
     if (quote !== undefined) {
       state.quote = quote;
       state.cursor += quote.length - 1;
@@ -602,7 +750,7 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
     const closing = ')]}>'.indexOf(character);
     if (opening !== -1 && (character !== '<' || state.angleOpeners?.[index] === 1)) {
       state.bracketDepth[opening]++;
-    } else if (closing !== -1) {
+    } else if (closing !== -1 && !(character === ')' && state.parenthesisLabels?.[index] === 1)) {
       state.bracketDepth[closing] = Math.max(0, state.bracketDepth[closing] - 1);
     }
   }
@@ -707,6 +855,7 @@ function findListCandidate(
   caseNeutral: boolean,
   expression: RegExp,
   state: ListScanState,
+  familyFilter?: RegExp,
 ): ListCandidate | undefined {
   const firstByFamily = new Map<
     string,
@@ -725,7 +874,7 @@ function findListCandidate(
     string,
     { candidate: ListCandidate; expressionIndex: number; state: ListScanState }
   >();
-  let current = nextListMarker(input, expression, state);
+  let current = nextListMarker(input, expression, state, familyFilter);
   let proseInitialEnd: number | undefined;
   while (current !== null) {
     const marker = current[0].trim();
@@ -745,7 +894,7 @@ function findListCandidate(
     if (context.joinedNameInitial) {
       firstByFamily.delete(family.source);
       deferredByFamily.delete(family.source);
-      current = nextListMarker(input, expression, state);
+      current = nextListMarker(input, expression, state, familyFilter);
       continue;
     }
     if (first !== undefined) {
@@ -788,7 +937,7 @@ function findListCandidate(
       });
     }
 
-    current = nextListMarker(input, expression, state);
+    current = nextListMarker(input, expression, state, familyFilter);
   }
   const deferred = [...deferredByFamily.values()].sort(
     (first, second) => first.candidate.current.index - second.candidate.current.index,
@@ -838,14 +987,7 @@ function segmentList(input: string, caseNeutral: boolean, depth: number): string
     return undefined;
   }
   const expression = new RegExp(listMarkerReg);
-  const numericQuotes = numericQuoteFlags(input);
-  const state: ListScanState = {
-    cursor: 0,
-    bracketDepth: [0, 0, 0, 0],
-    quote: undefined,
-    numericQuoteFlags: numericQuotes,
-    angleOpeners: matchedAngleOpeners(input, numericQuotes),
-  };
+  const state = listScanState(input);
   const candidate = findListCandidate(input, caseNeutral, expression, state);
   if (candidate === undefined) {
     return undefined;
@@ -888,8 +1030,48 @@ interface InternalSentenceSegmentOptions extends SentenceSegmentOptions {
   [nestedListDepth]?: number;
 }
 
+/** Preserve confirmed nested marker periods while still splitting ordinary item-body sentences. */
+function nestedMarkerPeriods(input: string, caseNeutral: boolean): Uint8Array | undefined {
+  const families = new Map<string, RegExp>();
+  for (const marker of input.matchAll(new RegExp(listMarkerReg))) {
+    if (marker[0].includes('.')) {
+      const family = listMarkerFamily(marker[0].trim(), caseNeutral);
+      families.set(family.source, family);
+    }
+  }
+  if (families.size === 0) {
+    return undefined;
+  }
+  const context = listScanState(input);
+  let periods: Uint8Array | undefined;
+  // The configured marker grammar has at most six families, independent of input size.
+  for (const family of families.values()) {
+    const expression = new RegExp(listMarkerReg);
+    const state = { ...context, bracketDepth: [0, 0, 0, 0] };
+    const candidate = findListCandidate(input, caseNeutral, expression, state, family);
+    if (candidate === undefined) {
+      continue;
+    }
+    periods ??= new Uint8Array(input.length);
+    markListPeriod(periods, candidate.current);
+    let marker: RegExpExecArray | null = candidate.next;
+    while (marker !== null) {
+      markListPeriod(periods, marker);
+      marker = nextListMarker(input, expression, state, family, marker);
+    }
+  }
+  return periods;
+}
+
+function markListPeriod(periods: Uint8Array, marker: RegExpExecArray): void {
+  const offset = marker[0].indexOf('.');
+  if (offset >= 0) {
+    periods[marker.index + offset] = 1;
+  }
+}
+
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
-function sentenceChunks(input: string, caseNeutral: boolean): string[] {
+function sentenceChunks(input: string, caseNeutral: boolean, markerPeriods?: Uint8Array): string[] {
   const chunks: string[] = [];
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
@@ -922,7 +1104,9 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       continue;
     }
     if (
-      (char === '.' && !isProtectedEllipsisPeriod(index, protectedPeriods, ellipsisCursor)) ||
+      (char === '.' &&
+        markerPeriods?.[index] !== 1 &&
+        !isProtectedEllipsisPeriod(index, protectedPeriods, ellipsisCursor)) ||
       char === '?' ||
       char === '!'
     ) {

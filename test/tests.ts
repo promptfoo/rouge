@@ -1002,6 +1002,82 @@ describe('Utility Functions', () => {
       expect(() => rouge.n(input, input)).not.toThrow();
     });
 
+    test.each([
+      [
+        'This note (uses labels a) Alpha, b) Beta, and c) Gamma.)',
+        ['This note (uses labels a) Alpha, b) Beta, and c) Gamma.)'],
+      ],
+      ['(section a) Options: b) Beta c) Gamma.', ['(section a) Options:', 'b) Beta', 'c) Gamma.']],
+      [
+        '(section a) Options: b) Beta c) Gamma. (note)',
+        ['(section a) Options:', 'b) Beta', 'c) Gamma.', '(note)'],
+      ],
+      [
+        '(Outer (section a) detail.) Options: b) Beta c) Gamma.',
+        ['(Outer (section a) detail.)', 'Options:', 'b) Beta', 'c) Gamma.'],
+      ],
+      [
+        'This note (uses labels a) Alpha, b) Beta, and c) Gamma.) Options: a) First b) Last.',
+        [
+          'This note (uses labels a) Alpha, b) Beta, and c) Gamma.) Options:',
+          'a) First',
+          'b) Last.',
+        ],
+      ],
+      ['1. Alpha. a. One b. Two 2. Beta', ['1. Alpha.', 'a. One b. Two', '2. Beta']],
+      [
+        '1. Alpha. a. One b. Two. Next sentence. 2. Beta',
+        ['1. Alpha.', 'a. One b. Two.', 'Next sentence.', '2. Beta'],
+      ],
+      [
+        '1. Alpha. a.) One b.) Two. Next sentence. 2. Beta',
+        ['1. Alpha.', 'a.) One b.) Two.', 'Next sentence.', '2. Beta'],
+      ],
+      [
+        '1) The answer was 42. More analysis followed. 2) Final.',
+        ['1) The answer was 42.', 'More analysis followed.', '2) Final.'],
+      ],
+      [
+        "He said 'The authors' names were a) Alpha and b) Beta.' Options: a) First b) Last.",
+        [
+          "He said 'The authors' names were a) Alpha and b) Beta.'",
+          'Options:',
+          'a) First',
+          'b) Last.',
+        ],
+      ],
+      [
+        "The word 'authors' describes a) Alpha and b) Beta. He said 'No.' Next.",
+        ["The word 'authors' describes", 'a) Alpha and', 'b) Beta.', "He said 'No.'", 'Next.'],
+      ],
+      [
+        'He said ‘The authors’ names were a) Alpha and b) Beta.’ Options: a) First b) Last.',
+        [
+          'He said ‘The authors’ names were a) Alpha and b) Beta.’ Options:',
+          'a) First',
+          'b) Last.',
+        ],
+      ],
+    ])('preserves reviewed list context and competing prose: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((part) => part.toLowerCase()),
+      );
+    });
+
+    test('does not score reordered parenthetical labels as reordered independent sentences', () => {
+      const first = 'This note (uses labels a) Alpha, b) Beta, and c) Gamma.)';
+      const second = 'This note (uses labels c) Gamma, b) Beta, and a) Alpha.)';
+      expect(rouge.l(first, second)).toBeLessThan(1);
+    });
+
+    test('confirms long parenthetical label ranges without repeated lookahead', () => {
+      const input = `This note (uses labels ${'a) Alpha b) Beta '.repeat(10_000)}and ends.)`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    }, 5000);
+
     test('does not interpret parenthesized labels as list markers', () => {
       const input = 'The winners were (team A) Alice and (team B) Bob.';
       expect(ss(input)).toEqual([input]);
