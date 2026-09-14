@@ -128,6 +128,7 @@ const listMarkerReg =
 const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
 const geographicContinuationReg =
   /^(?:government|army|navy|military|congress|senate|commission)\b/i;
+const unspacedGeographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
 const sentenceContinuationReg =
   /^(?:and|or|but|nor|for|yet|so|at|in|on|of|to|from|with|by|as|then|because|while|after|before|although|though|since|unless|until|when|where|whether|if|once|whereas)\b/i;
 const independentSentenceReg =
@@ -691,8 +692,21 @@ function sentenceEnd(
     return index + 1;
   }
   const end = closingDelimiterEnd(input, index, insideQuotes);
+  const { closedBrackets, closesAbbreviationQuotation } = closingDelimiterContext(
+    input,
+    index + 1,
+    end,
+    insideQuotes,
+  );
   const closesQuotation = insideQuotes && /(?:"|'')$/.test(input.slice(end - 2, end));
-  const closesAbbreviationQuotation = closesQuotation || input[end - 1] === "'";
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  if (
+    closesAbbreviationQuotation &&
+    closedBrackets < brackets.depth &&
+    /\bv\.?s\.$/i.test(suffix)
+  ) {
+    return -1;
+  }
   if (end < input.length && !/\s/.test(input[end])) {
     return isUnspacedSentenceBoundary(input, index, end, caseNeutral, closesAbbreviationQuotation)
       ? end
@@ -702,7 +716,6 @@ function sentenceEnd(
     return end;
   }
 
-  const closedBrackets = countClosingBrackets(input, index + 1, end);
   if (
     closedBrackets > 0 &&
     (closedBrackets < brackets.depth || !(brackets.standalone || closesQuotation))
@@ -717,7 +730,6 @@ function sentenceEnd(
   if (next === input.length) {
     return end;
   }
-  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const nextCharacter = characterAt(input, next);
   const startsWithLetter = caseNeutral
@@ -759,14 +771,21 @@ function isNumericSentenceStart(
   );
 }
 
-function countClosingBrackets(input: string, start: number, end: number): number {
-  let count = 0;
+function closingDelimiterContext(
+  input: string,
+  start: number,
+  end: number,
+  insideQuotes: boolean,
+): { closedBrackets: number; closesAbbreviationQuotation: boolean } {
+  let closedBrackets = 0;
+  let closesAbbreviationQuotation = false;
   for (let index = start; index < end; index++) {
     if (closingBracketReg.test(input[index])) {
-      count++;
+      closedBrackets++;
     }
+    closesAbbreviationQuotation ||= input[index] === "'" || (insideQuotes && input[index] === '"');
   }
-  return count;
+  return { closedBrackets, closesAbbreviationQuotation };
 }
 
 function isUnspacedDelimitedSentenceStart(
@@ -835,7 +854,9 @@ function isUnspacedSentenceBoundary(
   const nextInitial = caseNeutral ? /^\p{Cased}(?=\s|$)/u : /^\p{Lu}(?=\s|$)/u;
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const continuesAbbreviation =
-    abbrvReg.test(gateSuffix) && isAbbreviationException(gateSuffix, following, closesQuotation);
+    abbrvReg.test(gateSuffix) &&
+    (isAbbreviationException(gateSuffix, following, closesQuotation) ||
+      (geographicAcronymReg.test(gateSuffix) && unspacedGeographicContinuationReg.test(following)));
   return !(
     continuesAbbreviation ||
     initial.test(following) ||

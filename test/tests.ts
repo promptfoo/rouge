@@ -1219,6 +1219,29 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each(['vs.', 'v.s.'])(
+      'keeps quoted %s inside its still-open surrounding bracket',
+      (abbreviation) => {
+        for (const [opening, closing] of [
+          ['(', ')'],
+          ['[(', ')]'],
+        ]) {
+          for (const next of ['Examples followed', '123 followed', 'This happened']) {
+            const input = `He noted ${opening}"${abbreviation}" ${next}${closing} today.`;
+            expect(ss(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input)).toEqual([input]);
+            const singleQuoted = input.replaceAll('"', "'");
+            expect(ss(singleQuoted)).toEqual([singleQuoted]);
+            expect(segmentCaseNeutrally(singleQuoted)).toEqual([singleQuoted]);
+          }
+          const first = `${opening}He wrote "${abbreviation}"${closing}`;
+          const next = 'Examples followed.';
+          expect(ss(`${first} ${next}`)).toEqual([first, next]);
+          expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual([first, next]);
+        }
+      },
+    );
+
     test('retains Unicode-folded abbreviations before numeric quote continuations', () => {
       const input = 'He said "Kan." 2 people remained.';
       expect(segmentCaseNeutrally(input)).toEqual([input]);
@@ -1242,6 +1265,16 @@ describe('Utility Functions', () => {
             'Boston Celtics won.',
           ]);
         }
+      },
+    );
+
+    test.each(['Government', 'Army', 'Navy', 'Military', 'Congress'])(
+      'retains the existing unspaced geographic continuation %s',
+      (continuation) => {
+        const input = `The U.S.${continuation} acted.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
       },
     );
 
