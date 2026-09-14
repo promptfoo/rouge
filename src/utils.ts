@@ -129,6 +129,31 @@ function isAlphabeticFootnote(input: string, index: number): boolean {
   );
 }
 
+function isLeadingSmartElision(input: string, index: number): boolean {
+  return /^[‘’](?:(?:t(?:is|was)|em)\b|\p{Number}{2}(?!\p{Number}))/iu.test(
+    input.slice(index, index + 8),
+  );
+}
+
+function isRightSmartApostrophe(input: string, index: number, leadingElision: boolean): boolean {
+  const following = characterAt(input, index + 1);
+  const previous = previousNonClosingIndex(input, index);
+  const afterTerminal = /[.!?]/.test(input[previous] ?? '');
+  return (
+    (leadingElision && /\s/.test(input[index - 1] ?? '')) ||
+    (/^[\p{Letter}\p{Mark}]$/u.test(following) &&
+      !isAlphabeticFootnote(input, index) &&
+      (!afterTerminal || smartContractionReg.test(input.slice(index, index + 4)))) ||
+    (/^\p{Number}$/u.test(following) &&
+      !afterTerminal &&
+      (/\s/.test(input[index - 1] ?? '') ||
+        !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
+          input.slice(Math.max(0, previous - 1), previous + 1),
+        ))) ||
+    input.slice(index - 2, index).toLowerCase() === '’n'
+  );
+}
+
 /**
  * Classify elisions and possessives once. Ambiguous s-ending quotes need a later
  * unambiguous closer; guessing the last candidate can join unrelated sentences.
@@ -140,12 +165,7 @@ function smartApostrophes(input: string): Uint8Array {
   let opening: number | undefined;
   for (const quote of input.matchAll(/[‘’]/g)) {
     const index = quote.index;
-    const following = characterAt(input, index + 1);
-    const leadingElision =
-      opening !== undefined &&
-      /^[‘’](?:(?:t(?:is|was)|em)\b|\p{Number}{2}(?!\p{Number}))/iu.test(
-        input.slice(index, index + 8),
-      );
+    const leadingElision = opening !== undefined && isLeadingSmartElision(input, index);
     if (quote[0] === '‘') {
       // A left mark opens a span only after a compatible right mark pairs with it.
       apostrophes[index] = 1;
@@ -159,33 +179,18 @@ function smartApostrophes(input: string): Uint8Array {
       continue;
     }
 
-    const previous = previousNonClosingIndex(input, index);
-    const afterTerminal = /[.!?]/.test(input[previous] ?? '');
-    if (
-      (leadingElision && /\s/.test(input[index - 1] ?? '')) ||
-      (/^[\p{Letter}\p{Mark}]$/u.test(following) &&
-        !isAlphabeticFootnote(input, index) &&
-        (!afterTerminal || smartContractionReg.test(input.slice(index, index + 4)))) ||
-      (/^\p{Number}$/u.test(following) &&
-        !afterTerminal &&
-        (/\s/.test(input[index - 1] ?? '') ||
-          !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
-            input.slice(Math.max(0, previous - 1), previous + 1),
-          ))) ||
-      input.slice(index - 2, index).toLowerCase() === '’n'
-    ) {
+    if (isRightSmartApostrophe(input, index, leadingElision)) {
       apostrophes[index] = 1;
       continue;
     }
 
-    if (opening !== undefined) {
+    const ambiguousCloser = /(?:s|\p{Number}|\p{Letter}\.\p{Letter}\.)$/iu.test(
+      input.slice(Math.max(0, index - 8), index),
+    );
+    if (opening !== undefined && !(ambiguousCloser && isLeadingSmartElision(input, opening))) {
       apostrophes[opening] = 0;
     }
-    if (
-      /(?:s|\p{Number}|\p{Letter}\.\p{Letter}\.)$/iu.test(
-        input.slice(Math.max(0, index - 8), index),
-      )
-    ) {
+    if (ambiguousCloser) {
       candidateStart ??= index;
       continue;
     }
@@ -867,13 +872,16 @@ function sentenceEnd(
   return sentenceEndAfterDelimiter(input, end, gateSuffix, closedBrackets, caseNeutral);
 }
 
-/** Attach numeric citations after a consumed quotation, including enclosing brackets. */
+/** Attach supported citations after a consumed quotation, including enclosing brackets. */
 function quotationCitationEnd(input: string, index: number, delimiterEnd: number): number {
   let end = delimiterEnd;
   if (!/(?:["”’]|'')[\s)\]}>]*$/.test(input.slice(index + 1, end))) {
     return end;
   }
   while (/^\p{Number}$/u.test(characterAt(input, end))) {
+    end += characterAt(input, end).length;
+  }
+  if (isAlphabeticFootnote(input, end - 1)) {
     end += characterAt(input, end).length;
   }
   return end;

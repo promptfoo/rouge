@@ -1598,6 +1598,21 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each(['Class of ‘99', '‘Twas', '‘Tis'])(
+      'does not pair leading elision %s with a later ambiguous possessive',
+      (leading) => {
+        const first = `${leading} at Acme Co.`;
+        const second = 'James’ book followed.';
+        const input = `${first}\n${second}`;
+        expect(ss(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      },
+    );
+
     test('preserves a paired quotation starting with an abbreviated year', () => {
       const input = 'She said ‘99 etc.\nMore notes.’';
       const expected = ['She said ‘99 etc. More notes.’'];
@@ -1922,6 +1937,29 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['ᵃ', 'ᵇ', 'ᶜ'])(
+      'attaches supported alphabetic footnote %s after a quoted terminal',
+      (footnote) => {
+        for (const [open, close] of [
+          ['‘', '’'],
+          ['“', '”'],
+        ]) {
+          for (const terminal of ['.', '?', '!']) {
+            const first = `The result was ${open}Stop${terminal}${close}${footnote}.`;
+            expect(ss(`${first} Next sentence.`)).toEqual([first, 'Next sentence.']);
+            expect(segmentCaseNeutrally(`${first} Next sentence.`)).toEqual([
+              first,
+              'Next sentence.',
+            ]);
+            expect(segmentCaseNeutrally(`${first} Next sentence.`.toLowerCase())).toEqual([
+              first.toLowerCase(),
+              'next sentence.',
+            ]);
+          }
+        }
+      },
+    );
+
     test('keeps modifier letters within contraction words', () => {
       const input = 'She said ‘l’ᵃmour at Acme Co.\nInternational Holdings.’';
       const expected = [input.replaceAll('\n', ' ')];
@@ -1982,6 +2020,16 @@ describe('Utility Functions', () => {
       expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
       expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
       expect(rouge.treeBankTokenize(first)).toEqual([open, '``', 'Stop.', "''", close]);
+    });
+
+    test('requires a paired single quote before attaching a closing apostrophe', () => {
+      const unmatched = 'He said Stop.’ Next.';
+      const possessive = 'The U.S.’ Economy grew.';
+      for (const caseNeutral of [false, true]) {
+        expect(ss(unmatched, { caseNeutral })).toEqual([unmatched]);
+        expect(ss(possessive, { caseNeutral })).toEqual([possessive]);
+        expect(ss('He said ‘Stop.’ Next.', { caseNeutral })).toEqual(['He said ‘Stop.’', 'Next.']);
+      }
     });
 
     test.each(['Stop.”', 'He said "Stop.”'])(
