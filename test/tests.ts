@@ -758,6 +758,34 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test('does not confirm a numeric elision with a later possessive', () => {
+      const input = "In '99, a) Alpha b) Beta. The authors' names.";
+      const expected = ["In '99,", 'a) Alpha', 'b) Beta.', "The authors' names."];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('retains internal possessives after a numeric quotation is confirmed', () => {
+      const input =
+        "He said '99 options a) Alpha b) Beta and the authors' names.' Options: a) First b) Last.";
+      const expected = [
+        "He said '99 options a) Alpha b) Beta and the authors' names.'",
+        'Options:',
+        'a) First',
+        'b) Last.',
+      ];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      "He said '99 options a) Alpha b) Betas'.",
+      "He said '99 options a) Alpha b) Betas'",
+    ])('retains s-ending numeric quotations before punctuation or EOF: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
     test('discards deferred candidates when joined initials invalidate their family', () => {
       const input = 'Intro: 1. Authors: X. Smith A. Brown and C. Jones.';
       expect(ss(input)).toEqual(['Intro: 1.', 'Authors: X. Smith A. Brown and C.', 'Jones.']);

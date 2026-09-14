@@ -462,12 +462,12 @@ interface ListScanState {
   cursor: number;
   bracketDepth: number[];
   quote: string | undefined;
-  numericQuoteOpeners?: Uint8Array;
+  numericQuoteFlags?: Uint8Array;
   angleOpeners?: Uint8Array;
 }
 
 /** Confirm numeric quote openers without treating unpaired year elisions as quotes. */
-function numericQuoteOpeners(input: string): Uint8Array | undefined {
+function numericQuoteFlags(input: string): Uint8Array | undefined {
   let openings: Uint8Array | undefined;
   let candidate: number | undefined;
   for (const quote of input.matchAll(/'/g)) {
@@ -478,9 +478,18 @@ function numericQuoteOpeners(input: string): Uint8Array | undefined {
     if (opener && /^\p{Number}$/u.test(following)) {
       candidate = index;
     } else if (candidate !== undefined) {
-      if (following.length === 0 || /^[\s.,!?;:)\]}"”»\p{Pd}]$/u.test(following)) {
+      const possiblePossessive =
+        /s/iu.test(previous) && /^\s+[\p{Letter}\p{Mark}\p{Number}]/u.test(input.slice(index + 1));
+      if (
+        !possiblePossessive &&
+        (/[.!?]/.test(previous) ||
+          following.length === 0 ||
+          /^[\s.,!?;:)\]}"”»\p{Pd}]$/u.test(following))
+      ) {
         openings ??= new Uint8Array(input.length);
         openings[candidate] = 1;
+        // Confirmed numeric spans retain their internal possessive apostrophes.
+        openings.fill(2, candidate + 1, index);
         candidate = undefined;
       } else if (
         opener &&
@@ -497,7 +506,7 @@ function numericQuoteOpeners(input: string): Uint8Array | undefined {
 function listQuoteCloser(
   input: string,
   index: number,
-  numericOpenings: Uint8Array | undefined,
+  numericQuotes: Uint8Array | undefined,
 ): string | undefined {
   const character = input[index];
   if (
@@ -512,7 +521,7 @@ function listQuoteCloser(
   if (
     character === "'" &&
     (index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1])) &&
-    (numericOpenings?.[index] === 1 || !/^\p{Number}$/u.test(characterAt(input, index + 1))) &&
+    (numericQuotes?.[index] === 1 || !/^\p{Number}$/u.test(characterAt(input, index + 1))) &&
     !singleQuoteElisionReg.test(input.slice(index + 1, index + 32))
   ) {
     return "'";
@@ -523,11 +532,12 @@ function listQuoteCloser(
   return character === '‘' ? '’' : undefined;
 }
 
-function isListApostrophe(input: string, index: number): boolean {
+function isListApostrophe(input: string, index: number, numericQuotes?: Uint8Array): boolean {
   if (!/['’]/.test(input[index])) {
     return false;
   }
   return (
+    numericQuotes?.[index] === 2 ||
     (/[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
       /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1))) ||
     (!/[.!?]/.test(input[index - 1] ?? '') &&
@@ -538,20 +548,20 @@ function isListApostrophe(input: string, index: number): boolean {
 /** Only paired, unquoted angle marks form delimiters; unmatched comparisons stay prose. */
 function matchedAngleOpeners(
   input: string,
-  numericOpenings: Uint8Array | undefined,
+  numericQuotes: Uint8Array | undefined,
 ): Uint8Array | undefined {
   const pending: number[] = [];
   let matched: Uint8Array | undefined;
   let quote: string | undefined;
   for (let index = 0; index < input.length; index++) {
     if (quote !== undefined) {
-      if (input.startsWith(quote, index) && !isListApostrophe(input, index)) {
+      if (input.startsWith(quote, index) && !isListApostrophe(input, index, numericQuotes)) {
         index += quote.length - 1;
         quote = undefined;
       }
       continue;
     }
-    quote = listQuoteCloser(input, index, numericOpenings);
+    quote = listQuoteCloser(input, index, numericQuotes);
     if (quote !== undefined) {
       index += quote.length - 1;
     } else if (input[index] === '<') {
@@ -572,14 +582,14 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
     const index = state.cursor++;
     const character = input[index];
     if (state.quote !== undefined) {
-      const apostrophe = isListApostrophe(input, index);
+      const apostrophe = isListApostrophe(input, index, state.numericQuoteFlags);
       if (input.startsWith(state.quote, index) && !apostrophe) {
         state.cursor += state.quote.length - 1;
         state.quote = undefined;
       }
       continue;
     }
-    const quote = listQuoteCloser(input, index, state.numericQuoteOpeners);
+    const quote = listQuoteCloser(input, index, state.numericQuoteFlags);
     if (quote !== undefined) {
       state.quote = quote;
       state.cursor += quote.length - 1;
@@ -825,13 +835,13 @@ function segmentList(input: string, caseNeutral: boolean, depth: number): string
     return undefined;
   }
   const expression = new RegExp(listMarkerReg);
-  const numericOpenings = numericQuoteOpeners(input);
+  const numericQuotes = numericQuoteFlags(input);
   const state: ListScanState = {
     cursor: 0,
     bracketDepth: [0, 0, 0, 0],
     quote: undefined,
-    numericQuoteOpeners: numericOpenings,
-    angleOpeners: matchedAngleOpeners(input, numericOpenings),
+    numericQuoteFlags: numericQuotes,
+    angleOpeners: matchedAngleOpeners(input, numericQuotes),
   };
   const candidate = findListCandidate(input, caseNeutral, expression, state);
   if (candidate === undefined) {
