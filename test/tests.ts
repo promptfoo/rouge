@@ -1414,6 +1414,32 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each([
+      ['"', '"', '“', '”'],
+      ['“', '”', '"', '"'],
+      ["'", "'", '‘', '’'],
+      ['‘', '’', "'", "'"],
+    ])('preserves the outer %s%s quotation around %s%s', (open, close, innerOpen, innerClose) => {
+      const input = `We invested in ${open}The ${innerOpen}Acme${innerClose} Co.\nInternational Holdings${close} today.`;
+      const expected = `We invested in ${open}The ${innerOpen}Acme${innerClose} Co. International Holdings${close} today.`;
+      expect(ss(input)).toEqual([expected]);
+      expect(segmentCaseNeutrally(input)).toEqual([expected]);
+    });
+
+    test.each(['’Twas the night.', '’99 was a year.'])(
+      'recognizes the sentence beginning with %s',
+      (sentence) => {
+        expect(ss(`“Stop.” ${sentence}`)).toEqual(['“Stop.”', sentence]);
+        expect(segmentCaseNeutrally(`“Stop.” ${sentence}`)).toEqual(['“Stop.”', sentence]);
+      },
+    );
+
+    test.each(['—', '–', ';'])('closes a single-curly quotation before %s', (punctuation) => {
+      const first = `The term ‘class’${punctuation}see Acme Co.`;
+      expect(ss(`${first}\nNext sentence.`)).toEqual([first, 'Next sentence.']);
+      expect(segmentCaseNeutrally(`${first}\nNext sentence.`)).toEqual([first, 'Next sentence.']);
+    });
+
     test('closes spaced smart quotes and nested bracketed quotations', () => {
       expect(ss('He said “Stop. ” Next.')).toEqual(['He said “Stop. ”', 'Next.']);
       expect(ss('He said ‘Stop. ’ Next.')).toEqual(['He said ‘Stop. ’', 'Next.']);
@@ -1430,9 +1456,36 @@ describe('Utility Functions', () => {
         'Next.',
       ]);
       expect(ss('She said ‘Don’t stop. ’ Next.')).toEqual(['She said ‘Don’t stop. ’', 'Next.']);
+      expect(ss('She said ‘Rock ’n’ roll! ’ Next.')).toEqual([
+        'She said ‘Rock ’n’ roll! ’',
+        'Next.',
+      ]);
       expect(ss('He said “(Stop.)” Next.')).toEqual(['He said “(Stop.)”', 'Next.']);
       expect(ss('Use etc.\n“Next sentence.”')).toEqual(['Use etc.', '“Next sentence.”']);
       expect(ss('She said “Don’t stop.” Next.')).toEqual(['She said “Don’t stop.”', 'Next.']);
+    });
+
+    test('retains smart-single possessives across chunk boundaries', () => {
+      const input = '‘The students’ protest at Acme Co.\nInternational Holdings.’';
+      const expected = ['‘The students’ protest at Acme Co. International Holdings.’'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('closes nested smart quotations before a wrapped abbreviation', () => {
+      const first = 'He said “She called ‘Stop.’” before we use etc.';
+      expect(ss(`${first}\nNext.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first}\nNext.`)).toEqual([first, 'Next.']);
+    });
+
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+    ])('retains spaced ellipsis boundaries before %s%s closers', (open, close) => {
+      const first = `He said ${open}Wait . . . .${close}`;
+      const expected = [first, 'Next.'];
+      expect(ss(`${first} Next.`)).toEqual(expected);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual(expected);
     });
 
     test('recognizes Treebank closing quotes after bracketed sentences', () => {

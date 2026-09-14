@@ -81,9 +81,6 @@ function opensDoubleQuote(input: string, index: number, insideQuotes: boolean): 
 }
 
 function quotationState(input: string, index: number, insideQuotes: boolean): boolean {
-  if (input[index] === '“' || input[index] === '”') {
-    return input[index] === '“';
-  }
   if (input[index] === '"') {
     return opensDoubleQuote(input, index, insideQuotes);
   }
@@ -105,12 +102,16 @@ function singleQuotationState(input: string, index: number, insideQuotes: boolea
   if (input[index] === '‘') {
     return true;
   }
-  if (input[index] === '’' && !/^\p{Letter}$/u.test(characterAt(input, index + 1))) {
+  if (
+    input[index] === '’' &&
+    !/^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, index + 1))
+  ) {
     return (
       insideQuotes &&
-      input[index - 1]?.toLowerCase() === 's' &&
-      /\s/.test(input[index + 1] ?? '') &&
-      input.slice(index + 1).match(/[‘’]/)?.[0] === '’'
+      (input.slice(index - 2, index).toLowerCase() === '’n' ||
+        (input[index - 1]?.toLowerCase() === 's' &&
+          /\s/.test(input[index + 1] ?? '') &&
+          input.slice(index + 1).match(/[‘’]/)?.[0] === '’'))
     );
   }
   return insideQuotes;
@@ -139,7 +140,7 @@ const closingDelimiterReg = /[\])}>"'”’]/;
 const openingBracketReg = /[([{<]/;
 const closingBracketReg = /[\])}>]/;
 const listMarkerReg =
-  /(?:^|\s)(?:(?:[•⁃]\s*)?\d+(?:\.\)|[.)])|\p{Cased}\.)(?=\s+["'“‘([{<]*\p{Cased})/gu;
+  /(?:^|\s)(?:(?:[•⁃]\s*)?\d+(?:\.\)|[.)])|\p{Cased}\.)(?=\s+["'“‘’([{<]*\p{Cased})/gu;
 const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
 const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
 const sentenceContinuationReg =
@@ -150,18 +151,22 @@ const independentSentenceReg =
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
   readonly #caseNeutral: boolean;
+  readonly #quoteSource: { input: string; index: number };
   #parts: string[] = [];
   #normalizedThrough = 0;
   #words: { titleCase: boolean; lowerCase: boolean }[] = [];
   #openingDelimiters: string[] = [];
   #insideDoubleQuotes = false;
+  #insideSmartDoubleQuotes = false;
   #insideSingleQuotes = false;
+  #insideSmartSingleQuotes = false;
   #lastCharacter = '';
   hasLineBreaks = false;
   startsWithTitleCase = false;
 
-  constructor(text: string, caseNeutral: boolean) {
+  constructor(text: string, caseNeutral: boolean, quoteSource: { input: string; index: number }) {
     this.#caseNeutral = caseNeutral;
+    this.#quoteSource = quoteSource;
     this.append(trimSpaces(text));
   }
 
@@ -177,10 +182,17 @@ class SentenceBuffer {
     return this.#words.at(-2)?.titleCase ?? false;
   }
 
-  get hasOpenDelimiter(): boolean {
+  get #insideQuotes(): boolean {
     return (
-      this.#openingDelimiters.length > 0 || this.#insideDoubleQuotes || this.#insideSingleQuotes
+      this.#insideDoubleQuotes ||
+      this.#insideSmartDoubleQuotes ||
+      this.#insideSingleQuotes ||
+      this.#insideSmartSingleQuotes
     );
+  }
+
+  get hasOpenDelimiter(): boolean {
+    return this.#openingDelimiters.length > 0 || this.#insideQuotes;
   }
 
   get suffix(): string {
@@ -227,24 +239,30 @@ class SentenceBuffer {
     for (let index = 0; index < text.length; index++) {
       const character = text[index];
       if (/[“”]/.test(character)) {
-        this.#insideDoubleQuotes = character === '“';
+        this.#insideSmartDoubleQuotes = character === '“';
       } else if (character === '"') {
         const previous = index === 0 ? this.#lastCharacter : text[index - 1];
         this.#insideDoubleQuotes =
           !this.#insideDoubleQuotes &&
           (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous));
-      } else if (/['‘’]/.test(character)) {
+      } else if (/[‘’]/.test(character)) {
+        const source = this.#quoteSource;
+        source.index = source.input.indexOf(character, source.index);
+        this.#insideSmartSingleQuotes = singleQuotationState(
+          source.input,
+          source.index,
+          this.#insideSmartSingleQuotes,
+        );
+        source.index++;
+      } else if (character === "'") {
         this.#trackSingleQuote(text, index);
       } else if (
-        !(this.#insideDoubleQuotes || this.#insideSingleQuotes) &&
+        !this.#insideQuotes &&
         openingBracketReg.test(character) &&
         (character !== '<' || /^\p{Letter}$/u.test(characterAt(text, index + 1)))
       ) {
         this.#openingDelimiters.push(character);
-      } else if (
-        !(this.#insideDoubleQuotes || this.#insideSingleQuotes) &&
-        closingBracketReg.test(character)
-      ) {
+      } else if (!this.#insideQuotes && closingBracketReg.test(character)) {
         const opener = '([{<'[')]}>'.indexOf(character)];
         if (this.#openingDelimiters.at(-1) === opener) {
           this.#openingDelimiters.pop();
@@ -255,13 +273,6 @@ class SentenceBuffer {
   }
 
   #trackSingleQuote(text: string, index: number): void {
-    if (text[index] === '‘') {
-      this.#insideSingleQuotes = true;
-      return;
-    }
-    if (text[index] === '’' && !this.#insideSingleQuotes) {
-      return;
-    }
     const previous = index === 0 ? this.#lastCharacter : text[index - 1];
     const following = text[index + 1] ?? '';
     if (this.#insideSingleQuotes) {
@@ -340,13 +351,15 @@ export function sentenceSegment(
   }
 
   // Scan terminals before applying abbreviation and line-wrap rules.
-  const chunks = sentenceChunks(input.replace(/\u0085/g, ' '), caseNeutral);
+  const source = input.replace(/\u0085/g, ' ');
+  const chunks = sentenceChunks(source, caseNeutral);
 
   const acc: string[] = [];
+  const quoteSource = { input: source, index: 0 };
   let pending: SentenceBuffer | undefined;
   for (let idx = 0; idx < chunks.length; idx++) {
     if (pending || chunks[idx]) {
-      const chunk = pending ?? new SentenceBuffer(chunks[idx], caseNeutral);
+      const chunk = pending ?? new SentenceBuffer(chunks[idx], caseNeutral, quoteSource);
       pending = undefined;
       // Trim only spaces (i.e. preserve line breaks/carriage feeds)
       chunk.trimEnd();
@@ -362,7 +375,7 @@ export function sentenceSegment(
 
       if (chunk.hasLineBreaks) {
         const nextChunk = chunks[idx + 1];
-        const nextSentence = nextChunk?.replace(/^[\s"'“‘([{<]+/, '');
+        const nextSentence = nextChunk?.replace(/^[\s"'“‘’([{<]+/, '');
         const abbreviation = gateSuffix.trimEnd();
         if (
           nextSentence &&
@@ -380,6 +393,7 @@ export function sentenceSegment(
         } else if (
           nextChunk &&
           (chunk.startsWithTitleCase ||
+            chunk.hasOpenDelimiter ||
             (caseNeutral &&
               sentenceContinuationReg.test(nextChunk.trimStart()) &&
               /[.!?]["'”’\])}>]\s*[\r\n]/.test(suffix)))
@@ -540,12 +554,13 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const ellipsisCursor = { index: 0 };
   let lastEnd = 0;
   let start = -1;
-  const quotes = { double: false, single: false };
+  const quotes = { double: false, smartDouble: false, single: false };
   const brackets = { depth: 0, standalone: false };
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     quotes.double = quotationState(input, index, quotes.double);
+    quotes.smartDouble = char === '“' || (quotes.smartDouble && char !== '”');
     quotes.single = singleQuotationState(input, index, quotes.single);
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
@@ -604,7 +619,7 @@ function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllips
     }
 
     let next = match.index + match[0].length;
-    while (next < input.length && /[\s"'“‘([{<]/.test(input[next])) {
+    while (next < input.length && /[\s"'“”‘’([{<]/.test(input[next])) {
       next++;
     }
     const following = characterAt(input, next);
@@ -640,14 +655,16 @@ function isProtectedEllipsisPeriod(
 function closingDelimiterEnd(
   input: string,
   index: number,
-  quotes: { double: boolean; single: boolean },
+  quotes: { double: boolean; smartDouble: boolean; single: boolean },
 ): number {
   let end = index + 1;
   let doublePending = quotes.double;
+  let smartDoublePending = quotes.smartDouble;
   let singlePending = quotes.single;
   while (end < input.length) {
     if (closingDelimiterReg.test(input[end])) {
-      doublePending &&= input[end] !== '"' && input[end] !== '”';
+      doublePending &&= input[end] !== '"';
+      smartDoublePending &&= input[end] !== '”';
       singlePending &&= input[end] !== '’';
       end++;
       continue;
@@ -662,7 +679,8 @@ function closingDelimiterEnd(
       next > end &&
       next < input.length &&
       (closingBracketReg.test(input[next]) ||
-        (doublePending && (input[next] === '"' || input[next] === '”')) ||
+        (doublePending && input[next] === '"') ||
+        (smartDoublePending && input[next] === '”') ||
         (singlePending && input[next] === '’'))
     ) {
       end = next;
@@ -677,11 +695,11 @@ function closingDelimiterEnd(
 function sentenceEnd(
   input: string,
   index: number,
-  quotes: { double: boolean; single: boolean },
+  quotes: { double: boolean; smartDouble: boolean; single: boolean },
   brackets: { depth: number; standalone: boolean },
   caseNeutral: boolean,
 ): number {
-  const insideQuotes = quotes.double || quotes.single;
+  const insideQuotes = quotes.double || quotes.smartDouble || quotes.single;
   if (
     !insideQuotes &&
     brackets.depth === 0 &&
@@ -707,7 +725,7 @@ function sentenceEnd(
   }
 
   let next = end;
-  while (next < input.length && /[\s"'“‘([{<]/.test(input[next])) {
+  while (next < input.length && /[\s"'“‘’([{<]/.test(input[next])) {
     next++;
   }
   if (next === input.length) {
@@ -752,13 +770,13 @@ function isUnspacedDelimitedSentenceStart(
   caseNeutral: boolean,
 ): boolean {
   let next = index + 1;
-  if (!/["'“‘([{<]/.test(input[next] ?? '')) {
+  if (!/["'“‘’([{<]/.test(input[next] ?? '')) {
     return false;
   }
   if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {
     return false;
   }
-  while (next < input.length && /["'“‘([{<]/.test(input[next])) {
+  while (next < input.length && /["'“‘’([{<]/.test(input[next])) {
     next++;
   }
   const character = characterAt(input, next);
