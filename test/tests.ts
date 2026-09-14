@@ -1433,6 +1433,52 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each([
+      ["He said ``She said 'No.''' Next.", ["He said ``She said 'No.'''", 'Next.']],
+      [
+        "He said ``She said 'The dogs' owners stayed.''' Next.",
+        ["He said ``She said 'The dogs' owners stayed.'''", 'Next.'],
+      ],
+      ["He said ``Stop.'''Next.'", ["He said ``Stop.''", "'Next.'"]],
+      ["He said ``Stop.'' 'Next.'", ["He said ``Stop.''", "'Next.'"]],
+      [
+        "The answer 'Yes' was accepted. He wrote '$5. Next.' Last.",
+        ["The answer 'Yes' was accepted.", "He wrote '$5. Next.'", 'Last.'],
+      ],
+      [
+        "'Til tomorrow. He wrote '$5. Next.' Last.",
+        ["'Til tomorrow.", "He wrote '$5. Next.'", 'Last.'],
+      ],
+      ["Use etc.\n``Next sentence.''", ['Use etc.', "``Next sentence.''"]],
+      ["Use etc.\n`Next sentence.'", ["Use etc. `Next sentence.'"]],
+    ])('preserves reviewed Treebank and symbol-opening contexts: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['He said "', 'He said ("', 'He said ["', 'He said <"', '"'])(
+      'preserves a truncated tokenizer opener in opening context: %s',
+      (input) => {
+        expect(rouge.treeBankTokenize(input).at(-1)).toBe('``');
+      },
+    );
+
+    test.each([
+      ["He said '``Alpha.'' Beta.' Next.", ["He said '``Alpha.'' Beta.'", 'Next.']],
+      ["He said '``Alpha.''' Next.", ["He said '``Alpha.'''", 'Next.']],
+      ["He said ``'Alpha.''' Next.", ["He said ``'Alpha.'''", 'Next.']],
+      ["He said ``'Alpha.' Beta.'' Next.", ["He said ``'Alpha.' Beta.''", 'Next.']],
+      ["He said ``Alpha. '' Next.", ["He said ``Alpha. ''", 'Next.']],
+      ["He said ``Alpha.\n'' Next.", ["He said ``Alpha. ''", 'Next.']],
+      [
+        "The answer 'Yes' was accepted. '$5. Next.' Last.",
+        ["The answer 'Yes' was accepted.", "'$5. Next.'", 'Last.'],
+      ],
+    ])('uses actual quote endpoint families for both nesting orders: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
     test('recognizes astral digits before measurement apostrophes', () => {
       const input = "The answer 'Yes' worked. It was 𝟝' tall. Next.";
       const expected = ["The answer 'Yes' worked.", "It was 𝟝' tall.", 'Next.'];
