@@ -604,6 +604,12 @@ function listQuoteCloser(
   if (character === '“') {
     return '”';
   }
+  if (character === '«') {
+    return '»';
+  }
+  if (character === '‹') {
+    return '›';
+  }
   return character === '‘' ? '’' : undefined;
 }
 
@@ -661,7 +667,7 @@ function* unquotedListParentheses(
 ): Generator<number> {
   let quote: string | undefined;
   let skipThrough = -1;
-  for (const token of input.matchAll(/[()"'`“”‘’]/g)) {
+  for (const token of input.matchAll(/[()"'`“”‘’«»‹›]/g)) {
     const index = token.index;
     if (index <= skipThrough) {
       continue;
@@ -766,7 +772,7 @@ function listMarkerPrefix(
 } {
   let index = marker.index - 1;
   let lineBreak = /[\r\n]/.test(marker[0]);
-  while (index >= 0 && /[\s"'”’\])}>]/.test(input[index])) {
+  while (index >= 0 && /[\s"'”’»›\])}>]/.test(input[index])) {
     lineBreak ||= /[\r\n]/.test(input[index]);
     index--;
   }

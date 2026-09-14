@@ -1066,6 +1066,33 @@ describe('Utility Functions', () => {
       );
     });
 
+    test.each([
+      ['«', '»'],
+      ['‹', '›'],
+    ])('retains guillemet quotations while finding lists: %s%s', (opening, closing) => {
+      const quoted = `He said ${opening}The options were a) Alpha b) Beta.${closing}`;
+      expect(ss(quoted)).toEqual([quoted]);
+      expect(segmentCaseNeutrally(quoted)).toEqual([quoted]);
+      const introduction = `${opening}Intro.${closing}`;
+      expect(ss(`${introduction} 1. Alpha 2. Beta.`)).toEqual([
+        introduction,
+        '1. Alpha',
+        '2. Beta.',
+      ]);
+      expect(segmentCaseNeutrally(`${introduction} 1. Alpha 2. Beta.`)).toEqual([
+        introduction,
+        '1. Alpha',
+        '2. Beta.',
+      ]);
+      const parenthesis = `The symbol ${opening}(${closing} is used.`;
+      expect(ss(`${parenthesis} Options: a) First b) Last.`)).toEqual([
+        parenthesis,
+        'Options:',
+        'a) First',
+        'b) Last.',
+      ]);
+    });
+
     test('does not score reordered parenthetical labels as reordered independent sentences', () => {
       const first = 'This note (uses labels a) Alpha, b) Beta, and c) Gamma.)';
       const second = 'This note (uses labels c) Gamma, b) Beta, and a) Alpha.)';
