@@ -474,7 +474,7 @@ function numericQuoteFlags(input: string): Uint8Array | undefined {
     const index = quote.index;
     const previous = input[index - 1] ?? '';
     const following = characterAt(input, index + 1);
-    const opener = index === 0 || /^[\s\p{Punctuation}]$/u.test(previous);
+    const opener = index === 0 || /^[\s\p{Punctuation}<]$/u.test(previous);
     if (opener && /^\p{Number}$/u.test(following)) {
       candidate = index;
     } else if (candidate !== undefined) {
@@ -516,11 +516,11 @@ function listQuoteCloser(
     return "''";
   }
   if (character === '"') {
-    return index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1]) ? '"' : undefined;
+    return index === 0 || /^[\s\p{Punctuation}<]$/u.test(input[index - 1]) ? '"' : undefined;
   }
   if (
     character === "'" &&
-    (index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1])) &&
+    (index === 0 || /^[\s\p{Punctuation}<]$/u.test(input[index - 1])) &&
     (numericQuotes?.[index] === 1 || !/^\p{Number}$/u.test(characterAt(input, index + 1))) &&
     !singleQuoteElisionReg.test(input.slice(index + 1, index + 32))
   ) {
@@ -550,7 +550,8 @@ function matchedAngleOpeners(
   input: string,
   numericQuotes: Uint8Array | undefined,
 ): Uint8Array | undefined {
-  const pending: number[] = [];
+  let pending = new Uint32Array(32);
+  let depth = 0;
   let matched: Uint8Array | undefined;
   let quote: string | undefined;
   for (let index = 0; index < input.length; index++) {
@@ -565,13 +566,15 @@ function matchedAngleOpeners(
     if (quote !== undefined) {
       index += quote.length - 1;
     } else if (input[index] === '<') {
-      pending.push(index);
-    } else if (input[index] === '>') {
-      const opening = pending.pop();
-      if (opening !== undefined) {
-        matched ??= new Uint8Array(input.length);
-        matched[opening] = 1;
+      if (depth === pending.length) {
+        const grown = new Uint32Array(pending.length * 2);
+        grown.set(pending);
+        pending = grown;
       }
+      pending[depth++] = index;
+    } else if (input[index] === '>' && depth > 0) {
+      matched ??= new Uint8Array(input.length);
+      matched[pending[--depth]] = 1;
     }
   }
   return matched;

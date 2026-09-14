@@ -1829,6 +1829,21 @@ describe('Utility Functions', () => {
     describe('ReDoS prevention', () => {
       const TIMEOUT_MS = 500;
 
+      test('tracks unmatched angle openers within a constrained heap', () => {
+        expectBundledScriptToPass(
+          `
+            const summary = '<'.repeat(7000000) + 'word ">"';
+            const sentences = module.exports.sentenceSegment(summary);
+            if (sentences.length !== 1 || sentences[0] !== summary) {
+              throw new Error('Unmatched angle content changed');
+            }
+            process.stdout.write('ok');
+          `,
+          30_000,
+          ['--max-old-space-size=64'],
+        );
+      }, 35_000);
+
       test('anchors mismatched numeric marker families without backtracking', () => {
         const input = `1. Alpha 2. Beta ${'9'.repeat(48_000)}) Gamma`;
         const started = Date.now();
@@ -3493,3 +3508,19 @@ test('reuses a deferred list prefix with long leading whitespace', () => {
   const input = `${' '.repeat(5 * count)}A. x Intro: 1. x${' 2. x'.repeat(count)}`;
   expect(rouge.n(input, input)).toBe(1);
 }, 5000);
+
+test.each(['"literal > sign"', "'literal > sign'", "'99 > sign'"])(
+  'preserves quotes immediately inside angle literals: %s',
+  (quote) => {
+    const first = `The winners were <${quote} and team A) Alice and team B) Bob>.`;
+    const input = `${first} Options: a) First b) Last.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+        first,
+        'Options:',
+        'a) First',
+        'b) Last.',
+      ]);
+    }
+  },
+);
