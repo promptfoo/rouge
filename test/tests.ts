@@ -1617,6 +1617,58 @@ describe('Utility Functions', () => {
         expect(segmentCaseNeutrally(input)).toEqual([input]);
       });
 
+      test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('separates adjacent %s%s quotations ending in ellipses', (open, close) => {
+        const expected = [`He said ${open}Enough...${close}`, `${open}Later...${close}`, 'Final.'];
+        const input = expected.join(' ');
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+      });
+
+      test.each([
+        "She said, 'The students' work... Alpha matters.'",
+        "She said, 'James', the students' work... Alpha matters.'",
+        "He paused... 'The students' work,' before answering.",
+      ])('preserves ASCII possessives in ellipsis quotation context: %s', (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      });
+
+      test.each([
+        ['“I am done,” she said.', '“Perhaps,” before continuing.'],
+        ["'I am done,' she said.", "'Perhaps,' before continuing."],
+      ])('distinguishes a quoted reply from an inline aside: %s', (reply, aside) => {
+        for (const segment of [ss, segmentCaseNeutrally]) {
+          expect(segment(`He stopped... ${reply}`)).toEqual(['He stopped...', reply]);
+          expect(segment(`He paused... ${aside}`)).toEqual([`He paused... ${aside}`]);
+        }
+      });
+
+      test.each([',', ';', ':', ' —', '–'])(
+        'retains connecting punctuation after an ellipsis aside: %s',
+        (connector) => {
+          const input = `He paused... (Perhaps deliberately)${connector} before answering.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input.toUpperCase())).toEqual([input.toUpperCase()]);
+        },
+      );
+
+      test('retains Unicode case-folded abbreviation evidence before numeric starts', () => {
+        for (const abbreviation of ['Kan', 'Kan', 'kan']) {
+          const input = `He said "${abbreviation}." 2 people remained.`;
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+        }
+      });
+
       test('handles long sequences of merged ellipses in one scan', () => {
         expect(ss('It is... Alpha '.repeat(4000))).toHaveLength(1);
       });
