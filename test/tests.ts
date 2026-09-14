@@ -1122,6 +1122,48 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['vs.', 'v.s.'])(
+      'preserves wrapped lowercase comparisons with %s',
+      (abbreviation) => {
+        for (const separator of ['\n', '\r\n', '\r']) {
+          const first = `android ${abbreviation}`;
+          const next = 'Windows is common.';
+          for (const segment of [ss, segmentCaseNeutrally]) {
+            expect(segment(`${first}${separator}${next}`)).toEqual([`${first} ${next}`]);
+            expect(segment(`${first}${separator}${separator}${next}`)).toEqual([first, next]);
+          }
+        }
+        for (const segment of [ss, segmentCaseNeutrally]) {
+          expect(segment(`Intro line\nThe Giants ${abbreviation}\n\nBoston Celtics won.`)).toEqual([
+            `Intro line The Giants ${abbreviation}`,
+            'Boston Celtics won.',
+          ]);
+        }
+      },
+    );
+
+    test.each(['vs', 'v.s.'])(
+      'keeps question and exclamation terminals after %s distinct from abbreviation periods',
+      (abbreviation) => {
+        for (const terminal of ['?', '!']) {
+          const first = `He asked "${abbreviation}${terminal}"`;
+          for (const next of ['Alice replied.', '123 people replied.']) {
+            for (const segment of [ss, segmentCaseNeutrally]) {
+              expect(segment(`${first} ${next}`)).toEqual([first, next]);
+            }
+          }
+        }
+      },
+    );
+
+    test('releases legacy dotted versus question and exclamation suffixes', () => {
+      for (const terminal of ['?', '!']) {
+        const first = `He asked "v.s${terminal}"`;
+        const next = 'Alice replied.';
+        expect(ss(`${first} ${next}`)).toEqual([first, next]);
+      }
+    });
+
     test('retains parenthetical company-name continuations', () => {
       const input = 'We invested in Acme Co. (International Holdings) last year.';
       expect(ss(input)).toEqual([input]);

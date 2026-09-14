@@ -102,7 +102,10 @@ function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const abbrvReg = new RegExp(`\\b(${GATE_SUBSTITUTIONS.map(escapeRegExp).join('|')})[.!?] ?$`, 'i');
+const abbrvReg = new RegExp(
+  `\\b(?!v\\.?s[!?] ?$)(${GATE_SUBSTITUTIONS.map(escapeRegExp).join('|')})[.!?] ?$`,
+  'i',
+);
 const acronymReg = /[ |.][A-Z].?$/i;
 // Case mappings can add combining marks (for example, `İ` lowercases to `i` + dot above).
 const caseNeutralAcronymReg = /(?:^|[ |.])\p{Cased}\p{M}*.?$/u;
@@ -355,6 +358,12 @@ export function sentenceSegment(
         const nextChunk = chunks[idx + 1];
         const nextSentence = nextChunk?.replace(/^[\s"'([{<]+/, '');
         const abbreviation = gateSuffix.trimEnd();
+        const separator =
+          suffix.slice(suffix.trimEnd().length) + (nextChunk?.match(/^\s*/)?.[0] ?? '');
+        const continuesVersus =
+          /\bv\.?s\.$/i.test(abbreviation) &&
+          isAbbreviationException(abbreviation, nextSentence ?? '') &&
+          !/\n[^\S\n]*\n/.test(separator.replace(/\r\n?/g, '\n'));
         if (
           nextSentence &&
           abbrvReg.test(abbreviation) &&
@@ -376,6 +385,7 @@ export function sentenceSegment(
         } else if (
           nextChunk &&
           (chunk.startsWithTitleCase ||
+            continuesVersus ||
             (caseNeutral &&
               sentenceContinuationReg.test(nextChunk.trimStart()) &&
               /[.!?]["'\])}>]\s*[\r\n]/.test(suffix)))
