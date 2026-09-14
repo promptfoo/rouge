@@ -1036,7 +1036,7 @@ describe('Utility Functions', () => {
       'keeps URL punctuation %s inside a possessive quotation',
       (punctuation) => {
         const input = `She reviewed 'the students' Online https://example.com${punctuation}Next=value Acme Co.\nInternational report' today.`;
-        const expected = [input.replace('\n', ' ')];
+        const expected = [input.replaceAll('\n', ' ')];
         expect(ss(input)).toEqual(expected);
         expect(segmentCaseNeutrally(input)).toEqual(expected);
         expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
@@ -1047,7 +1047,7 @@ describe('Utility Functions', () => {
 
     test('classifies consecutive possessives in a single pass', () => {
       const input = `She reviewed 'the ${"students' ".repeat(10_000)}Acme Co.\nInternational project' today.`;
-      expect(segmentCaseNeutrally(input)).toEqual([input.replace('\n', ' ')]);
+      expect(segmentCaseNeutrally(input)).toEqual([input.replaceAll('\n', ' ')]);
     });
 
     test('closes single-quoted spans after their opening fragment', () => {
