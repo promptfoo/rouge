@@ -1268,6 +1268,63 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each([
+      [
+        '"It ended." Was version 3.14 ready? Next.',
+        ['"It ended."', 'Was version 3.14 ready?', 'Next.'],
+      ],
+      [
+        '"It ended." Was example.com ready? Next.',
+        ['"It ended."', 'Was example.com ready?', 'Next.'],
+      ],
+      [
+        'She said “outer „inner.“ Then left.” Next.',
+        ['She said “outer „inner.“ Then left.”', 'Next.'],
+      ],
+    ])('preserves reviewed question and nested-style boundaries: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      ['He said "Alpha.""2 people agreed."', ['He said "Alpha."', '"2 people agreed."']],
+      ['He said "Alpha.""Next."', ['He said "Alpha."', '"Next."']],
+      [
+        'He said "Alpha.""Two sentences. Really." Next.',
+        ['He said "Alpha."', '"Two sentences. Really."', 'Next.'],
+      ],
+    ])('preserves opening quotes on adjacent quoted sentences: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      ['"It ended." Was Alice\nready? Next.', ['"It ended."', 'Was Alice ready?', 'Next.']],
+      ['"It ended." Was Alice... ready? Next.', ['"It ended."', 'Was Alice... ready?', 'Next.']],
+      [
+        '"It ended." Was Alice . . . ready? Next.',
+        ['"It ended."', 'Was Alice . . . ready?', 'Next.'],
+      ],
+      ["He said 'Stop.'Next. Last.", ["He said 'Stop.'", 'Next.', 'Last.']],
+      ['Use etc.\n‘Next sentence.’', ['Use etc.', '‘Next sentence.’']],
+      ['“Stop!” “Alice said.” Next.', ['“Stop!”', '“Alice said.”', 'Next.']],
+      ['“Alpha.”“Beta.”', ['“Alpha.”', '“Beta.”']],
+    ])('retains reviewed continuation boundaries: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('preserves Unicode-folded abbreviations at quotation boundaries', () => {
+      for (const input of [
+        'He said "Kan." 2 people remained.',
+        '"It ended." Was Kan. ready? Next.',
+      ]) {
+        expect(segmentCaseNeutrally(input).map((sentence) => sentence.toLowerCase())).toEqual(
+          segmentCaseNeutrally(input.toLowerCase()),
+        );
+      }
+    });
+
     test('pairs consecutive elision candidates independently', () => {
       const input = "'Til tomorrow. He said 'Twas strange. Really.' Next.";
       const expected = ["'Til tomorrow.", "He said 'Twas strange. Really.'", 'Next.'];
