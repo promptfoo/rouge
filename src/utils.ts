@@ -129,16 +129,9 @@ const sentenceContinuationReg =
 const independentSentenceReg =
   /^(?:in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
-interface SingleQuoteSource {
-  input: string;
-  index: number;
-  possessives: Uint8Array;
-}
-
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
   readonly #caseNeutral: boolean;
-  readonly #quoteSource: SingleQuoteSource;
   #parts: string[] = [];
   #normalizedThrough = 0;
   #words: { titleCase: boolean; lowerCase: boolean }[] = [];
@@ -149,9 +142,8 @@ class SentenceBuffer {
   hasLineBreaks = false;
   startsWithTitleCase = false;
 
-  constructor(text: string, caseNeutral: boolean, quoteSource: SingleQuoteSource) {
+  constructor(text: string, caseNeutral: boolean) {
     this.#caseNeutral = caseNeutral;
-    this.#quoteSource = quoteSource;
     this.append(trimSpaces(text));
   }
 
@@ -243,18 +235,14 @@ class SentenceBuffer {
   }
 
   #trackSingleQuote(text: string, index: number): void {
-    const source = this.#quoteSource;
-    source.index = source.input.indexOf("'", source.index) + 1;
     const previous = index === 0 ? this.#lastCharacter : text[index - 1];
     const following = text[index + 1] ?? '';
     if (this.#insideSingleQuotes) {
-      const continuation = text.slice(index + 1).trimStart();
       const possessive =
+        !this.#caseNeutral &&
         previous.toLowerCase() === 's' &&
         /\s/.test(following) &&
-        (this.#caseNeutral
-          ? source.possessives[source.index - 1] === 1
-          : /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(continuation));
+        /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(text.slice(index + 1).trimStart());
       this.#insideSingleQuotes =
         possessive || (following.length > 0 && !/[\s.,!?;:)\]}]/.test(following));
       return;
@@ -299,58 +287,6 @@ class SentenceBuffer {
   }
 }
 
-// A spaced s' is ambiguous. Keep it open only when an unambiguous closer follows.
-// Classify all candidates once so repeated possessives do not repeat lookahead.
-function possessiveQuotePositions(input: string): Uint8Array {
-  // One byte per code unit avoids per-apostrophe arrays and hash-table overhead.
-  const possessives = new Uint8Array(input.length);
-  const ellipses = spacedEllipsisRanges(input, true);
-  const ellipsisCursor = { index: 0 };
-  let candidateStart: number | undefined;
-  for (const boundary of input.matchAll(/['.!?]/g)) {
-    const index = boundary.index;
-    if (boundary[0] !== "'") {
-      if (
-        candidateStart !== undefined &&
-        !isQuoteContinuation(input, index, ellipses, ellipsisCursor)
-      ) {
-        candidateStart = undefined;
-      }
-      continue;
-    }
-    const following = input[index + 1] ?? '';
-    if ((index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1])) && /\S/.test(following)) {
-      candidateStart = undefined;
-    } else if (input[index - 1]?.toLowerCase() === 's' && /\s/.test(following)) {
-      candidateStart ??= index;
-    } else if (following.length === 0 || /[\s.,!?;:)\]}]/.test(following)) {
-      if (candidateStart !== undefined) {
-        possessives.fill(1, candidateStart, index);
-      }
-      candidateStart = undefined;
-    }
-  }
-  return possessives;
-}
-
-function isQuoteContinuation(
-  input: string,
-  index: number,
-  ellipses: SpacedEllipsisRange[],
-  ellipsisCursor: { index: number },
-): boolean {
-  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-  return (
-    (input[index] === '.' &&
-      (input[index + 1] === '.' ||
-        ellipseReg.test(suffix) ||
-        isProtectedEllipsisPeriod(index, ellipses, ellipsisCursor))) ||
-    abbrvReg.test(suffix) ||
-    (/[\p{Letter}\p{Number}]/u.test(characterAt(input, index + 1)) &&
-      !isUnspacedSentenceBoundary(input, index, index + 1, true))
-  );
-}
-
 /**
  * Splits a body of text into an array of sentences
  * using a rule-based segmentation approach.
@@ -378,19 +314,13 @@ export function sentenceSegment(
   }
 
   // Scan terminals before applying abbreviation and line-wrap rules.
-  const source = input.replace(/\u0085/g, ' ');
-  const chunks = sentenceChunks(source, caseNeutral);
+  const chunks = sentenceChunks(input.replace(/\u0085/g, ' '), caseNeutral);
 
   const acc: string[] = [];
-  const quoteSource = {
-    input: source,
-    index: 0,
-    possessives: caseNeutral ? possessiveQuotePositions(source) : new Uint8Array(),
-  };
   let pending: SentenceBuffer | undefined;
   for (let idx = 0; idx < chunks.length; idx++) {
     if (pending || chunks[idx]) {
-      const chunk = pending ?? new SentenceBuffer(chunks[idx], caseNeutral, quoteSource);
+      const chunk = pending ?? new SentenceBuffer(chunks[idx], caseNeutral);
       pending = undefined;
       // Trim only spaces (i.e. preserve line breaks/carriage feeds)
       chunk.trimEnd();
@@ -575,7 +505,8 @@ function segmentList(input: string, caseNeutral: boolean): string[] | undefined 
 export interface SentenceSegmentOptions {
   /**
    * Ignore letter casing when applying sentence-boundary heuristics (default: false).
-   * A spaced s' closes a quote unless a later unambiguous closer identifies it as possessive.
+   * Ambiguous spaced single quotes close their span instead of using capitalization
+   * to infer a possessive; quoted phrases can therefore have different boundaries.
    */
   caseNeutral?: boolean;
 }
