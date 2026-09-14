@@ -685,6 +685,30 @@ describe('Utility Functions', () => {
       expect(rouge.l(input, '2. Beta 1. Alpha a) One b) Two')).toBe(1);
     });
 
+    test('prefers a sparse outer family over an earlier nested pair', () => {
+      const input = 'Intro: 1. First a) One b) Two 42. Last';
+      const expected = ['Intro:', '1. First a) One b) Two', '42. Last'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['Intro.\u0085', '"Intro."', '(Intro.)'])(
+      'finds an embedded list after %s',
+      (prefix) => {
+        const input = `${prefix} 1. Alpha 2. Beta.`;
+        const expected = [prefix.replace(/\u0085/g, '').trim(), '1. Alpha', '2. Beta.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test('discards joined author initials before a later list', () => {
+      const input = 'Authors: A. Smith and B. Jones. Intro: C. Alpha D. Beta.';
+      const expected = ['Authors: A. Smith and B. Jones.', 'Intro:', 'C. Alpha', 'D. Beta.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
     test('preserves genuinely sparse numbered lists after deferring outliers', () => {
       expect(ss('Options: 1. First 42. Last')).toEqual(['Options:', '1. First', '42. Last']);
     });

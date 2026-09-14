@@ -307,13 +307,14 @@ export function sentenceSegment(input: string, options: SentenceSegmentOptions =
     return [];
   }
 
-  const list = segmentList(input, caseNeutral, depth);
+  const normalizedInput = input.replace(/\u0085/g, ' ');
+  const list = segmentList(normalizedInput, caseNeutral, depth);
   if (list !== undefined) {
     return list;
   }
 
   // Scan terminals before applying abbreviation and line-wrap rules.
-  const chunks = sentenceChunks(input.replace(/\u0085/g, ' '), caseNeutral);
+  const chunks = sentenceChunks(normalizedInput, caseNeutral);
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -514,14 +515,22 @@ function listMarkerPrefix(
 ): {
   empty: boolean;
   boundary: boolean;
+  joinedNameInitial: boolean;
 } {
   let index = marker.index - 1;
   let lineBreak = /[\r\n]/.test(marker[0]);
-  while (index >= 0 && /\s/.test(input[index])) {
+  while (index >= 0 && /[\s"'\])}>]/.test(input[index])) {
     lineBreak ||= /[\r\n]/.test(input[index]);
     index--;
   }
-  return { empty: index < 0, boundary: lineBreak || /[.!?:\p{Pd}]/u.test(input[index] ?? '') };
+  const joinedNameInitial =
+    /^\p{Cased}\p{M}*\.$/u.test(marker[0].trim()) &&
+    /(?:\b(?:and|or)|[,;&])\s*$/i.test(input.slice(Math.max(0, marker.index - 8), marker.index));
+  return {
+    empty: index < 0,
+    boundary: lineBreak || /[.!?:\p{Pd}]/u.test(input[index] ?? ''),
+    joinedNameInitial,
+  };
 }
 
 function nextListMarker(
@@ -541,8 +550,7 @@ function nextListMarker(
       bodyStart = marker.index + marker[0].length;
     }
     const enclosedMarker =
-      marker[0].endsWith(')') &&
-      (state.bracketDepth.some((depth) => depth > 0) || state.quote !== undefined);
+      state.bracketDepth.some((depth) => depth > 0) || state.quote !== undefined;
     const yearInProse =
       /^(?:1\d{3}|20\d{2})\.$/.test(marker[0].trim()) && !listMarkerPrefix(input, marker).boundary;
     const countInProse =
@@ -590,6 +598,16 @@ function listMarkerFamily(marker: string, caseNeutral: boolean): RegExp {
   return new RegExp(`${start}[^\\r\\n]*${ending}$`, 'u');
 }
 
+function isDistantNumericMarker(first: number, marker: string, atBoundary: boolean): boolean {
+  const current = Number(marker.match(/^\d+/)?.[0]);
+  return (
+    Number.isFinite(first) &&
+    Number.isFinite(current) &&
+    Math.abs(current - first) > 10 &&
+    !atBoundary
+  );
+}
+
 function findListCandidate(
   input: string,
   caseNeutral: boolean,
@@ -619,16 +637,16 @@ function findListCandidate(
     const family = listMarkerFamily(marker, caseNeutral);
     const first = firstByFamily.get(family.source);
     const identity = caseNeutral ? marker.toLowerCase().toUpperCase().toLowerCase() : marker;
-    const joinedNameInitial =
-      /^\p{Cased}\p{M}*\.$/u.test(marker) &&
-      /(?:\b(?:and|or)|[,;&])\s*$/i.test(
-        input.slice(Math.max(0, current.index - 8), current.index),
-      );
+    if (context.joinedNameInitial) {
+      firstByFamily.delete(family.source);
+      current = nextListMarker(input, expression, state);
+      continue;
+    }
     if (first !== undefined) {
       first.hasBody ||= input.slice(first.bodyStart, current.index).trim().length > 0;
       first.bodyStart = current.index + current[0].length;
     }
-    const distinctMarker = first?.identity !== identity && !joinedNameInitial;
+    const distinctMarker = first?.identity !== identity;
     if (first?.hasBody && (first.emptyPrefix || distinctMarker)) {
       const candidate: ListCandidate = {
         current: first.marker,
@@ -639,21 +657,19 @@ function findListCandidate(
       const hasEarlierFamily = [...firstByFamily.values()].some(
         (entry) => entry.marker.index < first.marker.index,
       );
-      const firstNumber = first.number;
-      const currentNumber = Number(marker.match(/^\d+/)?.[0]);
-      const distantNumber =
-        Number.isFinite(firstNumber) &&
-        Number.isFinite(currentNumber) &&
-        Math.abs(currentNumber - firstNumber) > 10 &&
-        !context.boundary;
+      const distantNumber = isDistantNumericMarker(first.number, marker, context.boundary);
       if (!(hasEarlierFamily || distantNumber)) {
         return candidate;
       }
-      deferred ??= {
-        candidate,
-        expressionIndex: expression.lastIndex,
-        state: { ...state, bracketDepth: [...state.bracketDepth] },
-      };
+      if (
+        candidate.current.index < (deferred?.candidate.current.index ?? Number.POSITIVE_INFINITY)
+      ) {
+        deferred = {
+          candidate,
+          expressionIndex: expression.lastIndex,
+          state: { ...state, bracketDepth: [...state.bracketDepth] },
+        };
+      }
     }
 
     if (first === undefined && (context.empty || !ambiguousMarker || context.boundary)) {
