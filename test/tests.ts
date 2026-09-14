@@ -3459,3 +3459,9 @@ test('does not pair comparisons with quoted greater-than signs', () => {
     ]);
   }
 });
+
+test('reuses a deferred list prefix with long leading whitespace', () => {
+  const count = 40_000;
+  const input = `${' '.repeat(5 * count)}A. x Intro: 1. x${' 2. x'.repeat(count)}`;
+  expect(rouge.n(input, input)).toBe(1);
+}, 5000);

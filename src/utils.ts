@@ -700,6 +700,7 @@ function findListCandidate(
     {
       marker: RegExpExecArray;
       emptyPrefix: boolean;
+      prefix?: string;
       identity: string;
       number: number;
       bodyStart: number;
@@ -740,11 +741,12 @@ function findListCandidate(
     }
     const distinctMarker = first?.identity !== identity;
     if (first?.hasBody && (first.emptyPrefix || distinctMarker)) {
+      first.prefix ??= input.slice(0, first.marker.index).trim();
       const candidate: ListCandidate = {
         current: first.marker,
         next: current,
         family,
-        prefix: input.slice(0, first.marker.index).trim(),
+        prefix: first.prefix,
       };
       const hasEarlierFamily = [...firstByFamily.values()].some(
         (entry) => entry.marker.index < first.marker.index,
