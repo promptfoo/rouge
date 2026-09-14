@@ -753,6 +753,7 @@ describe('Utility Functions', () => {
       "She said 'The dogs' owners' Alpha.[1] Beta.'",
       "She said 'Alice's Alpha.[1] Beta.'",
       "She said ‘The dogs’ owners called 'Alice' near Alpha.[1] Beta.’ aloud.",
+      "She said ‘The dogs’ owners saw 'Alpha.[1] Beta.'’ aloud.",
       'She said ‘Alice’s Alpha.[1] Beta.’ aloud.',
       'She said ‘𝒜’s Alpha.[1] Beta.’ aloud.',
       'She said ‘Café’s Alpha.[1] Beta.’ aloud.',
@@ -763,6 +764,14 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
     });
+
+    test.each([', then left.', '—then left.'])(
+      'recognizes a closing ASCII quote before %s',
+      (suffix) => {
+        const input = `She said 'The dogs' owners saw Alpha.[1] Beta.'${suffix}`;
+        expect(ss(input)).toEqual([input]);
+      },
+    );
 
     test('keeps the ASCII plural possessive citation passage with its attribution', () => {
       const input = "She said 'The dogs' owners saw Alpha.[1] Beta.' aloud.";

@@ -566,6 +566,8 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   return chunks;
 }
 
+const singleQuoteClosingContextReg = /^[\s.,!?;:)\]}”’»\p{Pd}]$/u;
+
 /** A later unambiguous closer confirms s-ending possessives in each quote family. */
 function citationApostrophes(input: string): Uint8Array {
   const apostrophes = new Uint8Array(input.length);
@@ -580,7 +582,8 @@ function citationApostrophes(input: string): Uint8Array {
       quote[0] === '‘' ||
       (family === 1 &&
         (index === 0 || /[\s\p{Punctuation}]$/u.test(previous)) &&
-        /\S/.test(following))
+        following.length > 0 &&
+        !singleQuoteClosingContextReg.test(following))
     ) {
       candidates[family] = undefined;
     } else if (
@@ -638,7 +641,7 @@ function updateCitationQuotationState(
   const previous = input[index - 1] ?? '';
   const following = input[index + 1] ?? '';
   if (closers.at(-1) === "'") {
-    if (following.length === 0 || /[\s.,!?;:)\]}\p{Pd}]/u.test(following)) {
+    if (following.length === 0 || singleQuoteClosingContextReg.test(following)) {
       closers.pop();
     }
     return;
