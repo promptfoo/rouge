@@ -78,22 +78,19 @@ export function treeBankTokenize(input: string): string[] {
 }
 
 function opensDoubleQuote(input: string, index: number, insideQuotes: boolean): boolean {
-  return !insideQuotes && (index === 0 || /[\s\p{Punctuation}]/u.test(input[index - 1]));
+  return !insideQuotes && (index === 0 || /[\s\p{Punctuation}<]/u.test(input[index - 1]));
 }
 
-function remainsInsideNestedQuotation(
+function remainsInsideQuotation(
   input: string,
   start: number,
   end: number,
   closingQuotes: string,
 ): boolean {
-  return (
-    closingQuotes.length > 1 &&
-    [...closingQuotes].some((quote) => {
-      const closing = input.slice(start + 1, end);
-      return !(closing.includes(quote) || (quote === '"' && closing.includes("''")));
-    })
-  );
+  return [...closingQuotes].some((quote) => {
+    const closing = input.slice(start + 1, end);
+    return !(closing.includes(quote) || (quote === '"' && closing.includes("''")));
+  });
 }
 
 function singleQuotationState(input: string, index: number, insideQuotes: boolean): boolean {
@@ -959,7 +956,10 @@ function sentenceChunks(input: string, caseNeutral: boolean, pairs: Int32Array):
     ) {
       const closingQuotes = closingQuotationMarks(quotations);
       const end = sentenceEnd(input, index, closingQuotes, brackets, caseNeutral, questionTerminal);
-      if (end === -1 || remainsInsideNestedQuotation(input, index, end, closingQuotes)) {
+      if (
+        end === -1 ||
+        (closingQuotes.length > 1 && remainsInsideQuotation(input, index, end, closingQuotes))
+      ) {
         continue;
       }
       // Captured line wraps can only occur between the terminal and closing delimiters.
@@ -1085,7 +1085,7 @@ function sentenceEnd(
   }
   const end = closingDelimiterEnd(input, index, closingQuotes);
   if (end < input.length && !/\s/.test(input[end])) {
-    return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
+    return isUnspacedSentenceBoundary(input, index, end, caseNeutral, closingQuotes) ? end : -1;
   }
   if (end === index + 1) {
     return standaloneTerminalEnd(input, end, insideQuotes);
@@ -1338,7 +1338,11 @@ function isUnspacedSentenceBoundary(
   index: number,
   next: number,
   caseNeutral: boolean,
+  closingQuotes = '',
 ): boolean {
+  if (remainsInsideQuotation(input, index, next, closingQuotes)) {
+    return false;
+  }
   if (isUnspacedDelimitedSentenceStart(input, next - 1, caseNeutral)) {
     return true;
   }

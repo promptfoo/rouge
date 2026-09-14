@@ -1536,6 +1536,20 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each([
+      ['He wrote <"First. Next.">', ['He wrote <"First. Next.">']],
+      ['She said "Outer.‘Inner.’ End." Next.', ['She said "Outer.‘Inner.’ End."', 'Next.']],
+      [
+        'She said "Outer (Inner.)Next. End." Next.',
+        ['She said "Outer (Inner.)Next. End."', 'Next.'],
+      ],
+      ['She said "First."Next.', ['She said "First."', 'Next.']],
+      ['She said "First."‘Next.’', ['She said "First."', '‘Next.’']],
+    ])('requires pending quote closure before an unspaced boundary: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
     test('recovers repeated unmatched single openers with bounded context state', () => {
       const fragment = "He typed 'word.";
       const input = `${`${fragment} `.repeat(10_000)}He said 'Stop.' Last.`;
