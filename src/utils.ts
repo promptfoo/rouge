@@ -755,22 +755,19 @@ function caseNeutralIdentifierContext(input: string, index: number): boolean {
 }
 
 function hasStableAsciiIdentifierEvidence(input: string, start: number, end: number): boolean {
-  const noOneContinuation = /^no\s+one\b/i.test(input.slice(end + 1, end + 16));
   for (let cursor = start; cursor < end; cursor++) {
     const code = input.charCodeAt(cursor);
     if ((code >= 48 && code <= 57) || code === 95) {
       return true;
     }
-    const lowerCode = code | 32;
+    const lowerCode = code === 0x21_2a ? 107 : code | 32;
     if (lowerCode < 97 || lowerCode > 122) {
       continue;
     }
     if (/^\p{Mark}$/u.test(characterAt(input, cursor + 1))) {
       continue;
     }
-    if (lowerCode !== 107 || start > 0 || !noOneContinuation) {
-      return true;
-    }
+    return true;
   }
   return false;
 }
@@ -817,7 +814,9 @@ function isUnspacedSentenceBoundary(
   const trailingInitial = caseNeutral
     ? /(?:^|[^\p{Letter}\p{Mark}\p{Number}_-])\p{Cased}\p{M}*\.$/u
     : /\b\p{Lu}\.$/u;
-  const nextInitial = caseNeutral ? /^(?!i(?:\s|$))\p{Cased}\p{M}*(?=\s|$)/iu : /^\p{Lu}(?=\s|$)/u;
+  const nextInitial = caseNeutral
+    ? /^(?![ai](?:\s|$))\p{Cased}\p{M}*(?=\s|$)/iu
+    : /^\p{Lu}(?=\s|$)/u;
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const contextChangingGreekInitial = /^[Σσς]\p{M}+\.\p{Case_Ignorable}*\p{Cased}/u.test(following);
   const continuesAbbreviation =

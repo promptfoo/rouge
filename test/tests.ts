@@ -688,23 +688,19 @@ describe('Utility Functions', () => {
       );
     });
 
-    test.each(['K', 'KÁ'])(
-      'does not normalize Kelvin sign %s into ASCII identifier evidence',
+    test.each(['K', 'k', 'K', 'KÁ'])(
+      'keeps case-equivalent dotted identifiers before No one: %s',
       (word) => {
-        const input = `${word}.No one answered.`;
-        const expected = [`${word}.`, 'No one answered.'];
-        expect(segmentCaseNeutrally(input)).toEqual(expected);
-        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
-          expected.map((sentence) => sentence.toLowerCase()),
-        );
+        const input = `${word}.No one`;
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
         for (const score of [rouge.n, rouge.s, rouge.l]) {
           expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
-          expect(score(input, `${word}. No one answered.`, { caseSensitive: false })).toBe(1);
         }
       },
     );
 
-    test.each(['I agree.', 'I 100% agree.'])(
+    test.each(['I agree.', 'I 100% agree.', 'A test.', 'A new day.'])(
       'preserves an adjacent Unicode one-letter sentence before %s',
       (continuation) => {
         const input = `Я.${continuation}`;
