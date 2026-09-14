@@ -649,6 +649,9 @@ describe('Utility Functions', () => {
 
     test.each([
       'A.İ',
+      'A.İ́B',
+      'README.İ́ Beta',
+      'A.İ𝅥B',
       'Alpha.İ',
       'U.Sİ',
       'é.İ.',
