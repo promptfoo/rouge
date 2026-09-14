@@ -1265,6 +1265,91 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['vs.', 'v.s.'])(
+      'releases terminal %s after a completed standalone bracket',
+      (abbreviation) => {
+        for (const [opening, closing] of [
+          ['(', ')'],
+          ['[', ']'],
+          ['{', '}'],
+          ['<', '>'],
+        ]) {
+          const first = `${opening}He wrote ${abbreviation}${closing}`;
+          for (const next of ['Alice replied.', '123 people replied.']) {
+            for (const segment of [ss, segmentCaseNeutrally]) {
+              expect(segment(`${first} ${next}`)).toEqual([first, next]);
+            }
+          }
+        }
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'distinguishes angle delimiters from comparisons before quoted %s',
+      (abbreviation) => {
+        for (const comparison of ['x < 5', 'x<5', 'x<y']) {
+          const first = `The score was ${comparison}.`;
+          const second = `He wrote "${abbreviation}"`;
+          for (const segment of [ss, segmentCaseNeutrally]) {
+            expect(segment(`${first} ${second} Alice replied.`)).toEqual([
+              first,
+              second,
+              'Alice replied.',
+            ]);
+            expect(segment(`${first} He showed ">". ${second} Alice replied.`)).toEqual([
+              first,
+              'He showed ">".',
+              second,
+              'Alice replied.',
+            ]);
+          }
+        }
+        for (const [opening, closing] of [
+          ['<', '>'],
+          ['< ', ' >'],
+          ['<[(', ')]>'],
+        ]) {
+          const input = `He noted ${opening}"${abbreviation}" Examples followed${closing} today.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+        }
+      },
+    );
+
+    test.each([
+      ['"', '"'],
+      ["'", "'"],
+      ['“', '”'],
+      ['‘', '’'],
+      ['«', '»'],
+      ['``', "''"],
+      ["''", "''"],
+    ])('ignores quoted angle marks inside %s%s', (opening, closing) => {
+      const first = `${opening}literal < > sign${closing}.`;
+      const second = 'He wrote "vs."';
+      for (const segment of [ss, segmentCaseNeutrally]) {
+        expect(segment(`${first} ${second} Alice replied.`)).toEqual([
+          first,
+          second,
+          'Alice replied.',
+        ]);
+        const input = `He noted <${opening}literal > sign${closing} and "vs." Examples followed> today.`;
+        expect(segment(input)).toEqual([input]);
+      }
+    });
+
+    test.each(['Rock‘n', 'Rock’n', "Rock'n", 'Café’s'])(
+      'keeps word-internal apostrophes outside angle quotation state: %s',
+      (word) => {
+        const input = `${word} sign <"vs." Examples followed> today.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        const quoted = `He noted <"${word} > sign" and "vs." Examples followed> today.`;
+        expect(ss(quoted)).toEqual([quoted]);
+        expect(segmentCaseNeutrally(quoted)).toEqual([quoted]);
+      },
+    );
+
     test('retains Unicode-folded abbreviations before numeric quote continuations', () => {
       const input = 'He said "Kan." 2 people remained.';
       expect(segmentCaseNeutrally(input)).toEqual([input]);
@@ -1663,6 +1748,21 @@ describe('Utility Functions', () => {
     // Using 500ms threshold to account for CI environment variability
     describe('ReDoS prevention', () => {
       const TIMEOUT_MS = 500;
+
+      test('tracks unmatched angle openers within a constrained heap', () => {
+        expectBundledScriptToPass(
+          `
+            const summary = '<'.repeat(7000000) + 'word ">"';
+            const sentences = module.exports.sentenceSegment(summary);
+            if (sentences.length !== 1 || sentences[0] !== summary) {
+              throw new Error('Unmatched angle content changed');
+            }
+            process.stdout.write('ok');
+          `,
+          30_000,
+          ['--max-old-space-size=64'],
+        );
+      }, 35_000);
 
       test('segments large spaced-ellipsis runs within a constrained heap', () => {
         expectBundledScriptToPass(
