@@ -713,12 +713,12 @@ function sentenceEnd(
   const startsWithLetter = caseNeutral
     ? isNeutralSentenceStart(input, end, next)
     : charIsUpperCase(nextCharacter);
-  const startsWithNumber =
-    /^\p{Number}$/u.test(nextCharacter) &&
-    !abbrvReg.test(gateSuffix) &&
-    !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
-      input.slice(next),
-    );
+  const startsWithNumber = isNumericSentenceStart(
+    input,
+    next,
+    gateSuffix,
+    closesAbbreviationQuotation,
+  );
   if (!(startsWithLetter || startsWithNumber)) {
     return -1;
   }
@@ -731,6 +731,22 @@ function sentenceEnd(
     isAbbreviationException(gateSuffix, input.slice(next), closesAbbreviationQuotation)
     ? -1
     : end;
+}
+
+function isNumericSentenceStart(
+  input: string,
+  next: number,
+  suffix: string,
+  closesQuotation: boolean,
+): boolean {
+  const quotedVersus = closesQuotation && /\bv\.?s\.$/i.test(suffix);
+  return (
+    /^\p{Number}$/u.test(characterAt(input, next)) &&
+    (!abbrvReg.test(suffix) || quotedVersus) &&
+    !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
+      input.slice(next),
+    )
+  );
 }
 
 function countClosingBrackets(input: string, start: number, end: number): number {

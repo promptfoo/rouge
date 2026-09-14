@@ -1147,6 +1147,36 @@ describe('Utility Functions', () => {
       }
     });
 
+    test.each(['vs.', 'v.s.'])(
+      'preserves numeric sentence starts after a completed %s quotation',
+      (abbreviation) => {
+        for (const quote of ['"', "'"]) {
+          const first = `He wrote ${quote}${abbreviation}${quote}`;
+          const next = '123 started.';
+          for (const segment of [ss, segmentCaseNeutrally]) {
+            for (const separator of [' ', '\n\n']) {
+              expect(segment(`${first}${separator}${next}`)).toEqual([first, next]);
+            }
+            for (const continuation of ['100 times correctly.', '100% correctly.']) {
+              const input = `${first} ${continuation}`;
+              expect(segment(input)).toEqual([input]);
+            }
+          }
+        }
+      },
+    );
+
+    test('preserves pronoun sentence starts that share spelling with acronyms', () => {
+      const first = 'The abbreviation vs.';
+      const next = 'It is clearer.';
+      expect(ss(`${first} ${next}`)).toEqual([first, next]);
+      expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual([first, next]);
+      expect(segmentCaseNeutrally(`${first} ${next}`.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        next.toLowerCase(),
+      ]);
+    });
+
     test('retains Unicode-folded abbreviations before numeric quote continuations', () => {
       const input = 'He said "Kan." 2 people remained.';
       expect(segmentCaseNeutrally(input)).toEqual([input]);
