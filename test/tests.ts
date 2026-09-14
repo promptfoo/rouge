@@ -1749,6 +1749,83 @@ describe('Utility Functions', () => {
       });
 
       test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('separates an unspaced %s%s opening after a terminal ellipsis', (open, close) => {
+        const input = `Alpha...${open}Beta...${close}`;
+        const expected = ['Alpha...', `${open}Beta...${close}`];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+        const ordinary = `Alpha.${open}Beta.${close}`;
+        expect(ss(ordinary)).toEqual([ordinary]);
+        expect(segmentCaseNeutrally(ordinary)).toEqual([ordinary]);
+        const hesitation = `It was...${open}Beta...${close}`;
+        expect(ss(hesitation)).toEqual([hesitation]);
+        expect(segmentCaseNeutrally(hesitation)).toEqual([hesitation]);
+      });
+
+      test.each([
+        'It was..."Beta..."',
+        'He paused...“Perhaps,” before continuing.',
+        'Wait...100 years.',
+        'She said “Alpha...‘Beta...’ Gamma.”',
+      ])('applies continuation rules after an empty ellipsis separator: %s', (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      });
+
+      test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('closes terminal brackets inside %s%s quotations', (open, close) => {
+        for (const [left, right] of [
+          ['(', ')'],
+          ['[', ']'],
+          ['{', '}'],
+          ['<', '>'],
+        ]) {
+          const first = `He said ${open}${left}Enough...${right}${close}`;
+          const input = `${first} Next.`;
+          expect(ss(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+        }
+        const continuation = `He said ${open}(Enough...) and left${close} today.`;
+        expect(ss(continuation)).toEqual([continuation]);
+        expect(segmentCaseNeutrally(continuation)).toEqual([continuation]);
+      });
+
+      test.each(['—', '–', '-'])(
+        'closes an s-ending ASCII quotation before the dash %s',
+        (dash) => {
+          const first = `She chose 'Paris'${dash}Alice agreed...`;
+          const input = `${first} Beta followed.`;
+          expect(ss(input)).toEqual([first, 'Beta followed.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Beta followed.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            'beta followed.',
+          ]);
+          const possessive = `She said 'The students'${dash}all present${dash}work... Alpha mattered.'`;
+          expect(ss(possessive)).toEqual([possessive]);
+          expect(segmentCaseNeutrally(possessive)).toEqual([possessive]);
+        },
+      );
+
+      test('retains four-dot precedence before an unspaced typographic quotation', () => {
+        const input = 'It was....“Beta...”';
+        expect(ss(input)).toEqual(['It was....', '“Beta...”']);
+        expect(segmentCaseNeutrally(input)).toEqual(['It was....', '“Beta...”']);
+      });
+
+      test.each([
         "She said, 'The students' work... Alpha matters.'",
         "She said, 'James', the students' work... Alpha matters.'",
         "He paused... 'The students' work,' before answering.",

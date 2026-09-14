@@ -498,7 +498,7 @@ class SentenceBuffer {
         /\s/.test(following) &&
         /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(text.slice(index + 1).trimStart());
       this.#insideSingleQuotes =
-        possessive || (following.length > 0 && !/[\s.,!?;:)\]}]/.test(following));
+        possessive || (following.length > 0 && !/[\s.,!?;:)\]}\p{Pd}]/u.test(following));
       return;
     }
     this.#insideSingleQuotes =
@@ -685,7 +685,7 @@ export function sentenceSegment(
           // Retain a boundary for other entities and unterminated final fragments.
           acc.push(chunk.text());
         }
-      } else if (chunks[idx + 1] && ellipseReg.test(suffix)) {
+      } else if ((chunks[idx + 1] || chunks[idx + 2]) && ellipseReg.test(suffix)) {
         // Catch mid-sentence ellipses (and their derivatives) and merge them
         const nextChunk = chunks[idx + 1];
         const nextSentence = nextChunk.trim() || chunks[idx + 2] || '';
@@ -1032,7 +1032,10 @@ function sentenceEnd(
   }
 
   const closedBrackets = countClosingBrackets(input, index + 1, end);
-  const closesQuotation = insideQuotes && /(?:"|'')$/.test(input.slice(end - 2, end));
+  // Ellipsis lookahead succeeds here only after consuming all pending typographic closers.
+  const closesQuotation =
+    closesAsciiQuotation(input, end, insideQuotes) ||
+    (terminalEllipsis && typographicQuoteClosers.length > 0);
   if (
     closedBrackets > 0 &&
     (closedBrackets < brackets.depth || !(brackets.standalone || closesQuotation))
@@ -1057,6 +1060,10 @@ function sentenceEnd(
     return -1;
   }
   return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
+}
+
+function closesAsciiQuotation(input: string, end: number, insideQuotes: boolean): boolean {
+  return insideQuotes && /(?:"|'')$/.test(input.slice(end - 2, end));
 }
 
 function startsNumericSentence(
@@ -1100,13 +1107,16 @@ function isUnspacedDelimitedSentenceStart(
   caseNeutral: boolean,
 ): boolean {
   let next = index + 1;
-  if (!/["'([{<]/.test(input[next] ?? '')) {
+  const opening = /\.{3,4}$/.test(input.slice(Math.max(0, index - 3), index + 1))
+    ? /["'([{<“‘«„]/
+    : /["'([{<]/;
+  if (!opening.test(input[next] ?? '')) {
     return false;
   }
   if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {
     return false;
   }
-  while (next < input.length && /["'([{<]/.test(input[next])) {
+  while (next < input.length && opening.test(input[next])) {
     next++;
   }
   const character = characterAt(input, next);
