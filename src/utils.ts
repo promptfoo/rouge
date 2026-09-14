@@ -110,7 +110,10 @@ function singleQuotationState(
   return insideQuotes && (input[index] !== '’' || apostrophes[index] === 1);
 }
 
-/** Classify elisions and possessives once, without borrowing an unrelated possessive as a closer. */
+/**
+ * Classify elisions and possessives once. Ambiguous s-ending quotes need a later
+ * unambiguous closer; guessing the last candidate can join unrelated sentences.
+ */
 function smartApostrophes(input: string): Uint8Array {
   // One byte per code unit avoids per-apostrophe arrays and hash-table overhead.
   const apostrophes = new Uint8Array(input.length);
@@ -120,11 +123,17 @@ function smartApostrophes(input: string): Uint8Array {
     if (quote[0] === '‘') {
       candidateStart = undefined;
     } else if (
-      /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, index + 1)) ||
+      /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1)) ||
+      (/^\p{Number}$/u.test(characterAt(input, index + 1)) &&
+        !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index))) ||
       input.slice(index - 2, index).toLowerCase() === '’n'
     ) {
       apostrophes[index] = 1;
-    } else if (input[index - 1]?.toLowerCase() === 's' && /\s/.test(input[index + 1] ?? '')) {
+    } else if (
+      /\s/.test(input[index + 1] ?? '') &&
+      (input[index - 1]?.toLowerCase() === 's' ||
+        /\p{Letter}\.\p{Letter}\.$/u.test(input.slice(Math.max(0, index - 8), index)))
+    ) {
       candidateStart ??= index;
     } else {
       if (candidateStart !== undefined) {
@@ -354,6 +363,10 @@ class SentenceBuffer {
  * Splits a body of text into an array of sentences
  * using a rule-based segmentation approach.
  *
+ * Ambiguous smart-single quotes after s-ending words close their span unless a
+ * later unambiguous closer confirms a possessive. This conservative rule can
+ * split a quoted phrase containing both a possessive and an s-ending closer.
+ *
  * Adapted from Spencer Mountain's nlp_compromise library
  * found at https://github.com/spencermountain/nlp_compromise/
  *
@@ -579,6 +592,13 @@ export interface SentenceSegmentOptions {
   caseNeutral?: boolean;
 }
 
+interface QuoteState {
+  double: boolean;
+  smartDouble: boolean;
+  single: boolean;
+  apostrophes: Uint8Array;
+}
+
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
 function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8Array): string[] {
   const chunks: string[] = [];
@@ -586,7 +606,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
   const ellipsisCursor = { index: 0 };
   let lastEnd = 0;
   let start = -1;
-  const quotes = { double: false, smartDouble: false, single: false };
+  const quotes: QuoteState = { double: false, smartDouble: false, single: false, apostrophes };
   const brackets = { depth: 0, standalone: false };
 
   for (let index = 0; index < input.length; index++) {
@@ -684,17 +704,16 @@ function isProtectedEllipsisPeriod(
 }
 
 /** Scan closing delimiters, including whitespace before a pending closing quote. */
-function closingDelimiterEnd(
-  input: string,
-  index: number,
-  quotes: { double: boolean; smartDouble: boolean; single: boolean },
-): number {
+function closingDelimiterEnd(input: string, index: number, quotes: QuoteState): number {
   let end = index + 1;
   let doublePending = quotes.double;
   let smartDoublePending = quotes.smartDouble;
   let singlePending = quotes.single;
   while (end < input.length) {
-    if (closingDelimiterReg.test(input[end]) && (input[end] !== '’' || singlePending)) {
+    if (
+      closingDelimiterReg.test(input[end]) &&
+      (input[end] !== '’' || (singlePending && quotes.apostrophes[end] !== 1))
+    ) {
       doublePending &&= input[end] !== '"';
       smartDoublePending &&= input[end] !== '”';
       singlePending &&= input[end] !== '’';
@@ -713,7 +732,7 @@ function closingDelimiterEnd(
       (closingBracketReg.test(input[next]) ||
         (doublePending && input[next] === '"') ||
         (smartDoublePending && input[next] === '”') ||
-        (singlePending && input[next] === '’'))
+        (singlePending && input[next] === '’' && quotes.apostrophes[next] !== 1))
     ) {
       end = next;
       continue;
@@ -727,7 +746,7 @@ function closingDelimiterEnd(
 function sentenceEnd(
   input: string,
   index: number,
-  quotes: { double: boolean; smartDouble: boolean; single: boolean },
+  quotes: QuoteState,
   brackets: { depth: number; standalone: boolean },
   caseNeutral: boolean,
 ): number {

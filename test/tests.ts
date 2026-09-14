@@ -1504,6 +1504,19 @@ describe('Utility Functions', () => {
       },
     );
 
+    test('uses conservative boundaries when both smart-single candidates end in s', () => {
+      const input = 'She cited ‘The students’ work at Acme Co.\nInternational Holdings’ yesterday.';
+      const expected = [
+        'She cited ‘The students’ work at Acme Co.',
+        'International Holdings’ yesterday.',
+      ];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
     test('closes nested smart quotations before a wrapped abbreviation', () => {
       const first = 'He said “She called ‘Stop.’” before we use etc.';
       expect(ss(`${first}\nNext.`)).toEqual([first, 'Next.']);
@@ -1517,6 +1530,27 @@ describe('Utility Functions', () => {
         expect(segmentCaseNeutrally(input)).toEqual([input]);
       },
     );
+
+    test.each(['U.S.', 'U.S.A.', 'E.U.'])(
+      'preserves a quoted possessive after the acronym %s',
+      (acronym) => {
+        const input = `‘The ${acronym}’ Economy grew.’`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      },
+    );
+
+    test.each(['²', '2', '𝟚'])('closes a quotation before a numeric citation %s', (citation) => {
+      const first = `The result was ‘significant’${citation}.`;
+      const input = `${first} We use Acme Co.\nNext sentence.`;
+      const expected = [first, 'We use Acme Co.', 'Next sentence.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
 
     test.each([
       ['‘', '’'],
