@@ -136,12 +136,13 @@ function smartApostrophes(input: string): Uint8Array {
     if (quote[0] === '‘') {
       // A left mark opens a span only after a compatible right mark pairs with it.
       apostrophes[index] = 1;
-      if (
-        !(
-          /[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
-          /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following)
-        )
-      ) {
+      const wordInternal =
+        /[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+        /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following);
+      const leadingElision =
+        (opening !== undefined || candidateStart !== undefined) &&
+        /^‘(?:(?:t(?:is|was)|em)\b|\p{Number})/iu.test(input.slice(index, index + 6));
+      if (!(wordInternal || leadingElision)) {
         opening = index;
         candidateStart = undefined;
       }
@@ -169,15 +170,12 @@ function smartApostrophes(input: string): Uint8Array {
       opening = undefined;
     }
     if (
-      /\s/.test(following) &&
-      (/(?:s|\p{Number})$/iu.test(input.slice(Math.max(0, index - 2), index)) ||
-        /\p{Letter}\.\p{Letter}\.$/u.test(input.slice(Math.max(0, index - 8), index)))
+      /(?:s|\p{Number})$/iu.test(input.slice(Math.max(0, index - 2), index)) ||
+      /\p{Letter}\.\p{Letter}\.$/u.test(input.slice(Math.max(0, index - 8), index))
     ) {
       candidateStart ??= index;
-    } else {
-      if (candidateStart !== undefined) {
-        apostrophes.fill(1, candidateStart, index);
-      }
+    } else if (candidateStart !== undefined) {
+      apostrophes.fill(1, candidateStart, index);
       candidateStart = undefined;
     }
   }
@@ -221,7 +219,7 @@ const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b
 const sentenceContinuationReg =
   /^(?:and|or|but|nor|for|yet|so|at|in|on|of|to|from|with|by|as|then|because|while|after|before|although|though|since|unless|until|when|where|whether|if|once|whereas)\b/i;
 const independentSentenceReg =
-  /^(?:in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
+  /^(?:(?:i|we|he|she|they|you|it|who|what|why|how|which|whose|whom|do|does|did|is|are|was|were|has|have|had)\b|in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
@@ -404,6 +402,7 @@ class SentenceBuffer {
  *
  * Typographic double quotes use the existing straight-quote boundary heuristics,
  * including their ambiguity around quoted abbreviations and phrase boundaries.
+ * Case-neutral mode can split dialogue tags because casing is not a boundary cue.
  * Unpaired left-curly single marks do not open a quotation span; an unmatched
  * double opening quote keeps its span open.
  *
@@ -467,24 +466,24 @@ export function sentenceSegment(
         const nextChunk = chunks[idx + 1];
         const nextSentence = nextChunk?.replace(/^[\s"'“‘’([{<]+/, '');
         const abbreviation = gateSuffix.trimEnd();
+        const insideSmartQuotes = quoteSource.double || quoteSource.single;
+        const independentSentence = independentSentenceReg.test(nextSentence ?? '');
         if (
           nextSentence &&
           abbrvReg.test(abbreviation) &&
           !excepReg.test(abbreviation) &&
           (caseNeutral
             ? startsWithCasedCharacter(nextSentence) &&
-              (!sentenceContinuationReg.test(nextSentence) ||
-                independentSentenceReg.test(nextSentence))
+              (!sentenceContinuationReg.test(nextSentence) || independentSentence)
             : strIsTitleCase(nextSentence)) &&
-          !chunk.hasOpenDelimiter
+          (!chunk.hasOpenDelimiter || (insideSmartQuotes && independentSentence))
         ) {
           chunk.normalizeWhitespace();
           acc.push(chunk.text());
         } else if (
           nextChunk &&
           (chunk.startsWithTitleCase ||
-            quoteSource.double ||
-            quoteSource.single ||
+            insideSmartQuotes ||
             (caseNeutral &&
               sentenceContinuationReg.test(nextChunk.trimStart()) &&
               /[.!?]["'”’\])}>]\s*[\r\n]/.test(suffix)))
@@ -805,6 +804,16 @@ function sentenceEnd(
     return index + 1;
   }
   const end = closingDelimiterEnd(input, index, quotes);
+  const closesQuotation = insideQuotes && /(?:["”’]|'')$/.test(input.slice(end - 2, end));
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  if (
+    closesQuotation &&
+    (/^\p{Number}$/u.test(characterAt(input, end)) ||
+      (openingBracketReg.test(input[end] ?? '') && abbrvReg.test(gateSuffix)))
+  ) {
+    return -1;
+  }
   if (
     end < input.length &&
     !/\s/.test(input[end]) &&
@@ -817,7 +826,6 @@ function sentenceEnd(
   }
 
   const closedBrackets = countClosingBrackets(input, index + 1, end);
-  const closesQuotation = insideQuotes && /(?:["”’]|'')$/.test(input.slice(end - 2, end));
   if (
     closedBrackets > 0 &&
     (closedBrackets < brackets.depth || !(brackets.standalone || closesQuotation))
@@ -825,6 +833,16 @@ function sentenceEnd(
     return -1;
   }
 
+  return sentenceEndAfterDelimiter(input, end, gateSuffix, closedBrackets, caseNeutral);
+}
+
+function sentenceEndAfterDelimiter(
+  input: string,
+  end: number,
+  gateSuffix: string,
+  closedBrackets: number,
+  caseNeutral: boolean,
+): number {
   let next = end;
   while (next < input.length && /[\s"'“‘’([{<]/.test(input[next])) {
     next++;
@@ -832,8 +850,6 @@ function sentenceEnd(
   if (next === input.length) {
     return end;
   }
-  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const nextCharacter = characterAt(input, next);
   const startsWithLetter = caseNeutral
     ? isNeutralSentenceStart(input, end, next)
@@ -849,7 +865,7 @@ function sentenceEnd(
   }
 
   // Keep bracketed ellipses inside the surrounding sentence.
-  if (ellipseReg.test(suffix) && closedBrackets > 0) {
+  if (ellipseReg.test(gateSuffix) && closedBrackets > 0) {
     return -1;
   }
   return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;

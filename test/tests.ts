@@ -1605,6 +1605,65 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each(['‘Twas', '‘Tis', '‘em', '‘99'])(
+      'retains an outer quotation around the leading elision %s',
+      (elision) => {
+        const input = `she said ‘use Acme Co.\n${elision} wisely.’`;
+        const expected = [input.replace('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('retains a possessive candidate before a left-curly elision', () => {
+      const input = 'she said ‘the students’ project uses Acme Co.\n‘99 materials.’';
+      const expected = [input.replace('\n', ' ')];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('attaches the outer closer after a possessive followed by a period', () => {
+      const first = 'She said ‘the students’.’';
+      const input = `${first} Next.`;
+      expect(ss(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+    });
+
+    test.each(['.', ',', ';', ':'])(
+      'retains a quoted possessive before %s punctuation',
+      (punctuation) => {
+        const first = `‘That book is James’${punctuation}`;
+        const input = `${first} We use Acme Co.\nInternational Holdings.’`;
+        const second = 'We use Acme Co. International Holdings.’';
+        const expected = punctuation === '.' ? [first, second] : [`${first} ${second}`];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test.each([
+      ['‘', '’'],
+      ['“', '”'],
+    ])('preserves independent sentences inside %s%s quotes across a wrap', (open, close) => {
+      const first = `${open}I live in the U.S.`;
+      const second = `How about you?${close}`;
+      const input = `${first}\n${second}`;
+      const expected = [first, second];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+      expect(ss(input.replace('\n', ' '))).toEqual(expected);
+    });
+
     test.each(['‘Stop. ’', '‘(Stop.) ’'])(
       'attaches a spaced closer before an unspaced sentence after %s',
       (first) => {
@@ -1680,12 +1739,47 @@ describe('Utility Functions', () => {
     test.each(['2', '²', '𝟚'])(
       'closes a punctuation-ending smart quotation before citation %s',
       (citation) => {
-        const first = `The result was ‘Stop.’${citation}.`;
-        const input = `${first} We use Acme Co.\nNext.`;
-        const expected = [first, 'We use Acme Co.', 'Next.'];
-        expect(ss(input)).toEqual(expected);
-        expect(segmentCaseNeutrally(input)).toEqual(expected);
-        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        for (const [open, close] of [
+          ['‘', '’'],
+          ['“', '”'],
+        ]) {
+          for (const terminal of ['.', '?', '!']) {
+            const first = `The result was ${open}Stop${terminal}${close}${citation}.`;
+            const input = `${first} We use Acme Co.\nNext.`;
+            const expected = [first, 'We use Acme Co.', 'Next.'];
+            expect(ss(input)).toEqual(expected);
+            expect(segmentCaseNeutrally(input)).toEqual(expected);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+              expected.map((sentence) => sentence.toLowerCase()),
+            );
+          }
+        }
+      },
+    );
+
+    test.each(['(formerly Smith Inc.)', '(New York branch)'])(
+      'retains the parenthetical continuation %s after a quoted abbreviation',
+      (continuation) => {
+        for (const [open, close] of [
+          ['‘', '’'],
+          ['“', '”'],
+        ]) {
+          const input = `He works at ${open}Acme Co.${close}${continuation} today.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+        }
+      },
+    );
+
+    test.each(['“Stop!” she shouted.', 'He asked “Why?” repeatedly.'])(
+      'keeps dialogue-tag heuristics consistent across quote styles: %s',
+      (input) => {
+        const straightQuotes = (text: string): string => text.replace(/[“”]/g, '"');
+        expect(ss(input)).toEqual([input]);
+        const expected = segmentCaseNeutrally(straightQuotes(input));
+        expect(segmentCaseNeutrally(input).map(straightQuotes)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase()).map(straightQuotes)).toEqual(
           expected.map((sentence) => sentence.toLowerCase()),
         );
       },
