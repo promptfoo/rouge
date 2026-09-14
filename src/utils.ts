@@ -139,9 +139,9 @@ function isAbbreviationException(
   return (
     excepReg.test(suffix) &&
     !(
-      /\bvs\.$/i.test(suffix) &&
+      /\bv\.?s\.$/i.test(suffix) &&
       (closesQuotation ||
-        /\b(?:am|is|are|was|were|be|been|being)\s+vs\.$/i.test(suffix) ||
+        /\b(?:am|is|are|was|were|be|been|being)\s+v\.?s\.$/i.test(suffix) ||
         /^(?:this|that|these|those|it|we|they|he|she|i)\b/i.test(continuation))
     )
   );
@@ -398,12 +398,12 @@ export function sentenceSegment(
         }
       } else if (chunks[idx + 1] && abbrvReg.test(gateSuffix)) {
         const nextChunk = chunks[idx + 1];
-        const nextSentence = /\bvs\.$/i.test(gateSuffix)
+        const nextSentence = /\bv\.?s\.$/i.test(gateSuffix)
           ? nextChunk.replace(/^[\s"'([{<]+/, '')
           : nextChunk;
         const paragraphBreak = /\n[^\S\n]*\n/.test(nextChunk.replace(/\r\n?/g, '\n'));
         if (
-          (paragraphBreak && /\bvs\.$/i.test(gateSuffix)) ||
+          (paragraphBreak && /\bv\.?s\.$/i.test(gateSuffix)) ||
           ((caseNeutral
             ? startsWithCasedCharacter(nextSentence) &&
               (!sentenceContinuationReg.test(nextSentence) ||

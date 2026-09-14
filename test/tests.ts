@@ -1153,6 +1153,26 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
     });
 
+    test.each(['vs.', 'v.s.'])(
+      'applies the same terminal and comparison rules to %s',
+      (abbreviation) => {
+        const first = `The abbreviation is ${abbreviation}`;
+        const next = 'Today is clearer.';
+        const comparison = `The Giants ${abbreviation} Boston Celtics, which was televised.`;
+        const quoted = `He wrote "${abbreviation}"`;
+        const paragraph = `The Giants ${abbreviation}`;
+        for (const segment of [ss, segmentCaseNeutrally]) {
+          expect(segment(`${first} ${next}`)).toEqual([first, next]);
+          expect(segment(comparison)).toEqual([comparison]);
+          expect(segment(`${quoted} Alice explained.`)).toEqual([quoted, 'Alice explained.']);
+          expect(segment(`${paragraph}\n\nBoston Celtics won.`)).toEqual([
+            paragraph,
+            'Boston Celtics won.',
+          ]);
+        }
+      },
+    );
+
     test('should not split possessive two letter abbreviations', () => {
       expect(ss("That is JFK Jr.'s book.")).toEqual(["That is JFK Jr.'s book."]);
     });
