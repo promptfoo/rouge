@@ -303,15 +303,13 @@ class SentenceBuffer {
 // Classify all candidates once so repeated possessives do not repeat lookahead.
 function possessiveQuotePositions(input: string): Set<number> {
   const possessives = new Set<number>();
+  const ellipses = spacedEllipsisRanges(input, true);
+  const ellipsisCursor = { index: 0 };
   let candidates: number[] = [];
   for (const boundary of input.matchAll(/['.!?]/g)) {
     const index = boundary.index;
     if (boundary[0] !== "'") {
-      const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-      const internalPunctuation =
-        /[\p{Letter}\p{Number}]/u.test(characterAt(input, index + 1)) &&
-        !isUnspacedSentenceBoundary(input, index, index + 1, true);
-      if (!(internalPunctuation || abbrvReg.test(suffix))) {
+      if (candidates.length > 0 && !isQuoteContinuation(input, index, ellipses, ellipsisCursor)) {
         candidates = [];
       }
       continue;
@@ -329,6 +327,24 @@ function possessiveQuotePositions(input: string): Set<number> {
     }
   }
   return possessives;
+}
+
+function isQuoteContinuation(
+  input: string,
+  index: number,
+  ellipses: SpacedEllipsisRange[],
+  ellipsisCursor: { index: number },
+): boolean {
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  return (
+    (input[index] === '.' &&
+      (input[index + 1] === '.' ||
+        ellipseReg.test(suffix) ||
+        isProtectedEllipsisPeriod(index, ellipses, ellipsisCursor))) ||
+    abbrvReg.test(suffix) ||
+    (/[\p{Letter}\p{Number}]/u.test(characterAt(input, index + 1)) &&
+      !isUnspacedSentenceBoundary(input, index, index + 1, true))
+  );
 }
 
 /**
@@ -553,7 +569,10 @@ function segmentList(input: string, caseNeutral: boolean): string[] | undefined 
 
 /** Options for rule-based sentence segmentation. */
 export interface SentenceSegmentOptions {
-  /** Ignore letter casing when applying sentence-boundary heuristics (default: false). */
+  /**
+   * Ignore letter casing when applying sentence-boundary heuristics (default: false).
+   * A spaced s' closes a quote unless a later unambiguous closer identifies it as possessive.
+   */
   caseNeutral?: boolean;
 }
 

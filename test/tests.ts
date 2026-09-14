@@ -1050,6 +1050,28 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual([input.replaceAll('\n', ' ')]);
     });
 
+    test('uses conservative quote pairing when both closing candidates end in s', () => {
+      const input = "She reviewed 'the students' Acme Co.\nInternational Success' today.";
+      const expected = ["She reviewed 'the students' Acme Co.", "International Success' today."];
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+      for (const score of [rouge.n, rouge.s, rouge.l]) {
+        expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      }
+    });
+
+    test.each(['...', '. . .'])(
+      'preserves possessives across protected ellipses: %s',
+      (ellipsis) => {
+        const input = `She reviewed 'the students' Acme${ellipsis} Holdings Co.\nInternational report' today.`;
+        const expected = [input.replaceAll('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
     test('closes single-quoted spans after their opening fragment', () => {
       expect(
         ss("We invested in 'Acme Co.\nInternational Holdings' before we use etc.\nNext sentence."),
