@@ -1620,7 +1620,7 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
-    test.each(['‘Twas', '‘Tis', '‘em', '‘99'])(
+    test.each(['‘Twas', '‘Tis', '‘em', '‘99', '‘Cause', '‘Til', '‘Till'])(
       'retains an outer quotation around the leading elision %s',
       (elision) => {
         const input = `she said ‘use Acme Co.\n${elision} wisely.’`;
@@ -1652,7 +1652,7 @@ describe('Utility Functions', () => {
       );
     });
 
-    test.each(['’Twas', '’Tis', '’em', '’99'])(
+    test.each(['’Twas', '’Tis', '’em', '’99', '’Cause', '’Til', '’Till'])(
       'retains sentence-initial elision %s inside an outer smart quotation',
       (elision) => {
         const first = 'She said ‘First.';
@@ -1664,6 +1664,24 @@ describe('Utility Functions', () => {
         expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
           expected.map((sentence) => sentence.toLowerCase()),
         );
+      },
+    );
+
+    test.each(['Cause I left.', 'Til I returned.'])(
+      'keeps the leading elision with its own sentence: %s',
+      (sentence) => {
+        const first = 'She said ‘First.';
+        const second = `’${sentence}’`;
+        const input = `${first} ${second} Next.`;
+        const expected = [first, second, 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+        const adjacent = `She said ‘Stop.’${sentence}`;
+        expect(ss(adjacent)).toEqual(['She said ‘Stop.’', sentence]);
+        expect(segmentCaseNeutrally(adjacent)).toEqual(['She said ‘Stop.’', sentence]);
       },
     );
 

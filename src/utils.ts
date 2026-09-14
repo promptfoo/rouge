@@ -130,7 +130,7 @@ function isAlphabeticFootnote(input: string, index: number): boolean {
 }
 
 function isLeadingSmartElision(input: string, index: number): boolean {
-  return /^[‘’](?:(?:t(?:is|was)|em)\b|\p{Number}{2}(?!\p{Number}))/iu.test(
+  return /^[‘’](?:(?:t(?:is|was|ill?)|em|cause)\b|\p{Number}{2}(?!\p{Number}))/iu.test(
     input.slice(index, index + 8),
   );
 }
