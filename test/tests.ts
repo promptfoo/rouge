@@ -1074,6 +1074,7 @@ describe('Utility Functions', () => {
       'The Giants vs. Tigers won.',
       'The Giants VS. Tigers won.',
       'The Giants vs. Boston Celtics, which was televised.',
+      'Android vs. Windows is common.',
     ])('keeps the standard versus abbreviation inside %s', (input) => {
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);
@@ -1099,6 +1100,25 @@ describe('Utility Functions', () => {
         const expected = ['The standard abbreviation is vs.', continuation];
         expect(ss(input)).toEqual(expected);
         expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['"This is clearer."', '(This is clearer.)'])(
+      'preserves delimited sentences after a terminal versus abbreviation: %s',
+      (continuation) => {
+        const first = 'The abbreviation is vs.';
+        expect(ss(`${first} ${continuation}`)).toEqual([first, continuation]);
+        expect(segmentCaseNeutrally(`${first} ${continuation}`)).toEqual([first, continuation]);
+      },
+    );
+
+    test.each(['\n\n', '\r\n\r\n', '\r\r', '\n            \n'])(
+      'preserves paragraph boundaries after versus across %j',
+      (separator) => {
+        const first = 'The Giants vs.';
+        const next = 'Boston Celtics, which was televised.';
+        expect(ss(`${first}${separator}${next}`)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(`${first}${separator}${next}`)).toEqual([first, next]);
       },
     );
 

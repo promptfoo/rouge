@@ -393,17 +393,19 @@ export function sentenceSegment(
         }
       } else if (chunks[idx + 1] && abbrvReg.test(gateSuffix)) {
         const nextChunk = chunks[idx + 1];
+        const nextSentence = nextChunk.replace(/^[\s"'([{<]+/, '');
+        const paragraphBreak = /\n[^\S\n]*\n/.test(nextChunk.replace(/\r\n?/g, '\n'));
         if (
-          (caseNeutral
-            ? startsWithCasedCharacter(nextChunk) &&
-              (!sentenceContinuationReg.test(nextChunk.trimStart()) ||
-                independentSentenceReg.test(nextChunk.trimStart()))
-            : strIsTitleCase(nextChunk)) &&
-          !isAbbreviationException(gateSuffix, nextChunk) &&
-          !(
-            geographicAcronymReg.test(gateSuffix) &&
-            geographicContinuationReg.test(nextChunk.trim())
-          )
+          (paragraphBreak && /\bvs\.$/i.test(gateSuffix)) ||
+          ((caseNeutral
+            ? startsWithCasedCharacter(nextSentence) &&
+              (!sentenceContinuationReg.test(nextSentence) ||
+                independentSentenceReg.test(nextSentence))
+            : strIsTitleCase(nextSentence)) &&
+            !isAbbreviationException(gateSuffix, nextSentence) &&
+            !(
+              geographicAcronymReg.test(gateSuffix) && geographicContinuationReg.test(nextSentence)
+            ))
         ) {
           // Catch abbreviations followed by a capital letter and treat as a boundary.
           acc.push(chunk.text());
