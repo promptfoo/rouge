@@ -122,6 +122,7 @@ const openingBracketReg = /[([{<]/;
 const closingBracketReg = /[\])}>]/;
 const listMarkerReg = /(?:^|\s)(?:(?:[•⁃]\s*)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+\S)/gu;
 const nestedListDepth = Symbol('nestedListDepth');
+const skipListDetection = Symbol('skipListDetection');
 const maxNestedListDepth = 32;
 const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
 const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
@@ -308,7 +309,9 @@ export function sentenceSegment(input: string, options: SentenceSegmentOptions =
   }
 
   const normalizedInput = input.replace(/\u0085/g, ' ');
-  const list = segmentList(normalizedInput, caseNeutral, depth);
+  const list = (options as InternalSentenceSegmentOptions)[skipListDetection]
+    ? undefined
+    : segmentList(normalizedInput, caseNeutral, depth);
   if (list !== undefined) {
     return list;
   }
@@ -468,7 +471,7 @@ function listQuoteCloser(input: string, index: number): string | undefined {
     return "''";
   }
   if (character === '"') {
-    return opensDoubleQuote(input, index, false) ? '"' : undefined;
+    return index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1]) ? '"' : undefined;
   }
   if (
     character === "'" &&
@@ -608,12 +611,7 @@ function listMarkerFamily(marker: string, caseNeutral: boolean): RegExp {
 
 function isDistantNumericMarker(first: number, marker: string, atBoundary: boolean): boolean {
   const current = Number(marker.match(/^\d+/)?.[0]);
-  return (
-    Number.isFinite(first) &&
-    Number.isFinite(current) &&
-    Math.abs(current - first) > 10 &&
-    !atBoundary
-  );
+  return Number.isFinite(first) && Math.abs(current - first) > 10 && !atBoundary;
 }
 
 function findListCandidate(
@@ -637,6 +635,7 @@ function findListCandidate(
     | { candidate: ListCandidate; expressionIndex: number; state: ListScanState }
     | undefined;
   let current = nextListMarker(input, expression, state);
+  let proseInitialEnd: number | undefined;
   while (current !== null) {
     const marker = current[0].trim();
     const context = listMarkerPrefix(input, current);
@@ -644,6 +643,13 @@ function findListCandidate(
 
     const family = listMarkerFamily(marker, caseNeutral);
     const first = firstByFamily.get(family.source);
+    proseInitialEnd = markProseInitial(
+      input,
+      current,
+      first === undefined,
+      context,
+      proseInitialEnd,
+    );
     const identity = caseNeutral ? marker.toLowerCase().toUpperCase().toLowerCase() : marker;
     if (context.joinedNameInitial) {
       firstByFamily.delete(family.source);
@@ -700,10 +706,35 @@ function findListCandidate(
   return deferred?.candidate;
 }
 
-function segmentNestedSentence(input: string, caseNeutral: boolean, depth: number): string[] {
+function markProseInitial(
+  input: string,
+  marker: RegExpExecArray,
+  firstMarker: boolean,
+  context: { empty: boolean; boundary: boolean },
+  previousEnd: number | undefined,
+): number | undefined {
+  if (
+    firstMarker &&
+    /^\p{Cased}\p{M}*\.$/u.test(marker[0].trim()) &&
+    (!(context.empty || context.boundary) ||
+      (previousEnd !== undefined && input.slice(previousEnd, marker.index).trim().length === 0))
+  ) {
+    context.boundary = false;
+    return marker.index + marker[0].length;
+  }
+  return undefined;
+}
+
+function segmentNestedSentence(
+  input: string,
+  caseNeutral: boolean,
+  depth: number,
+  detectLists = true,
+): string[] {
   const options: InternalSentenceSegmentOptions = {
     caseNeutral,
     [nestedListDepth]: depth + 1,
+    [skipListDetection]: !detectLists,
   };
   return sentenceSegment(input, options);
 }
@@ -726,7 +757,7 @@ function segmentList(input: string, caseNeutral: boolean, depth: number): string
   do {
     const body = input.slice(current.index + current[0].length, next?.index ?? input.length).trim();
     const sentences = /[.!?\r\n]/.test(body)
-      ? segmentNestedSentence(body, caseNeutral, depth)
+      ? segmentNestedSentence(body, caseNeutral, depth, false)
       : [body];
     let firstSentenceEnd = 1;
     while (
@@ -752,6 +783,7 @@ export interface SentenceSegmentOptions {
 }
 
 interface InternalSentenceSegmentOptions extends SentenceSegmentOptions {
+  [skipListDetection]?: boolean;
   [nestedListDepth]?: number;
 }
 

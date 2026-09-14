@@ -685,6 +685,40 @@ describe('Utility Functions', () => {
       expect(rouge.l(input, '2. Beta 1. Alpha a) One b) Two')).toBe(1);
     });
 
+    test('keeps a deferred inner family together after an outer item sentence', () => {
+      const input = '1. Alpha. a) One b) Two 2. Beta';
+      const expected = ['1. Alpha.', 'a) One b) Two', '2. Beta'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([':', '—'])('keeps quoted marker-like text after %s inside prose', (separator) => {
+      const input = `Options${separator}"team A) Alice and team B) Bob."`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test('does not seed an embedded list from consecutive prose initials', () => {
+      const input = 'I met John A. B. Smith. Intro: C. Alpha D. Beta.';
+      expect(ss(input)).toEqual(['I met John A. B. Smith.', 'Intro:', 'C. Alpha', 'D. Beta.']);
+      expect(segmentCaseNeutrally(input)).toEqual([
+        'I met John A.',
+        'B.',
+        'Smith.',
+        'Intro:',
+        'C. Alpha',
+        'D. Beta.',
+      ]);
+    });
+
+    test('defers an overflowing numeric marker before a nearby item', () => {
+      const number = '9'.repeat(320);
+      const input = `1. First ${number}. Last 2. Next`;
+      const expected = [`1. First ${number}.`, 'Last', '2. Next'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
     test('prefers a sparse outer family over an earlier nested pair', () => {
       const input = 'Intro: 1. First a) One b) Two 42. Last';
       const expected = ['Intro:', '1. First a) One b) Two', '42. Last'];
