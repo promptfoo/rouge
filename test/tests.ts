@@ -1266,6 +1266,73 @@ describe('Utility Functions', () => {
     );
 
     test.each(['vs.', 'v.s.'])(
+      'resets standalone bracket context after a terminal versus statement: %s',
+      (abbreviation) => {
+        const first = `The abbreviation is ${abbreviation}`;
+        for (const [open, close] of bracketPairs) {
+          const second = `${open}This is clearer.${close}`;
+          expect(ss(`${first} ${second} Alice replied.`)).toEqual([
+            first,
+            second,
+            'Alice replied.',
+          ]);
+          expect(segmentCaseNeutrally(`${first} ${second} Alice replied.`)).toEqual([
+            first,
+            second,
+            'Alice replied.',
+          ]);
+          expect(segmentCaseNeutrally(`${first} ${second} Alice replied.`.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+            'alice replied.',
+          ]);
+        }
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'keeps paragraph-separated comparisons inside an open bracket: %s',
+      (abbreviation) => {
+        for (const [open, close] of bracketPairs) {
+          for (const separator of ['\n\n', '\r\n\r\n', '\n \n']) {
+            const input = `He noted ${open}Linux ${abbreviation}${separator}Windows${close} today.`;
+            const expected = `He noted ${open}Linux ${abbreviation} Windows${close} today.`;
+            expect(ss(input)).toEqual([expected]);
+            expect(segmentCaseNeutrally(input)).toEqual([expected]);
+          }
+        }
+        expect(ss(`He wrote ${abbreviation}\n\nWindows changed.`)).toEqual([
+          `He wrote ${abbreviation}`,
+          'Windows changed.',
+        ]);
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'ignores quoted bracket characters when releasing a versus boundary: %s',
+      (abbreviation) => {
+        for (const [open, close] of bracketPairs) {
+          const input = `He noted ${open}"${abbreviation}${close}" Examples followed${close} today.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          const first = `He wrote ${open}"${abbreviation}"${close}`;
+          expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+        }
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'keeps provisional geographic abbreviation and bracket attachment conservative: %s',
+      (abbreviation) => {
+        const input = `I live in the U.S. (He wrote ${abbreviation}) Alice replied.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
       'retains embedded brackets after provisional abbreviation boundaries: %s',
       (abbreviation) => {
         for (const separator of [' ', '\n']) {

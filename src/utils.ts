@@ -416,7 +416,7 @@ export function sentenceSegment(
           : nextChunk;
         const paragraphBreak = /\n[^\S\n]*\n/.test(nextChunk.replace(/\r\n?/g, '\n'));
         if (
-          (paragraphBreak && /\bv\.?s\.$/i.test(gateSuffix)) ||
+          (paragraphBreak && /\bv\.?s\.$/i.test(gateSuffix) && !chunk.hasOpenDelimiter) ||
           ((caseNeutral
             ? startsWithCasedCharacter(nextSentence) &&
               (!sentenceContinuationReg.test(nextSentence) ||
@@ -649,14 +649,14 @@ function angleQuotationEnd(
   return -1;
 }
 
-/** Pair unquoted angle delimiters once; an unmatched comparison stays ordinary prose. */
+/** Pair unquoted angles with a byte mask and scalar depths; unmatched comparisons stay prose. */
 function matchedAngleDelimiters(input: string): Uint8Array | undefined {
   if (!(input.includes('<') && input.includes('>'))) {
     return undefined;
   }
-  let pending = new Uint32Array(32);
   let depth = 0;
-  let matched: Uint8Array | undefined;
+  let pairs = 0;
+  let matched = new Uint8Array(0);
   const closerPositions: Record<string, number> = {};
   for (let index = 0; index < input.length; index++) {
     const quote = angleQuoteCloser(input, index);
@@ -668,17 +668,27 @@ function matchedAngleDelimiters(input: string): Uint8Array | undefined {
       }
     }
     if (input[index] === '<') {
-      if (depth === pending.length) {
-        const expanded = new Uint32Array(pending.length * 2);
-        expanded.set(pending);
-        pending = expanded;
+      if (matched.length === 0) {
+        matched = new Uint8Array(input.length);
       }
-      pending[depth++] = index;
+      matched[index] = 2;
+      depth++;
     } else if (input[index] === '>' && depth > 0) {
-      const opening = pending[--depth];
-      matched ??= new Uint8Array(input.length);
-      matched[opening] = 1;
       matched[index] = 1;
+      depth--;
+      pairs++;
+    }
+  }
+  if (pairs === 0) {
+    return undefined;
+  }
+  depth = 0;
+  for (let index = input.length - 1; index >= 0; index--) {
+    if (matched[index] === 1) {
+      depth++;
+    } else if (matched[index] === 2) {
+      matched[index] = depth > 0 ? 1 : 0;
+      depth = Math.max(0, depth - 1);
     }
   }
   return matched;
@@ -735,7 +745,9 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     insideQuotes = quotationState(input, index, insideQuotes);
-    updateBracketContext(input, index, !sentenceStarted, brackets);
+    if (!insideQuotes) {
+      updateBracketContext(input, index, !sentenceStarted, brackets);
+    }
     if (index < lastEnd || char === '\r' || char === '\n') {
       // Only closing-delimiter lookahead can cross CR/LF; other wraps reset the prefix.
       start = -1;
@@ -762,14 +774,27 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
       lastEnd = end;
       start = -1;
-      const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-      sentenceStarted =
-        end === index + 1 && abbrvReg.test(caseNeutral ? suffix.toLowerCase() : suffix);
+      sentenceStarted = keepsAbbreviationContext(input, index, end, caseNeutral);
     }
   }
 
   chunks.push(input.slice(lastEnd));
   return chunks;
+}
+
+function keepsAbbreviationContext(
+  input: string,
+  index: number,
+  end: number,
+  caseNeutral: boolean,
+): boolean {
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  return (
+    end === index + 1 &&
+    abbrvReg.test(gateSuffix) &&
+    !(/\bv\.?s\.$/i.test(gateSuffix) && !isAbbreviationException(gateSuffix, input.slice(end)))
+  );
 }
 
 interface SpacedEllipsisRange {
@@ -873,14 +898,8 @@ function sentenceEnd(
   }
   const end = closingDelimiterEnd(input, index, insideQuotes);
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-  const { closedBrackets, endsDelimitedSentence, endsDelimitedVersus } = closingDelimiterContext(
-    input,
-    index + 1,
-    end,
-    insideQuotes,
-    suffix,
-    brackets,
-  );
+  const { closedBrackets, containsBracket, endsDelimitedSentence, endsDelimitedVersus } =
+    closingDelimiterContext(input, index + 1, end, insideQuotes, suffix, brackets);
   const closesQuotation = insideQuotes && /(?:"|'')$/.test(input.slice(end - 2, end));
   if (endsDelimitedVersus && closedBrackets < brackets.depth) {
     return -1;
@@ -920,7 +939,7 @@ function sentenceEnd(
   }
 
   // Keep bracketed ellipses inside the surrounding sentence.
-  if (ellipseReg.test(suffix) && closedBrackets > 0) {
+  if (ellipseReg.test(suffix) && containsBracket) {
     return -1;
   }
   return abbrvReg.test(gateSuffix) &&
@@ -954,17 +973,24 @@ function closingDelimiterContext(
   brackets: BracketContext,
 ): {
   closedBrackets: number;
+  containsBracket: boolean;
   endsDelimitedSentence: boolean;
   endsDelimitedVersus: boolean;
 } {
   let closedBrackets = 0;
+  let containsBracket = false;
   let closesQuote = false;
+  let quotePending = insideQuotes;
   for (let index = start; index < end; index++) {
+    if (input[index] === '"' || input.startsWith("''", index)) {
+      quotePending = false;
+    }
     if (
       closingBracketReg.test(input[index]) &&
       (input[index] !== '>' || brackets.angles?.[index] === 1)
     ) {
-      closedBrackets++;
+      containsBracket = true;
+      closedBrackets += Number(!quotePending);
     }
     closesQuote ||= input[index] === "'" || (insideQuotes && input[index] === '"');
   }
@@ -972,6 +998,7 @@ function closingDelimiterContext(
     closesQuote || (brackets.standalone && closedBrackets > 0 && closedBrackets >= brackets.depth);
   return {
     closedBrackets,
+    containsBracket,
     endsDelimitedSentence,
     endsDelimitedVersus: endsDelimitedSentence && /\bv\.?s\.$/i.test(suffix),
   };
