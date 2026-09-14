@@ -130,13 +130,18 @@ const sentenceContinuationReg =
 const independentSentenceReg =
   /^(?:in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
-function isAbbreviationException(suffix: string, following: string): boolean {
+function isAbbreviationException(
+  suffix: string,
+  following: string,
+  closesQuotation = false,
+): boolean {
   const continuation = following.trimStart();
   return (
     excepReg.test(suffix) &&
     !(
       /\bvs\.$/i.test(suffix) &&
-      (/\b(?:am|is|are|was|were|be|been|being)\s+vs\.$/i.test(suffix) ||
+      (closesQuotation ||
+        /\b(?:am|is|are|was|were|be|been|being)\s+vs\.$/i.test(suffix) ||
         /^(?:this|that|these|those|it|we|they|he|she|i)\b/i.test(continuation))
     )
   );
@@ -393,7 +398,9 @@ export function sentenceSegment(
         }
       } else if (chunks[idx + 1] && abbrvReg.test(gateSuffix)) {
         const nextChunk = chunks[idx + 1];
-        const nextSentence = nextChunk.replace(/^[\s"'([{<]+/, '');
+        const nextSentence = /\bvs\.$/i.test(gateSuffix)
+          ? nextChunk.replace(/^[\s"'([{<]+/, '')
+          : nextChunk;
         const paragraphBreak = /\n[^\S\n]*\n/.test(nextChunk.replace(/\r\n?/g, '\n'));
         if (
           (paragraphBreak && /\bvs\.$/i.test(gateSuffix)) ||
@@ -404,7 +411,8 @@ export function sentenceSegment(
             : strIsTitleCase(nextSentence)) &&
             !isAbbreviationException(gateSuffix, nextSentence) &&
             !(
-              geographicAcronymReg.test(gateSuffix) && geographicContinuationReg.test(nextSentence)
+              geographicAcronymReg.test(gateSuffix) &&
+              geographicContinuationReg.test(nextChunk.trimStart())
             ))
         ) {
           // Catch abbreviations followed by a capital letter and treat as a boundary.
@@ -673,16 +681,16 @@ function sentenceEnd(
     return index + 1;
   }
   const end = closingDelimiterEnd(input, index, insideQuotes);
+  const closesQuotation =
+    insideQuotes && (input[end - 1] === '"' || input.slice(end - 2, end) === "''");
   if (end < input.length && !/\s/.test(input[end])) {
-    return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
+    return isUnspacedSentenceBoundary(input, index, end, caseNeutral, closesQuotation) ? end : -1;
   }
   if (end === index + 1) {
     return end;
   }
 
   const closedBrackets = countClosingBrackets(input, index + 1, end);
-  const closesQuotation =
-    insideQuotes && (input[end - 1] === '"' || input.slice(end - 2, end) === "''");
   if (
     closedBrackets > 0 &&
     (closedBrackets < brackets.depth || !(brackets.standalone || closesQuotation))
@@ -717,7 +725,8 @@ function sentenceEnd(
   if (ellipseReg.test(suffix) && closedBrackets > 0) {
     return -1;
   }
-  return abbrvReg.test(gateSuffix) && isAbbreviationException(gateSuffix, input.slice(next))
+  return abbrvReg.test(gateSuffix) &&
+    isAbbreviationException(gateSuffix, input.slice(next), closesQuotation)
     ? -1
     : end;
 }
@@ -760,6 +769,7 @@ function isUnspacedSentenceBoundary(
   index: number,
   next: number,
   caseNeutral: boolean,
+  closesQuotation: boolean,
 ): boolean {
   const nextCharacter = characterAt(input, next);
   const startsWithLetter = caseNeutral
@@ -797,7 +807,7 @@ function isUnspacedSentenceBoundary(
   const nextInitial = caseNeutral ? /^\p{Cased}(?=\s|$)/u : /^\p{Lu}(?=\s|$)/u;
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const continuesAbbreviation =
-    abbrvReg.test(gateSuffix) && isAbbreviationException(gateSuffix, following);
+    abbrvReg.test(gateSuffix) && isAbbreviationException(gateSuffix, following, closesQuotation);
   return !(
     continuesAbbreviation ||
     initial.test(following) ||

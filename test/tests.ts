@@ -1122,6 +1122,22 @@ describe('Utility Functions', () => {
       },
     );
 
+    test('retains parenthetical company-name continuations', () => {
+      const input = 'We invested in Acme Co. (International Holdings) last year.';
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each([' ', '\n\n', ''])(
+      'preserves a completed quotation containing versus before %j',
+      (separator) => {
+        const first = 'He wrote "vs."';
+        const next = 'Alice explained the term.';
+        expect(ss(`${first}${separator}${next}`)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(`${first}${separator}${next}`)).toEqual([first, next]);
+      },
+    );
+
     test('should not split possessive two letter abbreviations', () => {
       expect(ss("That is JFK Jr.'s book.")).toEqual(["That is JFK Jr.'s book."]);
     });
