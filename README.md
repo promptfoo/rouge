@@ -150,6 +150,8 @@ Omitted options and fields explicitly set to `undefined` use the documented defa
 
 `lcs` and `lcsIndices` are mutually exclusive. Specifying both throws `RangeError`.
 
+With the built-in sentence segmenter and LCS, `l()` throws `RangeError` when the candidate sentence count multiplied by the reference sentence count exceeds 100,000. This limit also applies with a custom tokenizer; comparisons with no tokens on either side return `0` first. Custom `segmenter`, `lcs`, or `lcsIndices` callbacks remain responsible for bounding their own work.
+
 ### ROUGE-S Options
 
 | Option          | Type     | Default       | Description                          |

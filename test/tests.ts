@@ -719,6 +719,71 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test('keeps a numeric-leading single quotation around apparent list markers', () => {
+      const input = "He said '100 options were a) Alpha and b) Beta.'";
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each(['“Intro.”', '‘Intro.’'])(
+      'finds an embedded list after typographic quoted introduction %s',
+      (prefix) => {
+        const input = `${prefix} 1. Alpha 2. Beta.`;
+        const expected = [prefix, '1. Alpha', '2. Beta.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test('keeps unpaired numeric elisions separate from a later unrelated quotation', () => {
+      const input = "In '99, a) Alpha b) Beta. He said 'go'.";
+      const expected = ["In '99,", 'a) Alpha', 'b) Beta.', "He said 'go'."];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      const quoted = "He said '99 options were a) Alpha and b) Beta.'";
+      expect(ss(quoted)).toEqual([quoted]);
+      expect(segmentCaseNeutrally(quoted)).toEqual([quoted]);
+    });
+
+    test('retains an inner elision inside a numeric-leading quotation', () => {
+      const input = "He said '100 years ago, 'twas a) cold and b) dark.'";
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test('does not pair a numeric elision with an unrelated parenthetical quotation', () => {
+      const input = "In '99, a) Alpha b) Beta. He said '(go)'.";
+      const expected = ["In '99,", 'a) Alpha', 'b) Beta.', "He said '(go)'."];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('discards deferred candidates when joined initials invalidate their family', () => {
+      const input = 'Intro: 1. Authors: X. Smith A. Brown and C. Jones.';
+      expect(ss(input)).toEqual(['Intro: 1.', 'Authors: X. Smith A. Brown and C.', 'Jones.']);
+      expect(segmentCaseNeutrally(input)).toEqual([
+        'Intro: 1.',
+        'Authors: X.',
+        'Smith A.',
+        'Brown and C.',
+        'Jones.',
+      ]);
+    });
+
+    test('retains a deferred list from a different family after joined initials', () => {
+      const input = 'Options: 1. First 42. Last. Authors: A. Smith and B. Jones.';
+      const expected = ['Options:', '1. First', '42. Last.', 'Authors: A. Smith and B. Jones.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('preserves ordinary-space NEL normalization without a list introduction', () => {
+      const input = 'Intro\u00851. Alpha 2. Beta.';
+      const expected = ['Intro 1.', 'Alpha 2.', 'Beta.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
     test('prefers a sparse outer family over an earlier nested pair', () => {
       const input = 'Intro: 1. First a) One b) Two 42. Last';
       const expected = ['Intro:', '1. First a) One b) Two', '42. Last'];

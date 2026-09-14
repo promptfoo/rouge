@@ -361,6 +361,10 @@ export function s(cand: string, ref: string, opts?: RougeSOptions): number {
 /**
  * Computes the ROUGE-L score for a candidate summary
  *
+ * With built-in segmentation and LCS, nonempty tokenized summaries are limited to
+ * 100,000 candidate/reference sentence pairs; larger comparisons throw RangeError.
+ * Custom tokenizers retain this limit. Custom segmenters or LCS callbacks manage their own work.
+ *
  * Configuration object schema and defaults:
  * ```
  * {

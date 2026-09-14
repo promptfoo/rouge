@@ -123,6 +123,8 @@ const closingBracketReg = /[\])}>]/;
 const listMarkerReg = /(?:^|\s)(?:(?:[•⁃]\s*)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+\S)/gu;
 const nestedListDepth = Symbol('nestedListDepth');
 const skipListDetection = Symbol('skipListDetection');
+const singleQuoteElisionReg =
+  /^(?:t(?:is|was|were|will|would|il|ill)|em|cause|cos|round|bout|neath|fore|tween|gainst|cept|(?:twen|thir|for|fif|six|seven|eigh|nine)ties)\b/i;
 const maxNestedListDepth = 32;
 const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
 const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
@@ -460,9 +462,42 @@ interface ListScanState {
   cursor: number;
   bracketDepth: number[];
   quote: string | undefined;
+  numericQuoteOpeners?: Uint8Array;
 }
 
-function listQuoteCloser(input: string, index: number): string | undefined {
+/** Confirm numeric quote openers without treating unpaired year elisions as quotes. */
+function numericQuoteOpeners(input: string): Uint8Array | undefined {
+  let openings: Uint8Array | undefined;
+  let candidate: number | undefined;
+  for (const quote of input.matchAll(/'/g)) {
+    const index = quote.index;
+    const previous = input[index - 1] ?? '';
+    const following = characterAt(input, index + 1);
+    const opener = index === 0 || /^[\s\p{Punctuation}]$/u.test(previous);
+    if (opener && /^\p{Number}$/u.test(following)) {
+      candidate = index;
+    } else if (candidate !== undefined) {
+      if (following.length === 0 || /^[\s.,!?;:)\]}"”»\p{Pd}]$/u.test(following)) {
+        openings ??= new Uint8Array(input.length);
+        openings[candidate] = 1;
+        candidate = undefined;
+      } else if (
+        opener &&
+        /\S/.test(following) &&
+        !singleQuoteElisionReg.test(input.slice(index + 1, index + 32))
+      ) {
+        candidate = undefined;
+      }
+    }
+  }
+  return openings;
+}
+
+function listQuoteCloser(
+  input: string,
+  index: number,
+  numericOpenings: Uint8Array | undefined,
+): string | undefined {
   const character = input[index];
   if (
     input.startsWith('``', index) ||
@@ -476,10 +511,8 @@ function listQuoteCloser(input: string, index: number): string | undefined {
   if (
     character === "'" &&
     (index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1])) &&
-    !/^\p{Number}$/u.test(characterAt(input, index + 1)) &&
-    !/^(?:t(?:is|was|were|will|would|il|ill)|em|cause|cos|round|bout|neath|fore|tween|gainst|cept|(?:twen|thir|for|fif|six|seven|eigh|nine)ties)\b/i.test(
-      input.slice(index + 1, index + 32),
-    )
+    (numericOpenings?.[index] === 1 || !/^\p{Number}$/u.test(characterAt(input, index + 1))) &&
+    !singleQuoteElisionReg.test(input.slice(index + 1, index + 32))
   ) {
     return "'";
   }
@@ -489,22 +522,31 @@ function listQuoteCloser(input: string, index: number): string | undefined {
   return character === '‘' ? '’' : undefined;
 }
 
+function isListApostrophe(input: string, index: number): boolean {
+  if (!/['’]/.test(input[index])) {
+    return false;
+  }
+  return (
+    (/[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+      /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1))) ||
+    (!/[.!?]/.test(input[index - 1] ?? '') &&
+      singleQuoteElisionReg.test(input.slice(index + 1, index + 32)))
+  );
+}
+
 function advanceListScan(input: string, end: number, state: ListScanState): void {
   while (state.cursor < end) {
     const index = state.cursor++;
     const character = input[index];
     if (state.quote !== undefined) {
-      const apostrophe =
-        /['’]/.test(character) &&
-        /[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
-        /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1));
+      const apostrophe = isListApostrophe(input, index);
       if (input.startsWith(state.quote, index) && !apostrophe) {
         state.cursor += state.quote.length - 1;
         state.quote = undefined;
       }
       continue;
     }
-    const quote = listQuoteCloser(input, index);
+    const quote = listQuoteCloser(input, index, state.numericQuoteOpeners);
     if (quote !== undefined) {
       state.quote = quote;
       state.cursor += quote.length - 1;
@@ -530,7 +572,7 @@ function listMarkerPrefix(
 } {
   let index = marker.index - 1;
   let lineBreak = /[\r\n]/.test(marker[0]);
-  while (index >= 0 && /[\s"'\])}>]/.test(input[index])) {
+  while (index >= 0 && /[\s"'”’\])}>]/.test(input[index])) {
     lineBreak ||= /[\r\n]/.test(input[index]);
     index--;
   }
@@ -631,9 +673,11 @@ function findListCandidate(
       hasBody: boolean;
     }
   >();
-  let deferred:
-    | { candidate: ListCandidate; expressionIndex: number; state: ListScanState }
-    | undefined;
+  // At most six fixed marker families can remain deferred.
+  const deferredByFamily = new Map<
+    string,
+    { candidate: ListCandidate; expressionIndex: number; state: ListScanState }
+  >();
   let current = nextListMarker(input, expression, state);
   let proseInitialEnd: number | undefined;
   while (current !== null) {
@@ -653,6 +697,7 @@ function findListCandidate(
     const identity = caseNeutral ? marker.toLowerCase().toUpperCase().toLowerCase() : marker;
     if (context.joinedNameInitial) {
       firstByFamily.delete(family.source);
+      deferredByFamily.delete(family.source);
       current = nextListMarker(input, expression, state);
       continue;
     }
@@ -675,14 +720,12 @@ function findListCandidate(
       if (!(hasEarlierFamily || distantNumber)) {
         return candidate;
       }
-      if (
-        candidate.current.index < (deferred?.candidate.current.index ?? Number.POSITIVE_INFINITY)
-      ) {
-        deferred = {
+      if (!deferredByFamily.has(family.source)) {
+        deferredByFamily.set(family.source, {
           candidate,
           expressionIndex: expression.lastIndex,
           state: { ...state, bracketDepth: [...state.bracketDepth] },
-        };
+        });
       }
     }
 
@@ -699,6 +742,9 @@ function findListCandidate(
 
     current = nextListMarker(input, expression, state);
   }
+  const deferred = [...deferredByFamily.values()].sort(
+    (first, second) => first.candidate.current.index - second.candidate.current.index,
+  )[0];
   if (deferred !== undefined) {
     expression.lastIndex = deferred.expressionIndex;
     Object.assign(state, deferred.state);
@@ -744,7 +790,12 @@ function segmentList(input: string, caseNeutral: boolean, depth: number): string
     return undefined;
   }
   const expression = new RegExp(listMarkerReg);
-  const state: ListScanState = { cursor: 0, bracketDepth: [0, 0, 0, 0], quote: undefined };
+  const state: ListScanState = {
+    cursor: 0,
+    bracketDepth: [0, 0, 0, 0],
+    quote: undefined,
+    numericQuoteOpeners: numericQuoteOpeners(input),
+  };
   const candidate = findListCandidate(input, caseNeutral, expression, state);
   if (candidate === undefined) {
     return undefined;
