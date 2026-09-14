@@ -709,14 +709,13 @@ function sentenceEnd(
     return end;
   }
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const nextCharacter = characterAt(input, next);
   const startsWithLetter = caseNeutral
     ? isNeutralSentenceStart(input, end, next)
     : charIsUpperCase(nextCharacter);
   const startsWithNumber =
     /^\p{Number}$/u.test(nextCharacter) &&
-    !abbrvReg.test(gateSuffix) &&
+    !abbrvReg.test(suffix) &&
     !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
       input.slice(next),
     );
@@ -728,8 +727,8 @@ function sentenceEnd(
   if (ellipseReg.test(suffix) && closedBrackets > 0) {
     return -1;
   }
-  return abbrvReg.test(gateSuffix) &&
-    isAbbreviationException(gateSuffix, input.slice(next), closesAbbreviationQuotation)
+  return abbrvReg.test(suffix) &&
+    isAbbreviationException(suffix, input.slice(next), closesAbbreviationQuotation)
     ? -1
     : end;
 }

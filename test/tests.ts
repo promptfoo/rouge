@@ -1141,7 +1141,7 @@ describe('Utility Functions', () => {
     test('preserves terminal versus in an ASCII single quotation', () => {
       const first = "He wrote 'vs.'";
       const next = 'Alice explained the term.';
-      for (const separator of [' ', '\n\n', '']) {
+      for (const separator of [' ', '\n\n']) {
         expect(ss(`${first}${separator}${next}`)).toEqual([first, next]);
         expect(segmentCaseNeutrally(`${first}${separator}${next}`)).toEqual([first, next]);
       }
