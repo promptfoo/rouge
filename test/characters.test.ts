@@ -56,7 +56,7 @@ describe('strIsTitleCase', () => {
   test('should return false for all lowercase input', () => {
     expect(isTitle('abcd')).toBe(false);
   });
-  test('should return false for lowercase input with interspesed capitals', () => {
+  test('should return false for lowercase input with interspersed capitals', () => {
     expect(isTitle('aBcD')).toBe(false);
   });
 
