@@ -531,11 +531,19 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const { apostrophes, overflowed } = citationApostrophes(input);
   const citationQuotes: CitationQuotationState = { closers: [], overflowed };
   const isPathOrAddress = pathOrAddressTokenChecker(input);
+  const isNumericContinuation = numericContinuationChecker(input);
+  let citationThrough = 0;
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     insideQuotes = quotationState(input, index, insideQuotes);
-    updateCitationQuotationState(input, index, citationQuotes, apostrophes);
+    updateCitationQuotationState(
+      input,
+      index,
+      citationQuotes,
+      apostrophes,
+      index < citationThrough,
+    );
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
         brackets.standalone = start === -1;
@@ -561,19 +569,22 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       char === '?' ||
       char === '!'
     ) {
+      const citationBoundary = citationEnd(
+        input,
+        index,
+        caseNeutral,
+        insideQuotes,
+        brackets,
+        citationQuotes,
+        isPathOrAddress,
+        isNumericContinuation,
+      );
       const end =
-        citationEnd(
-          input,
-          index,
-          caseNeutral,
-          insideQuotes,
-          brackets,
-          citationQuotes,
-          isPathOrAddress,
-        ) ?? sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
+        citationBoundary ?? sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
       if (end === -1) {
         continue;
       }
+      citationThrough = citationBoundary ?? citationThrough;
       // Captured line wraps can only occur between the terminal and closing delimiters.
       chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
       lastEnd = end;
@@ -796,6 +807,7 @@ function updateCitationQuotationState(
   index: number,
   quotes: CitationQuotationState,
   apostrophes: Uint8Array,
+  confirmedClosing: boolean,
 ): void {
   if (quotes.overflowed) {
     return;
@@ -830,6 +842,7 @@ function updateCitationQuotationState(
   const following = characterAt(input, index + 1);
   if (closers.at(-1) === "'") {
     if (
+      confirmedClosing ||
       following.length === 0 ||
       /[.!?]/.test(previous) ||
       singleQuoteClosingContextReg.test(following) ||
@@ -1000,6 +1013,7 @@ function citationEnd(
   brackets: { depth: number; standalone: boolean },
   quotationQuotes: CitationQuotationState,
   isPathOrAddress: (index: number) => boolean,
+  isNumericContinuation: (index: number) => boolean,
 ): number | undefined {
   if (quotationQuotes.overflowed) {
     return undefined;
@@ -1069,7 +1083,9 @@ function citationEnd(
     return undefined;
   }
 
-  return isCitationSentenceStart(input, index, end, caseNeutral) ? end : undefined;
+  return isCitationSentenceStart(input, index, end, caseNeutral, isNumericContinuation)
+    ? end
+    : undefined;
 }
 
 function isCitationSentenceStart(
@@ -1077,6 +1093,7 @@ function isCitationSentenceStart(
   index: number,
   end: number,
   caseNeutral: boolean,
+  isNumericContinuation: (index: number) => boolean,
 ): boolean {
   let next = end;
   while (next < input.length && /[\s"'“‘«([{<]/.test(input[next])) {
@@ -1085,12 +1102,17 @@ function isCitationSentenceStart(
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const continuation = input.slice(next);
+  const ellipsis = ellipseReg.test(suffix);
   if (
-    abbrvReg.test(gateSuffix) &&
-    (excepReg.test(gateSuffix) ||
-      (citedPlaceAcronymReg.test(gateSuffix) && geographicContinuationReg.test(continuation)))
+    (ellipsis && !/\.{4}$/.test(suffix)) ||
+    (abbrvReg.test(gateSuffix) &&
+      (excepReg.test(gateSuffix) ||
+        (citedPlaceAcronymReg.test(gateSuffix) && geographicContinuationReg.test(continuation))))
   ) {
     return false;
+  }
+  if (!(ellipsis || abbrvReg.test(gateSuffix)) && breakReg.test(input.slice(end, next))) {
+    return true;
   }
 
   const sentenceStart = characterAt(input, next);
@@ -1098,8 +1120,33 @@ function isCitationSentenceStart(
     ? isNeutralSentenceStart(input, end, next)
     : sentenceStart.length > 0 && charIsUpperCase(sentenceStart);
   const startsWithNumber =
-    /^\p{Number}$/u.test(sentenceStart) && !numericSentenceContinuationReg.test(continuation);
+    /^\p{Number}$/u.test(sentenceStart) &&
+    !abbrvReg.test(gateSuffix) &&
+    !ellipsis &&
+    !isNumericContinuation(next);
   return startsWithLetter || startsWithNumber;
+}
+
+/** Cache the shared token tail while numeric citation lookaheads advance through it. */
+function numericContinuationChecker(input: string): (index: number) => boolean {
+  let end = 0;
+  let lastPercent = -1;
+  let continuation = false;
+  return (index) => {
+    if (index >= end) {
+      end = index;
+      lastPercent = -1;
+      while (end < input.length && !/\s/.test(input[end])) {
+        if (input[end] === '%') {
+          lastPercent = end;
+        }
+        end++;
+      }
+      // One token character retains the original unit/space grammar without rescanning its body.
+      continuation = numericSentenceContinuationReg.test(input.slice(end - 1));
+    }
+    return lastPercent > index || continuation;
+  };
 }
 
 /** Separated bare numbers may start a sentence; brackets disambiguate citation chains. */
@@ -1260,7 +1307,7 @@ function isLabeledCitationIdentifier(input: string, start: number, token: string
   }
   return (
     labelEnd < start &&
-    /^[\p{Letter}\p{Number}_-]+$/u.test(token) &&
+    /^[\p{Letter}\p{Mark}\p{Number}_-]+$/u.test(token) &&
     /\b(?:appendix|section|chapter|part|figure|table|paragraph|article|clause)$/iu.test(
       input.slice(Math.max(0, labelEnd - 16), labelEnd),
     )
@@ -1292,7 +1339,7 @@ function isCitationContext(
   const standaloneIdentifier =
     input[index] === '.' &&
     (/[\p{Number}_]/u.test(precedingToken) ||
-      (!caseNeutral && /^[\p{Lu}\p{Number}_-]{2,}$/u.test(precedingToken)));
+      (!caseNeutral && /^[\p{Lu}\p{Lt}\p{Mark}\p{Number}_-]{2,}$/u.test(precedingToken)));
   const labeledSection = isLabeledCitationIdentifier(input, tokenStart, precedingToken);
   return (
     /^[\p{Letter}\p{Mark})\]!?]$/u.test(previous) &&

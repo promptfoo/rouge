@@ -887,6 +887,116 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['[1]', '(1)', '1'])(
+      'retains the numeric continuation of a cited date abbreviation: %s',
+      (citation) => {
+        const first = `The Jan.${citation} 2020 report arrived.`;
+        expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(first.toLowerCase())).toEqual([first.toLowerCase()]);
+        const ordinary = `Alpha.${citation}`;
+        expect(ss(`${ordinary} 2020 reports arrived.`)).toEqual([
+          ordinary,
+          '2020 reports arrived.',
+        ]);
+        expect(segmentCaseNeutrally(`${ordinary} 2020 reports arrived.`)).toEqual([
+          ordinary,
+          '2020 reports arrived.',
+        ]);
+      },
+    );
+
+    test.each(['\n', '\r', '\r\n', ' \n\t'])(
+      'uses an explicit line break after a citation before the next sentence: %j',
+      (separator) => {
+        for (const following of ['beta.', 'but it continued.', '2 months.', '🙂 smiled.']) {
+          const input = `Alpha.[1]${separator}${following}`;
+          expect(ss(input)).toEqual(['Alpha.[1]', following]);
+          expect(segmentCaseNeutrally(input)).toEqual(['Alpha.[1]', following]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(['alpha.[1]', following]);
+        }
+        const date = `The Jan.[1]${separator}2020 report arrived.`;
+        expect(ss(date)).toEqual(['The Jan.[1] 2020 report arrived.']);
+        expect(segmentCaseNeutrally(date)).toEqual(['The Jan.[1] 2020 report arrived.']);
+      },
+    );
+
+    test.each(['..', '...', '....', '.....'])(
+      'preserves the existing ellipsis continuation policy before a citation: %s',
+      (ellipsis) => {
+        for (const separator of ['', ' ']) {
+          const first = `He paused${ellipsis}${separator}[1]`;
+          const input = `${first} Perhaps continued.`;
+          const expected = ellipsis.length >= 4 ? [first, 'Perhaps continued.'] : [input];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+            expected.map((sentence) => sentence.toLowerCase()),
+          );
+          const numeric = `${first} 2020 reports arrived.`;
+          expect(ss(numeric)).toEqual([numeric]);
+          expect(segmentCaseNeutrally(numeric)).toEqual([numeric]);
+        }
+      },
+    );
+
+    test.each(['1%2 stayed.', '12 % stayed.', '12 years passed.', '12 days.'])(
+      'preserves the existing cited quantity continuation: %s',
+      (following) => {
+        const input = `Alpha.[1] ${following}`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
+
+    test('retains an independent numeric sentence with additional text after the quantity', () => {
+      const input = 'Alpha.[1] 12 days later.';
+      expect(ss(input)).toEqual(['Alpha.[1]', '12 days later.']);
+      expect(segmentCaseNeutrally(input)).toEqual(['Alpha.[1]', '12 days later.']);
+    });
+
+    test('segments repeated numeric citation starts within one whitespace token', () => {
+      const repetitions = 10_000;
+      const input = `A.[1]"1${'A.[2]""1'.repeat(repetitions)}`;
+      const expected = [
+        'A.[1]',
+        '"1A.[2]',
+        ...Array.from({ length: repetitions - 1 }, () => '""1A.[2]'),
+        '""1',
+      ];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['ABC\u0301', 'ǅA'])(
+      'keeps Unicode identifier case and explicit section labels aligned: %s',
+      (identifier) => {
+        const input = `${identifier}.1 Introduction.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([`${identifier}.1`, 'Introduction.']);
+        const labeled = `Section ${input}`;
+        expect(ss(labeled)).toEqual([labeled]);
+        expect(segmentCaseNeutrally(labeled)).toEqual([labeled]);
+        expect(segmentCaseNeutrally(labeled.toLowerCase())).toEqual([labeled.toLowerCase()]);
+      },
+    );
+
+    test.each(['[1]', '(1)', '1'])(
+      'synchronizes a consumed ASCII single citation closer before the next quotation: %s',
+      (citation) => {
+        const first = `He said 'Alpha.${citation}'`;
+        const input = `${first}"Next." Gamma.[2] Delta.`;
+        expect(ss(input)).toEqual([first, '"Next."', 'Gamma.[2]', 'Delta.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, '"Next."', 'Gamma.[2]', 'Delta.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          '"next."',
+          'gamma.[2]',
+          'delta.',
+        ]);
+      },
+    );
+
     test.each(['"Next."', "'Next.'", '“Next.”', '‘Next.’', '«Next.»', '(Next sentence.)'])(
       'retains an adjacent opening delimiter after a citation: %s',
       (following) => {
