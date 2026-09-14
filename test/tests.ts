@@ -1531,6 +1531,39 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['6', '𝟞'])('does not use a later %s-feet mark as a quotation closer', (feet) => {
+      const first = 'The label ‘Success’ appears in Calif.';
+      const second = `The board is ${feet}’ wide.`;
+      const input = `${first}\n${second}`;
+      expect(ss(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+    });
+
+    test.each(['.', '!', '?'])(
+      'retains an unspaced sentence after a %s smart closer',
+      (terminal) => {
+        const first = `He said ‘Stop${terminal}’`;
+        const input = `${first}Next sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          'next sentence.',
+        ]);
+      },
+    );
+
+    test.each(['s', 'S'])('retains the ’%s contraction after a quoted acronym', (contraction) => {
+      const input = `‘The U.S.’${contraction} Economy grew.’`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
     test.each(['U.S.', 'U.S.A.', 'E.U.'])(
       'preserves a quoted possessive after the acronym %s',
       (acronym) => {

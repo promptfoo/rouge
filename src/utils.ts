@@ -98,6 +98,8 @@ function quotationState(input: string, index: number, insideQuotes: boolean): bo
   );
 }
 
+const smartContractionReg = /^’(?:s|m|d|ll|re|ve)\b/i;
+
 function singleQuotationState(
   input: string,
   index: number,
@@ -123,7 +125,9 @@ function smartApostrophes(input: string): Uint8Array {
     if (quote[0] === '‘') {
       candidateStart = undefined;
     } else if (
-      /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1)) ||
+      (/^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1)) &&
+        (!/[.!?]/.test(input[index - 1] ?? '') ||
+          smartContractionReg.test(input.slice(index, index + 4)))) ||
       (/^\p{Number}$/u.test(characterAt(input, index + 1)) &&
         !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index))) ||
       input.slice(index - 2, index).toLowerCase() === '’n'
@@ -131,7 +135,7 @@ function smartApostrophes(input: string): Uint8Array {
       apostrophes[index] = 1;
     } else if (
       /\s/.test(input[index + 1] ?? '') &&
-      (input[index - 1]?.toLowerCase() === 's' ||
+      (/(?:s|\p{Number})$/iu.test(input.slice(Math.max(0, index - 2), index)) ||
         /\p{Letter}\.\p{Letter}\.$/u.test(input.slice(Math.max(0, index - 8), index)))
     ) {
       candidateStart ??= index;
@@ -821,7 +825,10 @@ function isUnspacedDelimitedSentenceStart(
   caseNeutral: boolean,
 ): boolean {
   let next = index + 1;
-  if (!/["'“‘’([{<]/.test(input[next] ?? '') || /^’(?:s|m|d|ll|re|ve)\b/i.test(input.slice(next))) {
+  if (
+    !/["'“‘’([{<]/.test(input[next] ?? '') ||
+    smartContractionReg.test(input.slice(next, next + 4))
+  ) {
     return false;
   }
   if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {
