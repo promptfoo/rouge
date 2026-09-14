@@ -863,6 +863,13 @@ describe('Utility Functions', () => {
       expect(ss(input)).toEqual([input]);
     });
 
+    test.each(['``', "''"])('retains label-shaped text inside Treebank quotation %s', (opening) => {
+      const first = `He said ${opening}The options were a) Alpha and b) Beta.''`;
+      const input = `${first} Options: a) First b) Last.`;
+      expect(ss(input)).toEqual([first, 'Options:', 'a) First', 'b) Last.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Options:', 'a) First', 'b) Last.']);
+    });
+
     test('caches long numeric markers while deferring overlapping list families', () => {
       const input = `A. x: ${'9'.repeat(4000)}. x ${'1. x '.repeat(4000)}`;
       expect(() => rouge.n(input, input)).not.toThrow();

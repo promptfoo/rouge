@@ -461,6 +461,12 @@ interface ListScanState {
 
 function listQuoteCloser(input: string, index: number): string | undefined {
   const character = input[index];
+  if (
+    input.startsWith('``', index) ||
+    (input.startsWith("''", index) && quotationState(input, index, false))
+  ) {
+    return "''";
+  }
   if (character === '"') {
     return opensDoubleQuote(input, index, false) ? '"' : undefined;
   }
@@ -489,7 +495,8 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
         /['’]/.test(character) &&
         /[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
         /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1));
-      if (character === state.quote && !apostrophe) {
+      if (input.startsWith(state.quote, index) && !apostrophe) {
+        state.cursor += state.quote.length - 1;
         state.quote = undefined;
       }
       continue;
@@ -497,6 +504,7 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
     const quote = listQuoteCloser(input, index);
     if (quote !== undefined) {
       state.quote = quote;
+      state.cursor += quote.length - 1;
       continue;
     }
     const opening = '([{<'.indexOf(character);
