@@ -681,8 +681,7 @@ function sentenceEnd(
     return index + 1;
   }
   const end = closingDelimiterEnd(input, index, insideQuotes);
-  const closesQuotation =
-    insideQuotes && (input[end - 1] === '"' || input.slice(end - 2, end) === "''");
+  const closesQuotation = insideQuotes && /(?:"|'')$/.test(input.slice(end - 2, end));
   const closesAbbreviationQuotation = closesQuotation || input[end - 1] === "'";
   if (end < input.length && !/\s/.test(input[end])) {
     return isUnspacedSentenceBoundary(input, index, end, caseNeutral, closesAbbreviationQuotation)
@@ -709,13 +708,14 @@ function sentenceEnd(
     return end;
   }
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const nextCharacter = characterAt(input, next);
   const startsWithLetter = caseNeutral
     ? isNeutralSentenceStart(input, end, next)
     : charIsUpperCase(nextCharacter);
   const startsWithNumber =
     /^\p{Number}$/u.test(nextCharacter) &&
-    !abbrvReg.test(suffix) &&
+    !abbrvReg.test(gateSuffix) &&
     !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
       input.slice(next),
     );
@@ -727,8 +727,8 @@ function sentenceEnd(
   if (ellipseReg.test(suffix) && closedBrackets > 0) {
     return -1;
   }
-  return abbrvReg.test(suffix) &&
-    isAbbreviationException(suffix, input.slice(next), closesAbbreviationQuotation)
+  return abbrvReg.test(gateSuffix) &&
+    isAbbreviationException(gateSuffix, input.slice(next), closesAbbreviationQuotation)
     ? -1
     : end;
 }

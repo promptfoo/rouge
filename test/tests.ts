@@ -1147,6 +1147,12 @@ describe('Utility Functions', () => {
       }
     });
 
+    test('retains Unicode-folded abbreviations before numeric quote continuations', () => {
+      const input = 'He said "Kan." 2 people remained.';
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
     test('should not split possessive two letter abbreviations', () => {
       expect(ss("That is JFK Jr.'s book.")).toEqual(["That is JFK Jr.'s book."]);
     });
