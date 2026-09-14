@@ -1266,6 +1266,83 @@ describe('Utility Functions', () => {
     );
 
     test.each(['vs.', 'v.s.'])(
+      'retains embedded brackets after provisional abbreviation boundaries: %s',
+      (abbreviation) => {
+        for (const separator of [' ', '\n']) {
+          for (const [open, close] of bracketPairs) {
+            for (const input of [
+              `The guide says e.g.${separator}${open}use ${abbreviation}${close} Examples follow.`,
+              `We use Acme Co.${separator}${open}printed ${abbreviation}${close} rather than versus.`,
+            ]) {
+              const expected = input.replaceAll('\n', ' ');
+              expect(ss(input)).toEqual([expected]);
+              // Preserve the existing neutral line-wrap boundary after ordinary abbreviations.
+              const neutral =
+                input.startsWith('We use') && separator === '\n' ? input.split('\n') : [expected];
+              expect(segmentCaseNeutrally(input)).toEqual(neutral);
+              expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+                neutral.map((sentence) => sentence.toLowerCase()),
+              );
+            }
+            const first = 'He wrote it.';
+            const second = `${open}He wrote ${abbreviation}${close}`;
+            expect(ss(`${first} ${second} Alice explained.`)).toEqual([
+              first,
+              second,
+              'Alice explained.',
+            ]);
+            expect(segmentCaseNeutrally(`${first} ${second} Alice explained.`)).toEqual([
+              first,
+              second,
+              'Alice explained.',
+            ]);
+          }
+        }
+      },
+    );
+
+    test('folds Unicode abbreviations when retaining embedded bracket context', () => {
+      for (const name of ['Kan', 'Kan', 'kan']) {
+        const input = `We use ${name}. (printed v.s.) rather than versus.`;
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      }
+    });
+
+    test.each([1, 3])('ignores an angle quotation closer after %i backslashes', (count) => {
+      const input = `He noted <"literal ${'\\'.repeat(count)}" > sign" and "v.s." Examples followed> today.`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each([2, 4])('accepts an angle quotation closer after %i backslashes', (count) => {
+      const first = `He noted <"literal ${'\\'.repeat(count)}" >.`;
+      const second = 'He wrote "v.s."';
+      const third = 'Examples followed.';
+      expect(ss(`${first} ${second} ${third}`)).toEqual([first, second, third]);
+      expect(segmentCaseNeutrally(`${first} ${second} ${third}`)).toEqual([first, second, third]);
+    });
+
+    test.each(['vs.', 'v.s.'])(
+      'attaches spaced Treebank quotation closure after %s',
+      (abbreviation) => {
+        for (const separator of [' ', '\n']) {
+          const first = `He wrote \`\`${abbreviation}${separator}''`;
+          for (const second of ['Alice explained.', '"Alice explained."']) {
+            const input = `${first} ${second}`;
+            const expected = [first.replaceAll('\n', ' '), second];
+            expect(ss(input)).toEqual(expected);
+            expect(segmentCaseNeutrally(input)).toEqual(expected);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+              expected.map((sentence) => sentence.toLowerCase()),
+            );
+          }
+        }
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
       'releases terminal %s after a completed standalone bracket',
       (abbreviation) => {
         for (const [opening, closing] of [

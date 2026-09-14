@@ -565,7 +565,11 @@ function isAngleApostrophe(input: string, index: number): boolean {
 
 function angleQuoteCloser(input: string, index: number): string | undefined {
   const character = input[index];
-  if (isAngleApostrophe(input, index)) {
+  if (
+    !/["'`“‘«]/.test(character) ||
+    isEscapedAngleQuote(input, index) ||
+    isAngleApostrophe(input, index)
+  ) {
     return undefined;
   }
   if (
@@ -585,6 +589,14 @@ function angleQuoteCloser(input: string, index: number): string | undefined {
     return character;
   }
   return undefined;
+}
+
+function isEscapedAngleQuote(input: string, index: number): boolean {
+  let escaped = false;
+  for (let previous = index - 1; previous >= 0 && input[previous] === '\\'; previous--) {
+    escaped = !escaped;
+  }
+  return escaped;
 }
 
 /** Leading elisions cannot borrow a closer across a later independent quotation. */
@@ -627,11 +639,11 @@ function angleQuotationEnd(
     if (found === -1) {
       break;
     }
-    if (!isAngleApostrophe(input, found)) {
+    if (!(isEscapedAngleQuote(input, found) || isAngleApostrophe(input, found))) {
       positions[closer] = found;
       return hasLaterAngleElisionOpening(input, start, found) ? -1 : found + closer.length;
     }
-    index = found + closer.length;
+    index = found + 1;
   }
   positions[closer] = input.length;
   return -1;
@@ -750,7 +762,9 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
       lastEnd = end;
       start = -1;
-      sentenceStarted = false;
+      const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+      sentenceStarted =
+        end === index + 1 && abbrvReg.test(caseNeutral ? suffix.toLowerCase() : suffix);
     }
   }
 
@@ -812,6 +826,11 @@ function closingDelimiterEnd(input: string, index: number, insideQuotes: boolean
   let end = index + 1;
   let quotePending = insideQuotes;
   while (end < input.length) {
+    if (quotePending && input.startsWith("''", end)) {
+      quotePending = false;
+      end += 2;
+      continue;
+    }
     if (closingDelimiterReg.test(input[end])) {
       quotePending &&= input[end] !== '"';
       end++;
@@ -826,7 +845,8 @@ function closingDelimiterEnd(input: string, index: number, insideQuotes: boolean
     if (
       next > end &&
       next < input.length &&
-      (closingBracketReg.test(input[next]) || (quotePending && input[next] === '"'))
+      (closingBracketReg.test(input[next]) ||
+        (quotePending && (input[next] === '"' || input.startsWith("''", next))))
     ) {
       end = next;
       continue;
