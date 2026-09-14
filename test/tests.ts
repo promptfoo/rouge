@@ -2022,6 +2022,195 @@ describe('Utility Functions', () => {
         expect(segmentCaseNeutrally(input)).toEqual(expected);
       });
 
+      test.each(['Cause', 'Til', 'Till'])(
+        'preserves the leading elision %s within a pending curly quotation',
+        (word) => {
+          const input = `She said ‘Alpha... ’${word} it continued... Next.’`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+          const first = 'She said ‘Alpha...’';
+          const second = `${word} it continued.`;
+          expect(ss(`${first}${second}`)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(`${first}${second}`)).toEqual([first, second]);
+        },
+      );
+
+      test.each(["'", '‘', '’'])(
+        'recognizes a new decade sentence after an ellipsis with %s',
+        (mark) => {
+          const second = `${mark}90s fashion returned.`;
+          expect(ss(`Alpha... ${second}`)).toEqual(['Alpha...', second]);
+          expect(segmentCaseNeutrally(`Alpha... ${second}`)).toEqual(['Alpha...', second]);
+        },
+      );
+
+      test.each(['“', '‘', '«', '„'])(
+        'recognizes unspaced prefixed numeric text after an ellipsis and %s',
+        (opening) => {
+          for (const number of ['$100', '+5', '-£100', '€+5']) {
+            const second = `${opening}${number} was the result.`;
+            expect(ss(`Alpha...${second}`)).toEqual(['Alpha...', second]);
+            expect(segmentCaseNeutrally(`Alpha...${second}`)).toEqual(['Alpha...', second]);
+            const quantity = `Alpha...${opening}${number} points.`;
+            expect(ss(quantity)).toEqual([quantity]);
+            expect(segmentCaseNeutrally(quantity)).toEqual([quantity]);
+          }
+        },
+      );
+
+      test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('preserves spaced four-dot precedence before unspaced %s%s', (open, close) => {
+        const expected = ['Omitted words . . . .', `${open}Beta.${close}`];
+        const input = expected.join('');
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      });
+
+      test.each([
+        ['(', ')'],
+        ['[', ']'],
+        ['{', '}'],
+        ['<', '>'],
+        ['"', '"'],
+      ])('retains an outer %s%s after consuming only an inner quote', (open, close) => {
+        for (const gap of [' ', '']) {
+          const input = `The choices were ${open}“Maybe...”${gap}Alice suggested${close} before voting.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          const first = `The choices were ${open}“Maybe...”${close}`;
+          const second = 'Alice suggested.';
+          expect(ss(`${first}${gap}${second}`)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(`${first}${gap}${second}`)).toEqual([first, second]);
+        }
+      });
+
+      test('preserves four-dot precedence while an outer bracket remains open', () => {
+        const input = 'The choices were (“Maybe....”Alice suggested) before voting.';
+        const expected = ['The choices were (“Maybe....”', 'Alice suggested) before voting.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      });
+
+      test.each(['\n', '\r\n', '\u2028', '\u2029'])(
+        'uses complete source offsets for a punctuated aside wrapped with %j',
+        (wrap) => {
+          const input = `He paused... (Perhaps e.g.${wrap}very deliberately) before answering. Alpha... Beta.`;
+          const expected = [
+            'He paused... (Perhaps e.g. very deliberately) before answering.',
+            'Alpha...',
+            'Beta.',
+          ];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+            expected.map((part) => part.toLowerCase()),
+          );
+        },
+      );
+
+      test.each(['„Perhaps “really” tail“', '“Perhaps „wirklich“ tail”'])(
+        'matches the actual outer closer of the nested aside %s',
+        (aside) => {
+          const input = `He paused... ${aside} before continuing.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          const second = `${aside} Next sentence.`;
+          expect(ss(`He paused... ${second}`)).toEqual(['He paused...', second]);
+          expect(segmentCaseNeutrally(`He paused... ${second}`)).toEqual(['He paused...', second]);
+        },
+      );
+
+      test('does not let an unmatched earlier aside hide a later independent reply', () => {
+        const first = 'He paused... (Unclosed. Later...';
+        const reply = '“I am done,” she said.';
+        const aside = '“Perhaps,” before continuing.';
+        for (const segment of [ss, segmentCaseNeutrally]) {
+          expect(segment(`${first} ${reply}`)).toEqual([
+            'He paused...',
+            '(Unclosed.',
+            'Later...',
+            reply,
+          ]);
+          expect(segment(`${first} ${aside}`)).toEqual([
+            'He paused...',
+            '(Unclosed.',
+            `Later... ${aside}`,
+          ]);
+        }
+      });
+
+      test.each(['(Perhaps [[nested]])', '"Perhaps (really)"', "''Perhaps deliberately''"])(
+        'keeps independently matched aside families in %s',
+        (aside) => {
+          const input = `He paused... ${aside} before continuing.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+        },
+      );
+
+      test('preserves unmatched nested asides without guessing a closer', () => {
+        const second = '(Perhaps (nested) before continuing.';
+        expect(ss(`He paused... ${second}`)).toEqual(['He paused...', second]);
+        expect(segmentCaseNeutrally(`He paused... ${second}`)).toEqual(['He paused...', second]);
+      });
+
+      test.each(['``', "''"])(
+        'keeps source offsets aligned across mixed parenthetical and Treebank asides: %s',
+        (opening) => {
+          const first = 'He paused... (Perhaps) before continuing.';
+          const second = `He paused... ${opening}Perhaps e.g.\nvery deliberately'' before answering.`;
+          const expected = [first, second.replaceAll('\n', ' ')];
+          expect(ss(`${first} ${second}`)).toEqual(expected);
+          expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual(expected);
+        },
+      );
+
+      test('keeps an initial quotation separate from a later inline aside', () => {
+        const expected = ['"Opening" ended.', 'He paused... "Perhaps," before continuing.'];
+        const input = expected.join(' ');
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      });
+
+      test.each([
+        ['(', ')'],
+        ['[', ']'],
+        ['{', '}'],
+        ['<', '>'],
+      ])('finds a consumed ASCII closer before the final %s%s bracket', (open, close) => {
+        for (const gap of ['', ' ']) {
+          const first = `He said ${open}"‘Enough...’"${gap}${close}`;
+          expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+          const pending = `He said ${open}"‘Enough...’ Next.${close}`;
+          expect(ss(pending)).toEqual([pending]);
+          expect(segmentCaseNeutrally(pending)).toEqual([pending]);
+        }
+      });
+
+      test.each(['(', ')', '[', ']', '{', '}', '<', '>'])(
+        'ignores the quoted literal bracket %s while matching an outer aside',
+        (literal) => {
+          for (const [open, close] of [
+            ['"', '"'],
+            ['“', '”'],
+            ['„', '“'],
+          ]) {
+            const input = `He paused... (Perhaps ${open}${literal}${close} deliberately) before continuing.`;
+            expect(ss(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input)).toEqual([input]);
+            const first = 'He paused...';
+            const second = `(Perhaps ${open}${literal}${close} deliberately) Next sentence.`;
+            expect(ss(`${first} ${second}`)).toEqual([first, second]);
+          }
+        },
+      );
+
       test('scores reference sentences ending in a three-dot ellipsis correctly', () => {
         expect(rouge.l('Beta Alpha...', 'Alpha... Beta.')).toBeCloseTo(6 / 7);
       });
