@@ -747,6 +747,13 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(`${token}.Σ/Α.`)).toEqual([`${token}.`, 'Σ/Α.']);
     });
 
+    test('scans ambiguous cased combining marks without backtracking', () => {
+      const word = `İ${'\u0345\u0307'.repeat(20_000)}x!`;
+      const start = Date.now();
+      expect(segmentCaseNeutrally(`A.${word}`)).toEqual(['A.', word]);
+      expect(Date.now() - start).toBeLessThan(2000);
+    });
+
     test('does not let a truncated mark qualify an unrelated later word', () => {
       const input = 'İ?0b/]]\té.𝒜B';
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(

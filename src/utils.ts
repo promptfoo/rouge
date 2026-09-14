@@ -754,6 +754,30 @@ function caseNeutralIdentifierContext(input: string, index: number): boolean {
   );
 }
 
+function isDottedIdentifierContinuation(input: string): boolean {
+  let cursor = 0;
+  for (let atoms = 0; atoms < 2; atoms++) {
+    const base = characterAt(input, cursor);
+    if (!/^[\p{Cased}\p{Number}_-]$/u.test(base)) {
+      return false;
+    }
+    cursor += base.length;
+    let next = characterAt(input, cursor);
+    if (base === 'İ' || next === '\u0307') {
+      // A marked atom accepts the entire mark run; splitting it into another atom
+      // cannot extend that run and needlessly introduces backtracking.
+      while (/^\p{Mark}$/u.test(next)) {
+        cursor += next.length;
+        next = characterAt(input, cursor);
+      }
+    }
+    if (next === '' || /^[\s/.]$/u.test(next)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function hasStableAsciiIdentifierEvidence(input: string, start: number, end: number): boolean {
   for (let cursor = start; cursor < end; cursor++) {
     const code = input.charCodeAt(cursor);
@@ -806,8 +830,7 @@ function isUnspacedSentenceBoundary(
         hostnameLabel === hostnameLabel.toLowerCase() ||
         hostnameLabel === hostnameLabel.toUpperCase()));
   const dottedIdentifier = caseNeutral
-    ? identifier &&
-      /^(?:İ\p{M}*|[\p{Cased}\p{Number}_-](?:\u0307\p{M}*)?){1,2}(?=\s|[/.]|$)/u.test(following)
+    ? identifier && isDottedIdentifierContinuation(following)
     : /\b\p{Lu}[\p{Letter}\p{Number}_-]*\.$/u.test(suffix) &&
       /^[\p{Lu}\p{Number}_-]+(?=\s|[/.]|$)/u.test(following);
   const initial = caseNeutral ? /^\p{Cased}\p{M}*\./u : /^\p{Lu}\./u;
