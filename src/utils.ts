@@ -36,7 +36,8 @@ export function treeBankTokenize(input: string): string[] {
   let parse = text.replace(/``|''|"/g, (quote: string, index: number): string => {
     insideQuotes =
       quote === '``' ||
-      (opensDoubleQuote(text, index, insideQuotes) &&
+      (index + quote.length < text.length &&
+        opensDoubleQuote(text, index, insideQuotes) &&
         !/[.!?]/.test(text[index - 1] ?? '') &&
         (quote === '"' ||
           (index > 0 &&
@@ -255,32 +256,41 @@ function markUnpairedElisions(input: string, apostrophes: Uint8Array): void {
 }
 
 function markStraightPossessives(input: string, apostrophes: Uint8Array): void {
+  let opening: number | undefined;
   let candidate: number | undefined;
   for (const quote of input.matchAll(/'/g)) {
     const index = quote.index;
-    const previous = input[index - 1] ?? '';
     const following = characterAt(input, index + 1);
     if (
-      (index === 0 || /[\s\p{Punctuation}]/u.test(previous)) &&
-      /^[\p{Letter}\p{Number}([{<]$/u.test(following)
+      opening !== undefined &&
+      (isLeadingElision(input, index) || numericQuoteIsElision(input, index))
     ) {
+      continue;
+    }
+    if (opensDoubleQuote(input, index, false) && /^[\p{Letter}\p{Number}([{<]$/u.test(following)) {
+      opening = index;
       candidate = undefined;
       continue;
     }
-    if (/^[\p{Letter}\p{Mark}]$/u.test(following)) {
+    if (opening === undefined || /^[\p{Letter}\p{Mark}]$/u.test(following)) {
       continue;
     }
-    if (/\p{Number}$/u.test(input.slice(Math.max(0, index - 2), index))) {
-      candidate = undefined;
-    } else if (/[sS]/.test(previous)) {
+    if (
+      !/^\p{Number}$/u.test(following) &&
+      /(?:s|\p{Number})$/iu.test(input.slice(Math.max(0, index - 2), index))
+    ) {
       candidate ??= index;
-    } else if (candidate !== undefined) {
-      // Preserve the other quote family's bits; confirmed ranges do not overlap.
+      continue;
+    }
+    if (candidate !== undefined) {
+      // A later closer confirms interior possessives and measurements in this span.
+      // A new opening resets the candidate, so confirmed ranges never overlap.
       for (let position = candidate; position < index; position++) {
         apostrophes[position] |= 2;
       }
-      candidate = undefined;
     }
+    opening = undefined;
+    candidate = undefined;
   }
 }
 
@@ -915,6 +925,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, pairs: Int32Array):
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
   const questionTerminal = questionTerminalChecker(input, protectedPeriods, caseNeutral, pairs);
+  const hasUrlPrefix = urlPrefixChecker(input);
   let lastEnd = 0;
   let start = -1;
   const quotations: SingleAndCurlyQuotations = {
@@ -955,7 +966,15 @@ function sentenceChunks(input: string, caseNeutral: boolean, pairs: Int32Array):
       char === '!'
     ) {
       const closingQuotes = closingQuotationMarks(quotations);
-      const end = sentenceEnd(input, index, closingQuotes, brackets, caseNeutral, questionTerminal);
+      const end = sentenceEnd(
+        input,
+        index,
+        closingQuotes,
+        brackets,
+        caseNeutral,
+        questionTerminal,
+        hasUrlPrefix,
+      );
       if (
         end === -1 ||
         (closingQuotes.length > 1 && remainsInsideQuotation(input, index, end, closingQuotes))
@@ -989,10 +1008,7 @@ function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllips
       }
     }
 
-    let next = match.index + match[0].length;
-    while (next < input.length && /[\s"'“‘„([{<]/.test(input[next])) {
-      next++;
-    }
+    const next = openingDelimiterEnd(input, match.index + match[0].length);
     const following = characterAt(input, next);
     const sentenceStart =
       /^\p{Number}$/u.test(following) ||
@@ -1074,6 +1090,7 @@ function sentenceEnd(
   brackets: { depth: number; standalone: boolean },
   caseNeutral: boolean,
   questionTerminal: (start: number) => boolean,
+  hasUrlPrefix: (end: number) => boolean,
 ): number {
   const insideQuotes = closingQuotes.length > 0;
   if (
@@ -1085,7 +1102,16 @@ function sentenceEnd(
   }
   const end = closingDelimiterEnd(input, index, closingQuotes);
   if (end < input.length && !/\s/.test(input[end])) {
-    return isUnspacedSentenceBoundary(input, index, end, caseNeutral, closingQuotes) ? end : -1;
+    return isUnspacedSentenceBoundary(
+      input,
+      index,
+      end,
+      caseNeutral,
+      hasUrlPrefix(end),
+      closingQuotes,
+    )
+      ? end
+      : -1;
   }
   if (end === index + 1) {
     return standaloneTerminalEnd(input, end, insideQuotes);
@@ -1101,10 +1127,7 @@ function sentenceEnd(
     return -1;
   }
 
-  let next = end;
-  while (next < input.length && /[\s"'“„‘([{<]/.test(input[next])) {
-    next++;
-  }
+  const next = openingDelimiterEnd(input, end);
   if (next === input.length) {
     return end;
   }
@@ -1147,7 +1170,7 @@ function isDialogueAttribution(
 ): boolean {
   if (
     !closesQuotation ||
-    /["'“‘„]/.test(leadingDelimiters) ||
+    /["'“‘„]|``/.test(leadingDelimiters) ||
     (/^(?:am|is|are|was|were|be|been|being|has|have|had|will|would|can|could|should|must)\b/i.test(
       input,
     ) &&
@@ -1155,10 +1178,19 @@ function isDialogueAttribution(
   ) {
     return false;
   }
+  const aloud = input.match(/^aloud\b(?:\s*,\s*)?/i);
+  if (aloud !== null) {
+    return !aloud[0].includes(',') || isReportingAttribution(input.slice(aloud[0].length));
+  }
   return (
-    /^(?:aloud\b|(?:am|is|are|was|were|be|been|being|has|have|had|will|would|can|could|should|must)\s+(?!(?:i|we|he|she|they|you|it|this|that|these|those)\b))/i.test(
+    /^(?:am|is|are|was|were|be|been|being|has|have|had|will|would|can|could|should|must)\s+(?!(?:i|we|he|she|they|you|it|this|that|these|those)\b)/i.test(
       input,
-    ) ||
+    ) || isReportingAttribution(input)
+  );
+}
+
+function isReportingAttribution(input: string): boolean {
+  return (
     /^(?:(?!(?:am|is|are|was|were|be|been|being|has|have|had)\b)[\p{Letter}\p{Mark}'’-]+\s+){1,3}(?:said|thought|asked|replied|answered)(?:\s+(?:[\p{Letter}\p{Mark}]+ly|me|you|him|her|us|them))*(?=\s*[,.;!?]|\s*$)/iu.test(
       input,
     ) ||
@@ -1216,10 +1248,7 @@ function quotedQuestionTerminal(input: string, quoteEnd: number, caseNeutral: bo
   while (end < input.length && /['”’“\])}>]/.test(input[end])) {
     end++;
   }
-  let next = end;
-  while (next < input.length && /[\s"'“„‘([{<]/.test(input[next])) {
-    next++;
-  }
+  const next = openingDelimiterEnd(input, end);
   const character = characterAt(input, next);
   return next === input.length ||
     (caseNeutral ? isNeutralSentenceStart(input, end, next) : charIsUpperCase(character)) ||
@@ -1236,6 +1265,7 @@ function questionTerminalChecker(
   pairs: Int32Array,
 ): (start: number) => boolean {
   const nextTerminal = unquotedTerminalScanner(input, pairs, caseNeutral);
+  const hasUrlPrefix = urlPrefixChecker(input);
   const ellipsisCursor = { index: 0 };
   let through = -1;
   let question = false;
@@ -1256,7 +1286,13 @@ function questionTerminalChecker(
       }
       if (
         /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, terminal.index + 1)) &&
-        !isUnspacedSentenceBoundary(input, terminal.index, terminal.index + 1, caseNeutral)
+        !isUnspacedSentenceBoundary(
+          input,
+          terminal.index,
+          terminal.index + 1,
+          caseNeutral,
+          hasUrlPrefix(terminal.index + 1),
+        )
       ) {
         terminal = nextTerminal(terminal.index + terminal[0].length);
         continue;
@@ -1310,20 +1346,33 @@ function countClosingBrackets(input: string, start: number, end: number): number
   return count;
 }
 
+/** Skip opening delimiters, treating the Treebank opener as one two-character token. */
+function openingDelimiterEnd(input: string, start: number, allowWhitespace = true): number {
+  let next = start;
+  while (next < input.length) {
+    if (/["'“‘„([{<]/.test(input[next]) || (allowWhitespace && /\s/.test(input[next]))) {
+      next++;
+    } else if (input.startsWith('``', next)) {
+      next += 2;
+    } else {
+      break;
+    }
+  }
+  return next;
+}
+
 function isUnspacedDelimitedSentenceStart(
   input: string,
   index: number,
   caseNeutral: boolean,
 ): boolean {
-  let next = index + 1;
-  if (!/["'“‘„([{<]/.test(input[next] ?? '')) {
+  const start = index + 1;
+  const next = openingDelimiterEnd(input, start, false);
+  if (next === start) {
     return false;
   }
-  if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {
+  if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(start))) {
     return false;
-  }
-  while (next < input.length && /["'“‘„([{<]/.test(input[next])) {
-    next++;
   }
   const character = characterAt(input, next);
   return (
@@ -1333,11 +1382,26 @@ function isUnspacedDelimitedSentenceStart(
   );
 }
 
+/** Keep URL-prefix context across arbitrarily long tokens for one monotone consumer. */
+function urlPrefixChecker(input: string): (end: number) => boolean {
+  const context = /\s|https?:\/\/|www\./gi;
+  let next = context.exec(input);
+  let insideUrl = false;
+  return (end) => {
+    while (next !== null && next.index + next[0].length <= end) {
+      insideUrl = !/\s/.test(next[0]);
+      next = context.exec(input);
+    }
+    return insideUrl;
+  };
+}
+
 function isUnspacedSentenceBoundary(
   input: string,
   index: number,
   next: number,
   caseNeutral: boolean,
+  insideUrl: boolean,
   closingQuotes = '',
 ): boolean {
   if (remainsInsideQuotation(input, index, next, closingQuotes)) {
@@ -1354,7 +1418,6 @@ function isUnspacedSentenceBoundary(
     return false;
   }
   const precedingToken = input.slice(Math.max(0, index - 320), next).match(/\S+$/)?.[0] ?? '';
-  const insideUrl = /https?:\/\/|www\./i.test(precedingToken);
   if (input[index] !== '.') {
     return !insideUrl;
   }

@@ -1389,6 +1389,50 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
     }, 5000);
 
+    test.each([
+      [
+        '“Stop!” Aloud, she read the transcript. Next.',
+        ['“Stop!”', 'Aloud, she read the transcript.', 'Next.'],
+      ],
+      ['He said “Stop!” aloud, said Alice. Next.', ['He said “Stop!” aloud, said Alice.', 'Next.']],
+      ['He said “Stop!” aloud to her. Next.', ['He said “Stop!” aloud to her.', 'Next.']],
+      [
+        "She said 'First. It was 5' tall. Take it.' Next.",
+        ["She said 'First. It was 5' tall. Take it.'", 'Next.'],
+      ],
+      [
+        "He said 'The dogs' owners stood 5' tall. Take it.' Next.",
+        ["He said 'The dogs' owners stood 5' tall. Take it.'", 'Next.'],
+      ],
+      [
+        "He wrote '5' on the card. She said 'First. Last.' Next.",
+        ["He wrote '5' on the card.", "She said 'First. Last.'", 'Next.'],
+      ],
+      [
+        "He said 'It was 𝟝' tall. Next thought.' Last.",
+        ["He said 'It was 𝟝' tall. Next thought.'", 'Last.'],
+      ],
+      ["He said ``Stop.'' ``Next.''", ["He said ``Stop.''", "``Next.''"]],
+      ["He said ``Stop.''``Next.''", ["He said ``Stop.''", "``Next.''"]],
+      ["He said ``Stop.'' \n``Was Alice ready?''", ["He said ``Stop.''", "``Was Alice ready?''"]],
+      ["He said ``Stop.'' `Next.'", ["He said ``Stop.'' `Next.'"]],
+    ])('retains reviewed quotation and attribution distinctions: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['https://example.com/', 'www.example.com/'])(
+      'retains long URL context in quotation and ordinary scans: %s',
+      (prefix) => {
+        const url = `${prefix}${'a'.repeat(400)}.Example`;
+        const input = `"It ended." Was ${url} ready? Next.`;
+        const expected = ['"It ended."', `Was ${url} ready?`, 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(ss(`See ${url}. Next.`)).toEqual([`See ${url}.`, 'Next.']);
+      },
+    );
+
     test('recognizes astral digits before measurement apostrophes', () => {
       const input = "The answer 'Yes' worked. It was 𝟝' tall. Next.";
       const expected = ["The answer 'Yes' worked.", "It was 𝟝' tall.", 'Next.'];
@@ -2016,6 +2060,18 @@ describe('Utility Functions', () => {
         const input = `He said \`\`Stop.''${separator}"Next."`;
         expect(ss(input)).toEqual(["He said ``Stop.''", '"Next."']);
         expect(segmentCaseNeutrally(input)).toEqual(["He said ``Stop.''", '"Next."']);
+      },
+    );
+
+    test.each([',', ';', ':', ')', ']'])(
+      'retains an unmatched EOF quote as a closing tokenizer mark after %s',
+      (punctuation) => {
+        expect(rouge.treeBankTokenize(`hello${punctuation}"`).at(-1)).toBe("''");
+        expect(rouge.treeBankTokenize(`hello${punctuation}"world"`).slice(-3)).toEqual([
+          '``',
+          'world',
+          "''",
+        ]);
       },
     );
 
