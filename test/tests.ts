@@ -1073,6 +1073,7 @@ describe('Utility Functions', () => {
       'The Giants vs. the Tigers won.',
       'The Giants vs. Tigers won.',
       'The Giants VS. Tigers won.',
+      'The Giants vs. Boston Celtics, which was televised.',
     ])('keeps the standard versus abbreviation inside %s', (input) => {
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);

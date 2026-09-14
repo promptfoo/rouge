@@ -137,7 +137,6 @@ function isAbbreviationException(suffix: string, following: string): boolean {
     !(
       /\bvs\.$/i.test(suffix) &&
       (/\b(?:am|is|are|was|were|be|been|being)\s+vs\.$/i.test(suffix) ||
-        independentSentenceReg.test(continuation) ||
         /^(?:this|that|these|those|it|we|they|he|she|i)\b/i.test(continuation))
     )
   );
