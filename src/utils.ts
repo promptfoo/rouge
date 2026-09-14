@@ -587,6 +587,56 @@ function angleQuoteCloser(input: string, index: number): string | undefined {
   return undefined;
 }
 
+/** Leading elisions cannot borrow a closer across a later independent quotation. */
+function hasLaterAngleElisionOpening(input: string, start: number, end: number): boolean {
+  const opener = input[start];
+  if (
+    !(
+      /['‘]/.test(opener) &&
+      /^(?:t(?:is|was)(?![\p{ID_Continue}\u200c\u200d])|\p{Number})/iu.test(
+        input.slice(start + 1, start + 16),
+      )
+    )
+  ) {
+    return false;
+  }
+  let next = input.indexOf(opener, start + 1);
+  while (next !== -1 && next <= end) {
+    if (
+      !isAngleApostrophe(input, next) &&
+      (opener === '‘' || /^[\s([{<]$/.test(input[next - 1])) &&
+      /\S/.test(input[next + 1] ?? '')
+    ) {
+      return true;
+    }
+    next = input.indexOf(opener, next + 1);
+  }
+  return false;
+}
+
+/** Search each fixed closer kind monotonically, including when no closer remains. */
+function angleQuotationEnd(
+  input: string,
+  start: number,
+  closer: string,
+  positions: Record<string, number>,
+): number {
+  let index = Math.max(start + closer.length, positions[closer] ?? 0);
+  while (index < input.length) {
+    const found = input.indexOf(closer, index);
+    if (found === -1) {
+      break;
+    }
+    if (!isAngleApostrophe(input, found)) {
+      positions[closer] = found;
+      return hasLaterAngleElisionOpening(input, start, found) ? -1 : found + closer.length;
+    }
+    index = found + closer.length;
+  }
+  positions[closer] = input.length;
+  return -1;
+}
+
 /** Pair unquoted angle delimiters once; an unmatched comparison stays ordinary prose. */
 function matchedAngleDelimiters(input: string): Uint8Array | undefined {
   if (!(input.includes('<') && input.includes('>'))) {
@@ -595,20 +645,17 @@ function matchedAngleDelimiters(input: string): Uint8Array | undefined {
   let pending = new Uint32Array(32);
   let depth = 0;
   let matched: Uint8Array | undefined;
-  let quote: string | undefined;
+  const closerPositions: Record<string, number> = {};
   for (let index = 0; index < input.length; index++) {
+    const quote = angleQuoteCloser(input, index);
     if (quote !== undefined) {
-      const apostrophe = isAngleApostrophe(input, index);
-      if (input.startsWith(quote, index) && !apostrophe) {
-        index += quote.length - 1;
-        quote = undefined;
+      const end = angleQuotationEnd(input, index, quote, closerPositions);
+      if (end !== -1) {
+        index = end - 1;
+        continue;
       }
-      continue;
     }
-    quote = angleQuoteCloser(input, index);
-    if (quote !== undefined) {
-      index += quote.length - 1;
-    } else if (input[index] === '<') {
+    if (input[index] === '<') {
       if (depth === pending.length) {
         const expanded = new Uint32Array(pending.length * 2);
         expanded.set(pending);
@@ -625,18 +672,32 @@ function matchedAngleDelimiters(input: string): Uint8Array | undefined {
   return matched;
 }
 
+function followsParagraph(input: string, index: number): boolean {
+  let breaks = 0;
+  for (let previous = index - 1; previous >= 0 && /\s/.test(input[previous]); previous--) {
+    if (input[previous] === '\n' || (input[previous] === '\r' && input[previous + 1] !== '\n')) {
+      breaks++;
+      if (breaks === 2) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function updateBracketContext(
-  character: string,
+  input: string,
   index: number,
   standalone: boolean,
   brackets: BracketContext,
 ): void {
+  const character = input[index];
   if (/[<>]/.test(character) && brackets.angles?.[index] !== 1) {
     return;
   }
   if (openingBracketReg.test(character)) {
     if (brackets.depth === 0) {
-      brackets.standalone = standalone;
+      brackets.standalone = standalone || followsParagraph(input, index);
     }
     brackets.depth++;
   } else if (closingBracketReg.test(character)) {
@@ -651,6 +712,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const ellipsisCursor = { index: 0 };
   let lastEnd = 0;
   let start = -1;
+  let sentenceStarted = false;
   let insideQuotes = false;
   const brackets: BracketContext = {
     depth: 0,
@@ -661,12 +723,13 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     insideQuotes = quotationState(input, index, insideQuotes);
-    updateBracketContext(char, index, start === -1, brackets);
+    updateBracketContext(input, index, !sentenceStarted, brackets);
     if (index < lastEnd || char === '\r' || char === '\n') {
       // Only closing-delimiter lookahead can cross CR/LF; other wraps reset the prefix.
       start = -1;
       continue;
     }
+    sentenceStarted ||= /\S/.test(char);
     if (start === -1) {
       if (/\S/.test(char)) {
         start = index;
@@ -687,6 +750,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
       lastEnd = end;
       start = -1;
+      sentenceStarted = false;
     }
   }
 

@@ -3370,3 +3370,109 @@ describe('Core Functions', () => {
     });
   });
 });
+
+describe('versus delimiters across wrapped prose', () => {
+  test.each(['vs.', 'v.s.'])('keeps an embedded %s parenthesis across wraps', (abbreviation) => {
+    for (const separator of [' ', '\n', '\r\n', '\r']) {
+      const input = `The label is${separator}(${abbreviation}) not versus.`;
+      const expected = [`The label is (${abbreviation}) not versus.`];
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual(expected);
+        expect(
+          rouge.sentenceSegment(`First sentence.\n(He wrote ${abbreviation}) Alice replied.`, {
+            caseNeutral,
+          }),
+        ).toEqual(['First sentence.', `(He wrote ${abbreviation})`, 'Alice replied.']);
+      }
+    }
+  });
+
+  test.each(['\n\n', '\r\n\r\n', '\r\r', '\n \t\n'])(
+    'retains standalone parentheses after a blank paragraph: %j',
+    (separator) => {
+      const input = `Preface${separator}(He wrote vs.) Alice replied.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          'Preface (He wrote vs.)',
+          'Alice replied.',
+        ]);
+      }
+    },
+  );
+
+  test.each(["'Tis", "'Twas", "'90s", '‘Tis', '‘Twas'])(
+    'retains angle context after an unpaired apostrophe in %s',
+    (prefix) => {
+      const input = `${prefix} a note: <"v.s." Examples followed> today.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    },
+  );
+
+  test.each([
+    ["'Tis", "'No.'"],
+    ["'Twas", "'No.'"],
+    ["'99", "'No.'"],
+    ['‘Tis', '‘No.’'],
+    ['‘Twas', '‘No.’'],
+    ['‘99', '‘No.’'],
+  ])('does not pair %s with a later independent quotation', (prefix, quotation) => {
+    const input = `${prefix} <team "vs." Examples followed> He said ${quotation}`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test.each([
+    "'Tis > odd'",
+    "'99 > odd'",
+    '‘Tis > odd’',
+    '‘𝒜’s > value’',
+    "``literal > sign''",
+    "''literal > sign''",
+  ])('keeps matched quotation spans inside an angle literal: %s', (quote) => {
+    const input = `He noted <${quote} and "vs." Examples followed> today.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test('retains the existing paired-angle interpretation across prose', () => {
+    const input = 'The score was x < 5. He wrote "vs." Alice replied > 3.';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+        'The score was x < 5.',
+        'He wrote "vs." Alice replied > 3.',
+      ]);
+    }
+  });
+
+  test('preserves a padded matched elision quotation at end of input', () => {
+    const input = "'Tis < a note > '";
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test('preserves deeply nested angle literals through position-stack growth', () => {
+    const input = `${'<'.repeat(80)}"vs." Examples followed${'>'.repeat(80)} today.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test('bounds searches for repeated unmatched quotation openers', () => {
+    expectBundledScriptToPass(
+      `
+        const summary = '‘'.repeat(250000) + '<"vs." Examples followed> today.';
+        const sentences = module.exports.sentenceSegment(summary);
+        if (sentences.length !== 1 || sentences[0] !== summary) {
+          throw new Error('Unmatched quotation content changed');
+        }
+        process.stdout.write('ok');
+      `,
+      3000,
+    );
+  }, 10_000);
+});
