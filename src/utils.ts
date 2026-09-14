@@ -683,8 +683,11 @@ function sentenceEnd(
   const end = closingDelimiterEnd(input, index, insideQuotes);
   const closesQuotation =
     insideQuotes && (input[end - 1] === '"' || input.slice(end - 2, end) === "''");
+  const closesAbbreviationQuotation = closesQuotation || input[end - 1] === "'";
   if (end < input.length && !/\s/.test(input[end])) {
-    return isUnspacedSentenceBoundary(input, index, end, caseNeutral, closesQuotation) ? end : -1;
+    return isUnspacedSentenceBoundary(input, index, end, caseNeutral, closesAbbreviationQuotation)
+      ? end
+      : -1;
   }
   if (end === index + 1) {
     return end;
@@ -726,7 +729,7 @@ function sentenceEnd(
     return -1;
   }
   return abbrvReg.test(gateSuffix) &&
-    isAbbreviationException(gateSuffix, input.slice(next), closesQuotation)
+    isAbbreviationException(gateSuffix, input.slice(next), closesAbbreviationQuotation)
     ? -1
     : end;
 }

@@ -1138,6 +1138,15 @@ describe('Utility Functions', () => {
       },
     );
 
+    test('preserves terminal versus in an ASCII single quotation', () => {
+      const first = "He wrote 'vs.'";
+      const next = 'Alice explained the term.';
+      for (const separator of [' ', '\n\n', '']) {
+        expect(ss(`${first}${separator}${next}`)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(`${first}${separator}${next}`)).toEqual([first, next]);
+      }
+    });
+
     test('should not split possessive two letter abbreviations', () => {
       expect(ss("That is JFK Jr.'s book.")).toEqual(["That is JFK Jr.'s book."]);
     });
