@@ -162,6 +162,7 @@ function singleQuoteApostrophes(input: string): Uint8Array {
   const apostrophes = new Uint8Array(input.length);
   markCurlyApostrophes(input, apostrophes);
   markUnpairedElisions(input, apostrophes);
+  markStraightPossessives(input, apostrophes);
   return apostrophes;
 }
 
@@ -226,16 +227,16 @@ function markUnpairedElisions(input: string, apostrophes: Uint8Array): void {
   let elisionOpening: number | undefined;
   for (const quote of input.matchAll(/'/g)) {
     const index = quote.index;
-    const nextState = singleQuotationState(input, index, insideStraight);
     const elision = leadingElisionReg.test(input.slice(index + 1, index + 12));
     if (
       elisionOpening !== undefined &&
       opensDoubleQuote(input, index, false) &&
-      /\S/.test(input[index + 1] ?? '') &&
-      !elision
+      /^[\p{Letter}\p{Number}([{<]$/u.test(characterAt(input, index + 1))
     ) {
       elisionOpening = undefined;
+      insideStraight = false;
     }
+    const nextState = singleQuotationState(input, index, insideStraight);
     if (nextState && !insideStraight && elision) {
       elisionOpening = index;
       apostrophes[index] |= 2;
@@ -244,6 +245,34 @@ function markUnpairedElisions(input: string, apostrophes: Uint8Array): void {
       elisionOpening = undefined;
     }
     insideStraight = nextState;
+  }
+}
+
+function markStraightPossessives(input: string, apostrophes: Uint8Array): void {
+  let candidate: number | undefined;
+  for (const quote of input.matchAll(/'/g)) {
+    const index = quote.index;
+    const previous = input[index - 1] ?? '';
+    const following = characterAt(input, index + 1);
+    if (
+      (index === 0 || /[\s\p{Punctuation}]/u.test(previous)) &&
+      /^[\p{Letter}\p{Number}([{<]$/u.test(following)
+    ) {
+      candidate = undefined;
+      continue;
+    }
+    if (/^[\p{Letter}\p{Mark}]$/u.test(following)) {
+      continue;
+    }
+    if (/[sS]/.test(previous)) {
+      candidate ??= index;
+    } else if (candidate !== undefined) {
+      // Preserve the other quote family's bits; confirmed ranges do not overlap.
+      for (let position = candidate; position < index; position++) {
+        apostrophes[position] |= 2;
+      }
+      candidate = undefined;
+    }
   }
 }
 
@@ -800,7 +829,7 @@ function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllips
     }
 
     let next = match.index + match[0].length;
-    while (next < input.length && /[\s"'([{<]/.test(input[next])) {
+    while (next < input.length && /[\s"'“‘„([{<]/.test(input[next])) {
       next++;
     }
     const following = characterAt(input, next);
@@ -935,7 +964,7 @@ function isDialogueAttribution(input: string, closesQuotation: boolean): boolean
     (/^(?:am|is|are|was|were|be|been|being|has|have|had|will|would|can|could|should|must)\b/i.test(
       input,
     ) &&
-      /^[^.!?\r\n]*\?/.test(input))
+      hasQuestionTerminal(input))
   ) {
     return false;
   }
@@ -950,6 +979,23 @@ function isDialogueAttribution(input: string, closesQuotation: boolean): boolean
       input,
     )
   );
+}
+
+function hasQuestionTerminal(input: string): boolean {
+  for (const terminal of input.matchAll(/[.!?\r\n]/g)) {
+    if (terminal[0] !== '.') {
+      return terminal[0] === '?';
+    }
+    const suffix = input.slice(
+      Math.max(0, terminal.index + 1 - sentenceSuffixLength),
+      terminal.index + 1,
+    );
+    const lastWord = suffix.match(/\S+$/)?.[0] ?? '';
+    if (!(abbrvReg.test(suffix) || matchesAcronymSuffix(suffix, lastWord, true))) {
+      return false;
+    }
+  }
+  return false;
 }
 
 function standaloneTerminalEnd(input: string, end: number, insideQuotes: boolean): number {
@@ -987,13 +1033,13 @@ function isUnspacedDelimitedSentenceStart(
   caseNeutral: boolean,
 ): boolean {
   let next = index + 1;
-  if (!/["'([{<]/.test(input[next] ?? '')) {
+  if (!/["'“‘„([{<]/.test(input[next] ?? '')) {
     return false;
   }
   if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {
     return false;
   }
-  while (next < input.length && /["'([{<]/.test(input[next])) {
+  while (next < input.length && /["'“‘„([{<]/.test(input[next])) {
     next++;
   }
   const character = characterAt(input, next);

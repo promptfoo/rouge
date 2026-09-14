@@ -1227,6 +1227,54 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each([
+      [
+        "She said 'The dogs' toys are here. Take them.' Next.",
+        ["She said 'The dogs' toys are here. Take them.'", 'Next.'],
+      ],
+      ['First.“Next.”', ['First.', '“Next.”']],
+      ['First.‘Next.’', ['First.', '‘Next.’']],
+      ['First.„Next.“', ['First.', '„Next.“']],
+      ['“It ended.” Was Mr. Jones ready? Next.', ['“It ended.”', 'Was Mr. Jones ready?', 'Next.']],
+      ['Omitted words . . . . “Next sentence.”', ['Omitted words . . . .', '“Next sentence.”']],
+    ])('preserves reviewed quote-family boundaries: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      [
+        "She said 'The dogs' owners' toys are here. Take them.' Next.",
+        ["She said 'The dogs' owners' toys are here. Take them.'", 'Next.'],
+      ],
+      [
+        "She said 'The dogs' toys are here. Take them.', then left. Next.",
+        ["She said 'The dogs' toys are here. Take them.', then left.", 'Next.'],
+      ],
+      [
+        "The answer 'Yes' was accepted. She said 'No.' Next.",
+        ["The answer 'Yes' was accepted.", "She said 'No.'", 'Next.'],
+      ],
+      [
+        '“It ended.” Was the U.S. government ready? Next.',
+        ['“It ended.”', 'Was the U.S. government ready?', 'Next.'],
+      ],
+      [
+        'The word “No.” was written. Was Alice ready?',
+        ['The word “No.” was written.', 'Was Alice ready?'],
+      ],
+    ])('preserves competing quote and attribution boundaries: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('pairs consecutive elision candidates independently', () => {
+      const input = "'Til tomorrow. He said 'Twas strange. Really.' Next.";
+      const expected = ["'Til tomorrow.", "He said 'Twas strange. Really.'", 'Next.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
     test('pairs elision quotations before Unicode next-line separators', () => {
       const input = "She said 'Til tomorrow. We can wait.'\u0085Next.";
       const expected = ["She said 'Til tomorrow. We can wait.'", 'Next.'];
