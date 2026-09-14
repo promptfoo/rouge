@@ -1,12 +1,4 @@
-import {
-  ABBR_DATES,
-  ABBR_ORGANIZATIONS,
-  ABBR_PLACES,
-  ABBR_TIME,
-  GATE_EXCEPTIONS,
-  GATE_SUBSTITUTIONS,
-  TREEBANK_CONTRACTIONS,
-} from './constants';
+import { GATE_EXCEPTIONS, GATE_SUBSTITUTIONS, TREEBANK_CONTRACTIONS } from './constants';
 import { lcsIndices } from './lcs';
 import {
   validateBeta,
@@ -137,10 +129,16 @@ const sentenceContinuationReg =
 const independentSentenceReg =
   /^(?:in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
+interface SingleQuoteSource {
+  input: string;
+  index: number;
+  possessives: Set<number>;
+}
+
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
   readonly #caseNeutral: boolean;
-  readonly #quoteSource: { input: string; index: number };
+  readonly #quoteSource: SingleQuoteSource;
   #parts: string[] = [];
   #normalizedThrough = 0;
   #words: { titleCase: boolean; lowerCase: boolean }[] = [];
@@ -151,7 +149,7 @@ class SentenceBuffer {
   hasLineBreaks = false;
   startsWithTitleCase = false;
 
-  constructor(text: string, caseNeutral: boolean, quoteSource: { input: string; index: number }) {
+  constructor(text: string, caseNeutral: boolean, quoteSource: SingleQuoteSource) {
     this.#caseNeutral = caseNeutral;
     this.#quoteSource = quoteSource;
     this.append(trimSpaces(text));
@@ -255,7 +253,7 @@ class SentenceBuffer {
         previous.toLowerCase() === 's' &&
         /\s/.test(following) &&
         (this.#caseNeutral
-          ? nextSingleQuoteCloses(source.input, source.index)
+          ? source.possessives.has(source.index - 1)
           : /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(continuation));
       this.#insideSingleQuotes =
         possessive || (following.length > 0 && !/[\s.,!?;:)\]}]/.test(following));
@@ -301,42 +299,36 @@ class SentenceBuffer {
   }
 }
 
-// Name, date, and time abbreviations can continue a wrapped quoted phrase.
-// Common terminal forms such as "etc." still stop lookahead.
-const quoteContinuationAbbreviationReg = new RegExp(
-  `\\b(?:${[...ABBR_DATES, ...ABBR_ORGANIZATIONS, ...ABBR_PLACES, ...ABBR_TIME, ...GATE_EXCEPTIONS]
-    .map(escapeRegExp)
-    .join('|')})\\.$`,
-  'i',
-);
-
-// A later sentence cannot supply the closer for the current quotation.
-function nextSingleQuoteCloses(input: string, start: number): boolean {
-  const boundaries = /['.!?]/g;
-  boundaries.lastIndex = start;
-  for (const boundary of input.matchAll(boundaries)) {
+// A spaced s' is ambiguous. Keep it open only when an unambiguous closer follows.
+// Classify all candidates once so repeated possessives do not repeat lookahead.
+function possessiveQuotePositions(input: string): Set<number> {
+  const possessives = new Set<number>();
+  let candidates: number[] = [];
+  for (const boundary of input.matchAll(/['.!?]/g)) {
     const index = boundary.index;
     if (boundary[0] !== "'") {
       const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-      // Internal dots in abbreviations and numbers do not end the quoted phrase.
-      const internalPeriod =
-        boundary[0] === '.' &&
+      const internalPunctuation =
         /[\p{Letter}\p{Number}]/u.test(characterAt(input, index + 1)) &&
         !isUnspacedSentenceBoundary(input, index, index + 1, true);
-      if (!(internalPeriod || quoteContinuationAbbreviationReg.test(suffix))) {
-        return false;
+      if (!(internalPunctuation || abbrvReg.test(suffix))) {
+        candidates = [];
       }
       continue;
     }
     const following = input[index + 1] ?? '';
     if ((index === 0 || /^[\s\p{Punctuation}]$/u.test(input[index - 1])) && /\S/.test(following)) {
-      return false;
-    }
-    if (following.length === 0 || /[\s.,!?;:)\]}]/.test(following)) {
-      return true;
+      candidates = [];
+    } else if (input[index - 1]?.toLowerCase() === 's' && /\s/.test(following)) {
+      candidates.push(index);
+    } else if (following.length === 0 || /[\s.,!?;:)\]}]/.test(following)) {
+      for (const candidate of candidates) {
+        possessives.add(candidate);
+      }
+      candidates = [];
     }
   }
-  return false;
+  return possessives;
 }
 
 /**
@@ -370,7 +362,11 @@ export function sentenceSegment(
   const chunks = sentenceChunks(source, caseNeutral);
 
   const acc: string[] = [];
-  const quoteSource = { input: source, index: 0 };
+  const quoteSource = {
+    input: source,
+    index: 0,
+    possessives: caseNeutral ? possessiveQuotePositions(source) : new Set<number>(),
+  };
   let pending: SentenceBuffer | undefined;
   for (let idx = 0; idx < chunks.length; idx++) {
     if (pending || chunks[idx]) {

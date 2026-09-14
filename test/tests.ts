@@ -983,7 +983,7 @@ describe('Utility Functions', () => {
       }
     });
 
-    test.each(['Jan.', 'Calif.', 'P.M.', 'E.g.', 'Latest 3.5 Co.'])(
+    test.each(['Jan.', 'Calif.', 'P.M.', 'E.g.', 'Latest 3.5 Co.', 'Rd.'])(
       'keeps protected periods inside possessive quotes: %s',
       (abbreviation) => {
         const input = `She reviewed 'the students' ${abbreviation}\nInternational report' today.`;
@@ -1011,6 +1011,9 @@ describe('Utility Functions', () => {
     test.each([
       "The label 'Success' appears in the report etc.\nNext sentence.",
       "The label 'Success' appears in the report etc.\nThe students' work continues.",
+      "The label 'Success' appears in Calif.\nThe students' work continues.",
+      "The label 'Success' appeared in Jan.\nThe students' work continues.",
+      "He called it 'Success' before the researchers' Co.\nNext sentence.",
       "The label 'Happy days' appears in the report etc.\nNext sentence.",
       "The label 'Success' appears beside 'Failure' in the report etc.\nNext sentence.",
       "The label 'Success' doesn't appear in the report etc.\nNext sentence.",
@@ -1027,6 +1030,24 @@ describe('Utility Functions', () => {
         "He called it 'Success' before we use etc.",
         'Next sentence.',
       ]);
+    });
+
+    test.each(['?', '!'])(
+      'keeps URL punctuation %s inside a possessive quotation',
+      (punctuation) => {
+        const input = `She reviewed 'the students' Online https://example.com${punctuation}Next=value Acme Co.\nInternational report' today.`;
+        const expected = [input.replace('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('classifies consecutive possessives in a single pass', () => {
+      const input = `She reviewed 'the ${"students' ".repeat(10_000)}Acme Co.\nInternational project' today.`;
+      expect(segmentCaseNeutrally(input)).toEqual([input.replace('\n', ' ')]);
     });
 
     test('closes single-quoted spans after their opening fragment', () => {
