@@ -800,20 +800,19 @@ function sentenceEnd(
   if (next === input.length) {
     return end;
   }
-  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const nextCharacter = characterAt(input, next);
   const startsWithLetter = caseNeutral
     ? isNeutralSentenceStart(input, end, next)
     : charIsUpperCase(nextCharacter);
   const startsWithNumber =
     /^\p{Number}$/u.test(nextCharacter) &&
-    !abbrvReg.test(gateSuffix) &&
+    !abbrvReg.test(suffix) &&
     !numericSentenceContinuationReg.test(input.slice(next));
   // Bracketed omission markers remain part of the surrounding sentence.
   if (!(startsWithLetter || startsWithNumber) || /[[(]\.{2,10}$/.test(suffix)) {
     return -1;
   }
-  return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
+  return abbrvReg.test(suffix) && excepReg.test(suffix) ? -1 : end;
 }
 
 function countClosingBrackets(input: string, start: number, end: number): number {
