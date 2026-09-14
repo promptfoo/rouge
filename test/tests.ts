@@ -660,8 +660,14 @@ describe('Utility Functions', () => {
       ['Alpha.[1,2] Beta.', ['Alpha.[1,2]', 'Beta.']],
       ['Alpha.[1–3] Beta.', ['Alpha.[1–3]', 'Beta.']],
       ['Alpha.[12] Beta.[34] Gamma.', ['Alpha.[12]', 'Beta.[34]', 'Gamma.']],
-      ['A conclusion.11 12 The next sentence.', ['A conclusion.11 12', 'The next sentence.']],
-      ['A conclusion.11 12 13 The next sentence.', ['A conclusion.11 12 13', 'The next sentence.']],
+      ['A conclusion.11 12 The next sentence.', ['A conclusion.11', '12 The next sentence.']],
+      ['A conclusion.11 12 13 The next sentence.', ['A conclusion.11', '12 13 The next sentence.']],
+      [
+        'A conclusion.[11,12,13] The next sentence.',
+        ['A conclusion.[11,12,13]', 'The next sentence.'],
+      ],
+      ['Alpha.1 2 people remained.', ['Alpha.1', '2 people remained.']],
+      ['Alpha.1 Beta.', ['Alpha.1', 'Beta.']],
       ['A conclusion (1987).1 The next sentence.', ['A conclusion (1987).1', 'The next sentence.']],
       ['Text𐐀.1 Next.', ['Text𐐀.1', 'Next.']],
       ['He said "Alpha.[1]" Beta.', ['He said "Alpha.[1]"', 'Beta.']],
@@ -696,20 +702,35 @@ describe('Utility Functions', () => {
       'Appendix A.1 Introduction',
       'Appendix IV.1 Introduction',
       'Section ABC.1 Introduction',
-      'ABC.1 Introduction.',
       'I work for the U.S.[1] Government agency.',
     ])('preserves dotted section identifiers and cited abbreviation continuations: %s', (input) => {
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);
     });
 
-    test.each(['', ' ', '\t', '\n'])(
-      'preserves unlabeled dotted identifiers after %j',
+    test.each(['', ' ', '\t', '\n', 'See '])(
+      'uses citation precedence for letter-only identifiers in neutral mode after %j',
       (prefix) => {
         const uppercase = `${prefix}ABC.1 Introduction.`;
         const lowercase = uppercase.toLowerCase();
-        expect(segmentCaseNeutrally(lowercase)).toEqual([lowercase.trimStart()]);
+        expect(ss(uppercase)).toEqual([uppercase.trimStart()]);
+        expect(segmentCaseNeutrally(uppercase)).toEqual([
+          `${prefix}ABC.1`.trimStart(),
+          'Introduction.',
+        ]);
+        expect(segmentCaseNeutrally(lowercase)).toEqual([
+          `${prefix}abc.1`.trimStart().toLowerCase(),
+          'introduction.',
+        ]);
         expect(rouge.l(uppercase, lowercase, { caseSensitive: false })).toBe(1);
+      },
+    );
+
+    test.each(['See ABC2.1 Introduction.', 'See ABC_D.1 Introduction.'])(
+      'preserves identifiers with structural evidence in neutral mode: %s',
+      (input) => {
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
       },
     );
 
@@ -728,6 +749,10 @@ describe('Utility Functions', () => {
     });
 
     test.each([
+      "She said 'The dogs' owners saw Alpha.[1] Beta.'",
+      "She said 'The dogs' owners' Alpha.[1] Beta.'",
+      "She said 'Alice's Alpha.[1] Beta.'",
+      "She said ‘The dogs’ owners called 'Alice' near Alpha.[1] Beta.’ aloud.",
       'She said ‘Alice’s Alpha.[1] Beta.’ aloud.',
       'She said ‘𝒜’s Alpha.[1] Beta.’ aloud.',
       'She said ‘Café’s Alpha.[1] Beta.’ aloud.',
@@ -737,6 +762,16 @@ describe('Utility Functions', () => {
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test('keeps the ASCII plural possessive citation passage with its attribution', () => {
+      const input = "She said 'The dogs' owners saw Alpha.[1] Beta.' aloud.";
+      expect(ss(input)).toEqual([input]);
+      // Case-neutral attribution behavior is independent of citation recognition.
+      expect(segmentCaseNeutrally(input)).toEqual([
+        "She said 'The dogs' owners saw Alpha.[1] Beta.'",
+        'aloud.',
+      ]);
     });
 
     test('does not mistake a quoted numeric sentence start for a citation', () => {

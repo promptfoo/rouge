@@ -519,7 +519,6 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const brackets = { depth: 0, standalone: false };
   const citationQuotationClosers: string[] = [];
   const apostrophes = citationApostrophes(input);
-  const contentStart = input.search(/\S/);
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
@@ -551,15 +550,8 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       char === '!'
     ) {
       const end =
-        citationEnd(
-          input,
-          index,
-          caseNeutral,
-          insideQuotes,
-          brackets,
-          citationQuotationClosers,
-          contentStart,
-        ) ?? sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
+        citationEnd(input, index, caseNeutral, insideQuotes, brackets, citationQuotationClosers) ??
+        sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
       if (end === -1) {
         continue;
       }
@@ -574,26 +566,39 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   return chunks;
 }
 
-/** An ambiguous s-ending mark stays internal only when a later unambiguous closer confirms it. */
+/** A later unambiguous closer confirms s-ending possessives in each quote family. */
 function citationApostrophes(input: string): Uint8Array {
   const apostrophes = new Uint8Array(input.length);
-  let candidate: number | undefined;
-  for (const quote of input.matchAll(/[‘’]/g)) {
+  const candidates: (number | undefined)[] = [undefined, undefined];
+  for (const quote of input.matchAll(/['‘’]/g)) {
     const index = quote.index;
-    if (quote[0] === '‘') {
-      candidate = undefined;
-    } else if (
-      /[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
-      /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1))
+    const family = quote[0] === "'" ? 1 : 0;
+    const flag = 1 << family;
+    const previous = input.slice(Math.max(0, index - 2), index);
+    const following = characterAt(input, index + 1);
+    if (
+      quote[0] === '‘' ||
+      (family === 1 &&
+        (index === 0 || /[\s\p{Punctuation}]$/u.test(previous)) &&
+        /\S/.test(following))
     ) {
-      apostrophes[index] = 1;
-    } else if (/[sS]$/.test(input.slice(Math.max(0, index - 1), index))) {
-      candidate ??= index;
+      candidates[family] = undefined;
+    } else if (
+      /[\p{Letter}\p{Mark}]$/u.test(previous) &&
+      /^[\p{Letter}\p{Mark}]$/u.test(following)
+    ) {
+      apostrophes[index] |= flag;
+    } else if (/[sS]$/.test(previous)) {
+      candidates[family] ??= index;
     } else {
+      const candidate = candidates[family];
       if (candidate !== undefined) {
-        apostrophes.fill(1, candidate, index);
+        // Confirmed ranges do not overlap within a quote family.
+        for (let position = candidate; position < index; position++) {
+          apostrophes[position] |= flag;
+        }
       }
-      candidate = undefined;
+      candidates[family] = undefined;
     }
   }
   return apostrophes;
@@ -606,7 +611,10 @@ function updateCitationQuotationState(
   apostrophes: Uint8Array,
 ): void {
   const character = input[index];
-  if (character === '’' && apostrophes[index] === 1) {
+  if (
+    (character === '’' && (apostrophes[index] & 1) !== 0) ||
+    (character === "'" && (apostrophes[index] & 2) !== 0)
+  ) {
     return;
   }
   if (character === '“' || character === '‘') {
@@ -798,7 +806,6 @@ function citationEnd(
   insideQuotes: boolean,
   brackets: { depth: number; standalone: boolean },
   quotationClosers: readonly string[],
-  contentStart: number,
 ): number | undefined {
   const nextCharacter = characterAt(input, index + 1);
   if (nextCharacter !== '[' && !/^[\p{Number}\])}>"'”’]$/u.test(nextCharacter)) {
@@ -819,17 +826,16 @@ function citationEnd(
       following,
       Math.max(0, brackets.depth - closedBrackets),
       caseNeutral,
-      contentStart,
     )
   ) {
     return undefined;
   }
 
+  // Whitespace-separated plain numbers may start the next sentence; require brackets
+  // to identify multiple separated citations without relying on letter casing.
   const citation = input
     .slice(delimiterEnd)
-    .match(
-      /^(?:(?:\[\p{Number}+(?:\s*[,;\p{Pd}]\s*\p{Number}+)*\])+|\p{Number}+(?:[^\S\r\n]+\p{Number}+)*)/u,
-    );
+    .match(/^(?:(?:\[\p{Number}+(?:\s*[,;\p{Pd}]\s*\p{Number}+)*\])+|\p{Number}+)/u);
   if (citation === null) {
     return undefined;
   }
@@ -901,7 +907,6 @@ function isCitationContext(
   following: string,
   bracketDepth: number,
   caseNeutral: boolean,
-  contentStart: number,
 ): boolean {
   if (bracketDepth > 0 || (following !== '[' && !/^\p{Number}$/u.test(following))) {
     return false;
@@ -915,12 +920,12 @@ function isCitationContext(
   const precedingToken =
     input.slice(Math.max(0, index - 64), index).match(/[\p{Letter}\p{Mark}\p{Number}_-]+$/u)?.[0] ??
     '';
+  // Letter-only identifiers and cited words are indistinguishable after case folding.
   const standaloneIdentifier =
     input[index] === '.' &&
-    (/^[\p{Lu}\p{Number}_-]{2,}$/u.test(precedingToken) ||
-      (caseNeutral &&
-        index - precedingToken.length === contentStart &&
-        /^[a-z\d_-]{2,}$/u.test(precedingToken)));
+    (caseNeutral
+      ? /[\p{Number}_]/u.test(precedingToken)
+      : /^[\p{Lu}\p{Number}_-]{2,}$/u.test(precedingToken));
   const labeledSection =
     /\b(?:appendix|section|chapter|part|figure|table|paragraph|article|clause)\s+[\p{Letter}\p{Number}_-]+$/iu.test(
       input.slice(Math.max(0, index - 96), index),
