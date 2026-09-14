@@ -593,6 +593,14 @@ function isCitationElision(input: string, index: number): boolean {
   return citationElisionReg.test(input.slice(index + 1, index + 32));
 }
 
+function isRightCitationElision(input: string, index: number): boolean {
+  return (
+    input[index] === '’' &&
+    (index === 0 || /^[\s,;:([{<"'‘“«„\p{Pd}]$/u.test(input[index - 1])) &&
+    isCitationElision(input, index)
+  );
+}
+
 /** Reserve required curly closers before deciding whether an elision opens a quote. */
 class CurlyCitationElisions {
   #entries = new Uint32Array(32);
@@ -602,7 +610,11 @@ class CurlyCitationElisions {
     let available = 0;
     for (let index = input.length - 1; index >= 0; index--) {
       const character = input[index];
-      if (!/[‘’]/.test(character) || isWordInternalApostrophe(input, index)) {
+      if (
+        !/[‘’]/.test(character) ||
+        isWordInternalApostrophe(input, index) ||
+        isRightCitationElision(input, index)
+      ) {
         continue;
       }
       if (character === '’') {
@@ -660,7 +672,7 @@ function citationApostrophes(input: string): { apostrophes: Uint8Array; overflow
   for (const quote of input.matchAll(/['‘’]/g)) {
     const index = quote.index;
     const family = quote[0] === "'" ? 1 : 0;
-    if (isWordInternalApostrophe(input, index)) {
+    if (isWordInternalApostrophe(input, index) || isRightCitationElision(input, index)) {
       apostrophes[index] |= 1 << family;
     } else if (family === 0) {
       updateCurlyCitationCandidates(input, index, curly, apostrophes, elisions);
@@ -679,7 +691,7 @@ function updateStraightCitationCandidates(
 ): void {
   const previous = input[index - 1] ?? '';
   const following = characterAt(input, index + 1);
-  const elision = isCitationElision(input, index);
+  const elision = !/[.!?]/.test(previous) && isCitationElision(input, index);
   if (
     (index === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) &&
     following.length > 0 &&
@@ -819,6 +831,7 @@ function updateCitationQuotationState(
   if (closers.at(-1) === "'") {
     if (
       following.length === 0 ||
+      /[.!?]/.test(previous) ||
       singleQuoteClosingContextReg.test(following) ||
       /^[[(\p{Number}]$/u.test(following)
     ) {
@@ -1048,7 +1061,10 @@ function citationEnd(
   ) {
     return undefined;
   }
-  if (!/\s/.test(input[end] ?? '')) {
+  if (end === input.length || /^\s+$/.test(input.slice(end))) {
+    return end;
+  }
+  if (!/\s/.test(input[end])) {
     return undefined;
   }
 

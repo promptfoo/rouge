@@ -757,7 +757,7 @@ describe('Utility Functions', () => {
       },
     );
 
-    test.each(['‘90s', '‘tis', "'90s", "'tis"])(
+    test.each(['‘90s', '‘tis', '’90s', '’tis', "'90s", "'tis"])(
       'does not open a quotation for the unpaired elision %s',
       (elision) => {
         const first = `In the ${elision}, Alpha.[1]`;
@@ -818,6 +818,51 @@ describe('Utility Functions', () => {
       expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
       expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
     });
+
+    test.each(['90s', 'tis'])('preserves a quotation around the right-mark elision %s', (word) => {
+      const first = `She said ‘In the ’${word}, Alpha.[1] Beta.[2]’`;
+      expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+    });
+
+    test.each([
+      'She said ‘In the ‘90s and the ’tis era, Alpha.[1] Beta.’ aloud.',
+      'She said ‘He called ‘twas odd’ rude in the ’90s, Alpha.[1] Beta.’ aloud.',
+    ])('excludes right-mark elisions from the nested quotation closer budget: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each(['Alpha.', 'Alpha.[1]'])(
+      'closes a quotation after %s before an adjacent elision-like word',
+      (ending) => {
+        const first = `She said ‘${ending}’Tis true.`;
+        const second = 'Later Alpha.[2]';
+        const input = `${first} ${second} Next.`;
+        expect(ss(input)).toEqual([first, second, 'Next.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second, 'Next.']);
+      },
+    );
+
+    test.each(['Next', 'Tis'])(
+      'releases an ASCII quotation before adjacent %s and a later citation',
+      (start) => {
+        // Preserve the existing unspaced closing-quote attachment on the next chunk.
+        const first = "He said 'Alpha.";
+        const second = `'${start} citation.[1]`;
+        const input = `${first}${second} Final.`;
+        expect(ss(input)).toEqual([first, second, 'Final.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second, 'Final.']);
+      },
+    );
+
+    test.each(['', '   ', '\n', '\t\r\n'])(
+      'retains a spaced citation before the document tail %j',
+      (tail) => {
+        expect(ss(`Alpha. [1]${tail}`)).toEqual(['Alpha. [1]']);
+        expect(segmentCaseNeutrally(`Alpha. [1]${tail}`)).toEqual(['Alpha. [1]']);
+      },
+    );
 
     test('does not mistake decimal numbers for numeric citation suffixes', () => {
       const input = 'She has $100.00 in her bag.';
