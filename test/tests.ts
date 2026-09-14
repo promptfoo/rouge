@@ -1637,6 +1637,35 @@ describe('Utility Functions', () => {
         expect(rouge.l(uppercase, uppercase.toLowerCase(), { caseSensitive: false })).toBe(1);
       });
 
+      test.each([
+        ['(', ')'],
+        ['“', '”'],
+        ["'", "'"],
+      ])('keeps long inline asides delimited by %s%s', (opening, closing) => {
+        const input = `He paused... ${opening}Perhaps ${'very '.repeat(110)}deliberately${closing} before answering.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      });
+
+      test.each([
+        ['He said “Enough...” Next sentence.', ['He said “Enough...”', 'Next sentence.']],
+        ['He said ‘Enough...’ Next sentence.', ['He said ‘Enough...’', 'Next sentence.']],
+        ['He said «Enough...» Next sentence.', ['He said «Enough...»', 'Next sentence.']],
+        ['(He paused...) Next sentence.', ['(He paused...)', 'Next sentence.']],
+      ])('recognizes terminal ellipses before closing delimiters: %s', (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      });
+
+      test('keeps ellipses inside nested quotes until the outer quote closes', () => {
+        const input = 'She said “He said ‘Enough...’ and went.”';
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      });
+
       test.each(lineBreaks)('keeps wrapped continuations after inline asides across %j', (wrap) => {
         const input = `He paused... (Perhaps deliberately)${wrap}before answering.`;
         const expected = ['He paused... (Perhaps deliberately) before answering.'];
