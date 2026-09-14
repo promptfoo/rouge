@@ -583,6 +583,7 @@ describe('Utility Functions', () => {
       ['α. First β. Next', ['α. First', 'β. Next']],
       ['n. First ñ. Second', ['n. First', 'ñ. Second']],
       ['a. B. Smith will attend b. Next item', ['a. B. Smith will attend', 'b. Next item']],
+      ['a. X. b. Next item', ['a. X.', 'b. Next item']],
       ['ρ. First σ. Next', ['ρ. First', 'σ. Next']],
       ['Ρ. First Σ. Next', ['Ρ. First', 'Σ. Next']],
     ] as const)('keeps leading name initials in their list item: %s', (input, expected) => {

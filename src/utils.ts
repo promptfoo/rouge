@@ -471,12 +471,13 @@ function nextListMarker(
   }
   let bodyStart = previous ? previous.index + previous[0].length : 0;
   let hasBody = previous === undefined;
-  let marker = expression.exec(input);
-  while (marker !== null) {
+  for (let marker = expression.exec(input); marker !== null; marker = expression.exec(input)) {
+    if (family !== undefined && !family.test(marker[0])) {
+      continue;
+    }
     hasBody ||= input.slice(bodyStart, marker.index).trim().length > 0;
     bodyStart = marker.index + marker[0].length;
     if (
-      (family === undefined || family.test(marker[0])) &&
       hasBody &&
       (marker.index === 0 ||
         !/\b(?:section|chapter|page|figure|table|paragraph|article|clause)$/i.test(
@@ -485,7 +486,6 @@ function nextListMarker(
     ) {
       return marker;
     }
-    marker = expression.exec(input);
   }
   return null;
 }
