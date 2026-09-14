@@ -490,7 +490,7 @@ function segmentList(input: string, caseNeutral: boolean): string[] | undefined 
   do {
     const body = input.slice(current.index + current[0].length, next?.index ?? input.length).trim();
     const sentences = /[.!?\r\n]/.test(body) ? sentenceSegment(body, { caseNeutral }) : [body];
-    if (sentences.length > 1 && /^\p{Cased}\.$/u.test(sentences[0])) {
+    if (sentences.length > 1 && /^(?!\p{Mark})\p{Cased}\p{Mark}*\.$/u.test(sentences[0])) {
       sentences.splice(0, 2, `${sentences[0]} ${sentences[1]}`);
     }
     segments.push(`${current[0].trim()} ${sentences[0]}`, ...sentences.slice(1));
@@ -733,6 +733,20 @@ function isUnspacedDelimitedSentenceStart(
   );
 }
 
+/** Read the complete identifier atom; combining marks can exceed the abbreviation suffix. */
+function identifierSuffix(input: string, index: number): string {
+  let start = index;
+  while (start > 0) {
+    const previous = input.codePointAt(start - 2);
+    const width = previous !== undefined && previous > 0xff_ff ? 2 : 1;
+    if (!/^[\p{Letter}\p{Mark}\p{Number}_-]$/u.test(input.slice(start - width, start))) {
+      break;
+    }
+    start -= width;
+  }
+  return input.slice(start, index + 1);
+}
+
 function isUnspacedSentenceBoundary(
   input: string,
   index: number,
@@ -765,17 +779,18 @@ function isUnspacedSentenceBoundary(
       (caseNeutral ||
         hostnameLabel === hostnameLabel.toLowerCase() ||
         hostnameLabel === hostnameLabel.toUpperCase()));
+  const identifier = caseNeutral ? identifierSuffix(input, index) : suffix;
   const dottedIdentifier = caseNeutral
-    ? /(?<![\p{Letter}\p{Mark}\p{Number}_])\p{Cased}[\p{Letter}\p{Mark}\p{Number}_-]*\.$/u.test(
-        suffix,
+    ? /(?<![\p{Letter}\p{Mark}\p{Number}_])(?!\p{Mark})\p{Cased}[\p{Letter}\p{Mark}\p{Number}_-]*\.$/u.test(
+        identifier,
       ) && /^(?:(?!\p{Mark})[\p{Cased}\p{Number}_-]\p{Mark}*){1,2}(?=\s|[/.]|$)/u.test(following)
     : /\b\p{Lu}[\p{Letter}\p{Number}_-]*\.$/u.test(suffix) &&
       /^[\p{Lu}\p{Number}_-]+(?=\s|[/.]|$)/u.test(following);
-  const initial = caseNeutral ? /^\p{Cased}\p{Mark}*\./u : /^\p{Lu}\./u;
+  const initial = caseNeutral ? /^(?!\p{Mark})\p{Cased}\p{Mark}*\./u : /^\p{Lu}\./u;
   const trailingInitial = caseNeutral
-    ? /(?<![\p{Letter}\p{Mark}\p{Number}_])\p{Cased}\p{Mark}*\.$/u
+    ? /(?<![\p{Letter}\p{Mark}\p{Number}_])(?!\p{Mark})\p{Cased}\p{Mark}*\.$/u
     : /\b\p{Lu}\.$/u;
-  const nextInitial = caseNeutral ? /^\p{Cased}\p{Mark}*(?=\s|$)/u : /^\p{Lu}(?=\s|$)/u;
+  const nextInitial = caseNeutral ? /^(?!\p{Mark})\p{Cased}\p{Mark}*(?=\s|$)/u : /^\p{Lu}(?=\s|$)/u;
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const continuesAbbreviation =
     abbrvReg.test(gateSuffix) &&
@@ -784,7 +799,7 @@ function isUnspacedSentenceBoundary(
   return !(
     continuesAbbreviation ||
     initial.test(following) ||
-    (trailingInitial.test(suffix) && nextInitial.test(following)) ||
+    (trailingInitial.test(identifier) && nextInitial.test(following)) ||
     /^[^\s]*@/.test(following) ||
     insideAddress ||
     insideHostname ||

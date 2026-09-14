@@ -651,6 +651,7 @@ describe('Utility Functions', () => {
       'Use AC.İ for instructions.',
       'Open İD.X for instructions.',
       'Use İ.A next.',
+      'Use İAAAAAAAA.A next.',
       'Use Σ.A next.',
       'Use İ.Α next.',
       'Foo.İ. Next.',
@@ -672,6 +673,28 @@ describe('Utility Functions', () => {
         `I${'\u0345'.repeat(16_000)}!`,
         'Next.',
       ]);
+    });
+
+    test('reads complete identifier bases before long combining-mark sequences', () => {
+      for (const base of ['A', '\u{10400}']) {
+        const input = `Use ${base}${'\u0307'.repeat(16_000)}.B next.`;
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      }
+    });
+
+    test('does not treat a cased combining mark as an identifier base', () => {
+      expect(segmentCaseNeutrally('Use \u0345.A next.')).toEqual(['Use \u0345.', 'A next.']);
+    });
+
+    test('keeps marked name initials attached to numbered list items', () => {
+      const input = '1. I\u0307. Smith will attend 2. A. Brown will attend';
+      const expected = ['1. I\u0307. Smith will attend', '2. A. Brown will attend'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
     });
 
     test('keeps bracketed references inside their sentence', () => {
