@@ -517,13 +517,13 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   let start = -1;
   let insideQuotes = false;
   const brackets = { depth: 0, standalone: false };
-  const citationQuotationClosers: string[] = [];
+  const citationQuotes: CitationQuotationState = { closers: [], overflowed: false };
   const apostrophes = citationApostrophes(input);
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     insideQuotes = quotationState(input, index, insideQuotes);
-    updateCitationQuotationState(input, index, citationQuotationClosers, apostrophes);
+    updateCitationQuotationState(input, index, citationQuotes, apostrophes);
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
         brackets.standalone = start === -1;
@@ -550,7 +550,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       char === '!'
     ) {
       const end =
-        citationEnd(input, index, caseNeutral, insideQuotes, brackets, citationQuotationClosers) ??
+        citationEnd(input, index, caseNeutral, insideQuotes, brackets, citationQuotes) ??
         sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
       if (end === -1) {
         continue;
@@ -607,13 +607,22 @@ function citationApostrophes(input: string): Uint8Array {
   return apostrophes;
 }
 
+interface CitationQuotationState {
+  closers: string[];
+  overflowed: boolean;
+}
+
 function updateCitationQuotationState(
   input: string,
   index: number,
-  closers: string[],
+  quotes: CitationQuotationState,
   apostrophes: Uint8Array,
 ): void {
+  if (quotes.overflowed) {
+    return;
+  }
   const character = input[index];
+  const closers = quotes.closers;
   if (
     (character === '’' && (apostrophes[index] & 1) !== 0) ||
     (character === "'" && (apostrophes[index] & 2) !== 0)
@@ -621,11 +630,11 @@ function updateCitationQuotationState(
     return;
   }
   if (character === '“' || character === '‘') {
-    pushCitationQuotation(closers, character === '“' ? '”' : '’');
+    pushCitationQuotation(quotes, character === '“' ? '”' : '’');
     return;
   }
   if (character === '«') {
-    pushCitationQuotation(closers, '»');
+    pushCitationQuotation(quotes, '»');
     return;
   }
   if (character === '”' || character === '’' || character === '»') {
@@ -653,13 +662,16 @@ function updateCitationQuotationState(
       input.slice(index + 1, index + 32),
     )
   ) {
-    pushCitationQuotation(closers, "'");
+    pushCitationQuotation(quotes, "'");
   }
 }
 
-function pushCitationQuotation(closers: string[], closing: string): void {
-  if (closers.length < 64) {
-    closers.push(closing);
+function pushCitationQuotation(quotes: CitationQuotationState, closing: string): void {
+  if (quotes.closers.length < 64) {
+    quotes.closers.push(closing);
+  } else {
+    // Discarded nesting cannot be reconstructed safely from subsequent mixed closers.
+    quotes.overflowed = true;
   }
 }
 
@@ -808,19 +820,29 @@ function citationEnd(
   caseNeutral: boolean,
   insideQuotes: boolean,
   brackets: { depth: number; standalone: boolean },
-  quotationClosers: readonly string[],
+  quotationQuotes: CitationQuotationState,
 ): number | undefined {
-  const nextCharacter = characterAt(input, index + 1);
-  if (nextCharacter !== '[' && !/^[\p{Number}\])}>"'”’]$/u.test(nextCharacter)) {
+  if (quotationQuotes.overflowed) {
     return undefined;
   }
-  if (/^["'“‘]$/.test(nextCharacter) && !insideQuotes && quotationClosers.length === 0) {
+  const nextCharacter = characterAt(input, index + 1);
+  if (!/^[\s\p{Number}[()\]}>"'”’»]$/u.test(nextCharacter)) {
+    return undefined;
+  }
+  if (/^["'“‘]$/.test(nextCharacter) && !insideQuotes && quotationQuotes.closers.length === 0) {
     return undefined;
   }
 
   const delimiterEnd = citationDelimiterEnd(input, index, insideQuotes);
+  let citationStart = delimiterEnd;
+  while (citationStart < input.length && /[^\S\r\n]/.test(input[citationStart])) {
+    citationStart++;
+  }
+  if (citationStart > delimiterEnd && !/[[(]/.test(input[citationStart] ?? '')) {
+    return undefined;
+  }
   const closedBrackets = countClosingBrackets(input, index + 1, delimiterEnd);
-  const following = characterAt(input, delimiterEnd);
+  const following = characterAt(input, citationStart);
   if (
     (closedBrackets > 0 && brackets.depth > 0 && !brackets.standalone) ||
     !isCitationContext(
@@ -834,27 +856,31 @@ function citationEnd(
     return undefined;
   }
 
-  // Whitespace-separated plain numbers may start the next sentence; require brackets
-  // to identify multiple separated citations without relying on letter casing.
-  const citation = input
-    .slice(delimiterEnd)
-    .match(/^(?:(?:\[\p{Number}+(?:\s*[,;\p{Pd}]\s*\p{Number}+)*\])+|\p{Number}+)/u);
-  if (citation === null) {
+  const contentEnd = numericCitationEnd(input, citationStart);
+  if (contentEnd === undefined) {
     return undefined;
   }
 
-  const contentEnd = delimiterEnd + citation[0].length;
   const leadingClosers = input.slice(index + 1, delimiterEnd);
-  const closedQuote = insideQuotes && leadingClosers.includes('"');
+  const closedQuote = insideQuotes && /"|''/.test(leadingClosers);
   const end = citationDelimiterEnd(input, contentEnd - 1, insideQuotes && !closedQuote);
   const closing = leadingClosers + input.slice(contentEnd, end);
-  if (!closesCitationQuotations(closing, insideQuotes, quotationClosers)) {
+  if (!closesCitationQuotations(closing, insideQuotes, quotationQuotes.closers)) {
     return undefined;
   }
   if (!/\s/.test(input[end] ?? '')) {
     return undefined;
   }
 
+  return isCitationSentenceStart(input, index, end, caseNeutral) ? end : undefined;
+}
+
+function isCitationSentenceStart(
+  input: string,
+  index: number,
+  end: number,
+  caseNeutral: boolean,
+): boolean {
   let next = end;
   while (next < input.length && /[\s"'“‘«([{<]/.test(input[next])) {
     next++;
@@ -867,7 +893,7 @@ function citationEnd(
     (excepReg.test(gateSuffix) ||
       (geographicAcronymReg.test(gateSuffix) && geographicContinuationReg.test(continuation)))
   ) {
-    return undefined;
+    return false;
   }
 
   const sentenceStart = characterAt(input, next);
@@ -876,7 +902,36 @@ function citationEnd(
     : sentenceStart.length > 0 && charIsUpperCase(sentenceStart);
   const startsWithNumber =
     /^\p{Number}$/u.test(sentenceStart) && !numericSentenceContinuationReg.test(continuation);
-  return startsWithLetter || startsWithNumber ? end : undefined;
+  return startsWithLetter || startsWithNumber;
+}
+
+/** Separated bare numbers may start a sentence; brackets disambiguate citation chains. */
+function numericCitationEnd(input: string, start: number): number | undefined {
+  const expression =
+    /(?:\[\p{Number}+(?:[^\S\r\n]*[,;\p{Pd}][^\S\r\n]*\p{Number}+)*\]|\(\p{Number}+(?:[^\S\r\n]*[,;\p{Pd}][^\S\r\n]*\p{Number}+)*\)|\p{Number}+)/uy;
+  expression.lastIndex = start;
+  if (expression.exec(input) === null) {
+    return undefined;
+  }
+  let end = expression.lastIndex;
+  if (!/[[(]/.test(input[start])) {
+    return end;
+  }
+  while (end < input.length) {
+    let next = end;
+    while (next < input.length && /[^\S\r\n]/.test(input[next])) {
+      next++;
+    }
+    if (!/[[(]/.test(input[next] ?? '')) {
+      break;
+    }
+    expression.lastIndex = next;
+    if (expression.exec(input) === null) {
+      break;
+    }
+    end = expression.lastIndex;
+  }
+  return end;
 }
 
 function citationDelimiterEnd(input: string, index: number, insideQuotes: boolean): number {
@@ -892,7 +947,7 @@ function closesCitationQuotations(
   insideQuotes: boolean,
   quotationClosers: readonly string[],
 ): boolean {
-  if (insideQuotes && !closing.includes('"')) {
+  if (insideQuotes && !/"|''/.test(closing)) {
     return false;
   }
   let remaining = quotationClosers.length;
@@ -911,10 +966,11 @@ function isCitationContext(
   bracketDepth: number,
   caseNeutral: boolean,
 ): boolean {
-  if (bracketDepth > 0 || (following !== '[' && !/^\p{Number}$/u.test(following))) {
+  const bracketed = following === '[' || following === '(';
+  if (bracketDepth > 0 || !(bracketed || /^\p{Number}$/u.test(following))) {
     return false;
   }
-  if (following === '[') {
+  if (bracketed) {
     return true;
   }
 

@@ -657,6 +657,13 @@ describe('Utility Functions', () => {
     test.each([
       ['Alpha.[1] Beta.', ['Alpha.[1]', 'Beta.']],
       ['Alpha.[7][8] Beta.', ['Alpha.[7][8]', 'Beta.']],
+      ['Alpha.[1] [2] Beta.', ['Alpha.[1] [2]', 'Beta.']],
+      ['Alpha. [1] Beta.', ['Alpha. [1]', 'Beta.']],
+      ['Alpha.(1) Beta.', ['Alpha.(1)', 'Beta.']],
+      ['Alpha.(1–3) [4,5] Beta.', ['Alpha.(1–3) [4,5]', 'Beta.']],
+      ["He said ``Alpha.[1]'' Beta.", ["He said ``Alpha.[1]''", 'Beta.']],
+      ["He said ``Alpha.''[1] Next.", ["He said ``Alpha.''[1]", 'Next.']],
+      ['«Alpha.»[1] Beta.', ['«Alpha.»[1]', 'Beta.']],
       ['Alpha.[1,2] Beta.', ['Alpha.[1,2]', 'Beta.']],
       ['Alpha.[1–3] Beta.', ['Alpha.[1–3]', 'Beta.']],
       ['Alpha.[12] Beta.[34] Gamma.', ['Alpha.[12]', 'Beta.[34]', 'Gamma.']],
@@ -792,6 +799,14 @@ describe('Utility Functions', () => {
 
     test('scores reordered cited reference sentences correctly', () => {
       expect(rouge.l('Beta Alpha.[1]', 'Alpha.[1] Beta.')).toBeCloseTo(10 / 11);
+    });
+
+    test.each([
+      `${'“'.repeat(65)}inside${'”'.repeat(64)} Alpha.[1] Beta.`,
+      `${'“'.repeat(64)}‘inside’${'”'.repeat(64)} Alpha.[1] Beta.`,
+    ])('keeps citation recognition conservative after quotation depth overflows: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
     });
 
     test('segments citation-heavy documents without repeated quotation searches', () => {
