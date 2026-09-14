@@ -357,12 +357,21 @@ class QuotationPairing {
       const kind = character === "'" ? 'straightSingle' : 'curlySingle';
       const inside = this.#openings[kind] >= 0;
       const next = singleQuoteState(this.#input, index, inside, this.#apostrophes);
-      if (next && !inside) {
+      if (next && (!inside || (kind === 'straightSingle' && this.#reopensSingle(index)))) {
         this.#openings[kind] = index;
       } else if (!next && inside) {
         this.#close(kind, index);
       }
     }
+  }
+
+  #reopensSingle(index: number): boolean {
+    return (
+      (this.#apostrophes[index] & 2) === 0 &&
+      !isLeadingElision(this.#input, index) &&
+      !numericQuoteIsElision(this.#input, index) &&
+      this.#opensAfterUnmatched(index)
+    );
   }
 
   #opensAfterUnmatched(index: number): boolean {

@@ -1521,6 +1521,29 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual([input.slice(0, boundary), 'Next.']);
     });
 
+    test.each([
+      [
+        "He typed 'hello. Next says 'Stop.' Last.",
+        ["He typed 'hello.", "Next says 'Stop.'", 'Last.'],
+      ],
+      [
+        "He typed 'hello. Next says '“Stop.”' Last.",
+        ["He typed 'hello.", "Next says '“Stop.”'", 'Last.'],
+      ],
+      ["She said 'First. In '99 we left.' Next.", ["She said 'First. In '99 we left.'", 'Next.']],
+    ])('recovers later single openers while preserving inner elisions: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('recovers repeated unmatched single openers with bounded context state', () => {
+      const fragment = "He typed 'word.";
+      const input = `${`${fragment} `.repeat(10_000)}He said 'Stop.' Last.`;
+      const expected = [...new Array<string>(10_000).fill(fragment), "He said 'Stop.'", 'Last.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
     test('recovers repeated unmatched straight openers in a single pass', () => {
       const fragment = 'He typed "word.';
       const input = `${`${fragment} `.repeat(10_000)}He said "Stop." Last.`;
