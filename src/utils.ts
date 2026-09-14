@@ -146,10 +146,9 @@ function isRightSmartApostrophe(input: string, index: number, leadingElision: bo
       (!afterTerminal || smartContractionReg.test(input.slice(index, index + 4)))) ||
     (/^\p{Number}$/u.test(following) &&
       !afterTerminal &&
-      (/\s/.test(input[index - 1] ?? '') ||
-        !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
-          input.slice(Math.max(0, previous - 1), previous + 1),
-        ))) ||
+      !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(
+        input.slice(Math.max(0, previous - 1), previous + 1),
+      )) ||
     input.slice(index - 2, index).toLowerCase() === '’n'
   );
 }

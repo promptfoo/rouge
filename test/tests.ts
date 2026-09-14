@@ -1937,6 +1937,24 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['2', '²', '𝟚'])(
+      'preserves a spaced smart-single closer before numeric footnote %s',
+      (marker) => {
+        for (const gap of [' ', '\t']) {
+          const input = `The result was ‘significant at Acme Co.\nInternational Holdings${gap}’${marker}.`;
+          const expected = [input.replace(/\s+/g, ' ')];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+            expected.map((part) => part.toLowerCase()),
+          );
+          const double = input.replace('‘', '“').replace('’', '”');
+          expect(ss(double)).toEqual([double.replace(/\s+/g, ' ')]);
+          expect(segmentCaseNeutrally(double)).toEqual([double.replace(/\s+/g, ' ')]);
+        }
+      },
+    );
+
     test.each(['ᵃ', 'ᵇ', 'ᶜ'])(
       'attaches supported alphabetic footnote %s after a quoted terminal',
       (footnote) => {
