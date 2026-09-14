@@ -803,7 +803,11 @@ function sentenceEnd(
     return index + 1;
   }
   const end = closingDelimiterEnd(input, index, quotes);
-  if (end < input.length && !/\s/.test(input[end])) {
+  if (
+    end < input.length &&
+    !/\s/.test(input[end]) &&
+    !isUnspacedDelimitedSentenceStart(input, end - 1, caseNeutral)
+  ) {
     return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
   }
   if (end === index + 1) {

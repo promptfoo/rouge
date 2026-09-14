@@ -1489,6 +1489,7 @@ describe('Utility Functions', () => {
 
     test.each([
       ['The students’ work continues.', ['The students’ work continues.']],
+      ['John’s car.', ['John’s car.']],
       ['Next sentence. ‘Another.’', ['Next sentence.', '‘Another.’']],
     ] as const)(
       'does not borrow a later apostrophe from %s to close a quotation',
@@ -1702,6 +1703,29 @@ describe('Utility Functions', () => {
           first.toLowerCase(),
           'next sentence.',
         ]);
+      },
+    );
+
+    test.each([
+      ['He said ‘Stop.’', '“Next.”'],
+      ['He said “Stop.”', '‘Next.’'],
+      ['He said “Stop.”', '“Next.”'],
+      ['He said ‘Stop.’', '(Next.)'],
+    ])('separates %s from an adjacent delimited sentence', (first, second) => {
+      const input = `${first}${second}`;
+      const expected = [first, second];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['He said ‘Dr.’“Smith”.', 'He said ‘Stop.’[2] Next.', 'He said ‘Stop.’(2) Next.'])(
+      'retains adjacent quoted names and citations in %s',
+      (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
       },
     );
 
