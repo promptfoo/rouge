@@ -703,12 +703,15 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual([input]);
     });
 
-    test('preserves unlabeled dotted identifiers under case folding', () => {
-      const uppercase = 'ABC.1 Introduction.';
-      const lowercase = uppercase.toLowerCase();
-      expect(segmentCaseNeutrally(lowercase)).toEqual([lowercase]);
-      expect(rouge.l(uppercase, lowercase, { caseSensitive: false })).toBe(1);
-    });
+    test.each(['', ' ', '\t', '\n'])(
+      'preserves unlabeled dotted identifiers after %j',
+      (prefix) => {
+        const uppercase = `${prefix}ABC.1 Introduction.`;
+        const lowercase = uppercase.toLowerCase();
+        expect(segmentCaseNeutrally(lowercase)).toEqual([lowercase.trimStart()]);
+        expect(rouge.l(uppercase, lowercase, { caseSensitive: false })).toBe(1);
+      },
+    );
 
     test.each([
       'She said "Alpha.[1] Beta." aloud.',

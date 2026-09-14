@@ -519,6 +519,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const brackets = { depth: 0, standalone: false };
   const citationQuotationClosers: string[] = [];
   const apostrophes = citationApostrophes(input);
+  const contentStart = input.search(/\S/);
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
@@ -550,8 +551,15 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       char === '!'
     ) {
       const end =
-        citationEnd(input, index, caseNeutral, insideQuotes, brackets, citationQuotationClosers) ??
-        sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
+        citationEnd(
+          input,
+          index,
+          caseNeutral,
+          insideQuotes,
+          brackets,
+          citationQuotationClosers,
+          contentStart,
+        ) ?? sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
       if (end === -1) {
         continue;
       }
@@ -790,6 +798,7 @@ function citationEnd(
   insideQuotes: boolean,
   brackets: { depth: number; standalone: boolean },
   quotationClosers: readonly string[],
+  contentStart: number,
 ): number | undefined {
   const nextCharacter = characterAt(input, index + 1);
   if (nextCharacter !== '[' && !/^[\p{Number}\])}>"'”’]$/u.test(nextCharacter)) {
@@ -810,6 +819,7 @@ function citationEnd(
       following,
       Math.max(0, brackets.depth - closedBrackets),
       caseNeutral,
+      contentStart,
     )
   ) {
     return undefined;
@@ -891,6 +901,7 @@ function isCitationContext(
   following: string,
   bracketDepth: number,
   caseNeutral: boolean,
+  contentStart: number,
 ): boolean {
   if (bracketDepth > 0 || (following !== '[' && !/^\p{Number}$/u.test(following))) {
     return false;
@@ -907,7 +918,9 @@ function isCitationContext(
   const standaloneIdentifier =
     input[index] === '.' &&
     (/^[\p{Lu}\p{Number}_-]{2,}$/u.test(precedingToken) ||
-      (caseNeutral && index === precedingToken.length && /^[a-z\d_-]{2,}$/u.test(precedingToken)));
+      (caseNeutral &&
+        index - precedingToken.length === contentStart &&
+        /^[a-z\d_-]{2,}$/u.test(precedingToken)));
   const labeledSection =
     /\b(?:appendix|section|chapter|part|figure|table|paragraph|article|clause)\s+[\p{Letter}\p{Number}_-]+$/iu.test(
       input.slice(Math.max(0, index - 96), index),
