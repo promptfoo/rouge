@@ -112,6 +112,24 @@ function singleQuotationState(
   return insideQuotes && (input[index] !== '’' || apostrophes[index] === 1);
 }
 
+function straightSingleQuotationState(
+  input: string,
+  index: number,
+  insideQuotes: boolean,
+  lastCharacter = '',
+): boolean {
+  const previous = index === 0 ? lastCharacter : input[index - 1];
+  const following = input[index + 1] ?? '';
+  if (insideQuotes) {
+    const possessive =
+      previous.toLowerCase() === 's' &&
+      /\s/.test(following) &&
+      /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(input.slice(index + 1).trimStart());
+    return possessive || (following.length > 0 && !/[\s.,!?;:)\]}“‘]/.test(following));
+  }
+  return (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) && /\S/.test(following);
+}
+
 function previousNonClosingIndex(input: string, index: number): number {
   let previous = index - 1;
   // Stop at another single quote so adjacent candidates never rescan the same span.
@@ -241,6 +259,13 @@ const sentenceContinuationReg =
 const independentSentenceReg =
   /^(?:(?:i|we|he|she|they|you|it|who|what|why|how|which|whose|whom)\b|(?:do|does|did|is|are|was|were|has|have|had|can|could|will|would|shall|should|may|might|must)\s+(?:i|we|he|she|they|you|it)\b|in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
+function isIndependentSentence(input: string): boolean {
+  return (
+    independentSentenceReg.test(input) &&
+    (!/^(?:who|which|whose|whom)\b/i.test(input) || /^[^.!?]*\?/.test(input))
+  );
+}
+
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
   readonly #caseNeutral: boolean;
@@ -347,7 +372,12 @@ class SentenceBuffer {
         );
         source.index++;
       } else if (character === "'") {
-        this.#trackSingleQuote(text, index);
+        this.#insideSingleQuotes = straightSingleQuotationState(
+          text,
+          index,
+          this.#insideSingleQuotes,
+          this.#lastCharacter,
+        );
       } else if (
         !this.#insideQuotes &&
         openingBracketReg.test(character) &&
@@ -362,22 +392,6 @@ class SentenceBuffer {
       }
     }
     this.#lastCharacter = text.at(-1) ?? this.#lastCharacter;
-  }
-
-  #trackSingleQuote(text: string, index: number): void {
-    const previous = index === 0 ? this.#lastCharacter : text[index - 1];
-    const following = text[index + 1] ?? '';
-    if (this.#insideSingleQuotes) {
-      const possessive =
-        previous.toLowerCase() === 's' &&
-        /\s/.test(following) &&
-        /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(text.slice(index + 1).trimStart());
-      this.#insideSingleQuotes =
-        possessive || (following.length > 0 && !/[\s.,!?;:)\]}]/.test(following));
-      return;
-    }
-    this.#insideSingleQuotes =
-      (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous)) && /\S/.test(following);
   }
 
   trimEnd(): void {
@@ -490,7 +504,7 @@ export function sentenceSegment(
         const nextSentence = nextChunk?.replace(/^[\s"'“‘’([{<]+/, '');
         const abbreviation = gateSuffix.trimEnd();
         const insideSmartQuotes = quoteSource.double || quoteSource.single;
-        const independentSentence = independentSentenceReg.test(nextSentence ?? '');
+        const independentSentence = isIndependentSentence(nextSentence ?? '');
         if (
           nextSentence &&
           abbrvReg.test(abbreviation) &&
@@ -533,7 +547,7 @@ export function sentenceSegment(
           (caseNeutral
             ? startsWithCasedCharacter(nextChunk) &&
               (!sentenceContinuationReg.test(nextChunk.trimStart()) ||
-                independentSentenceReg.test(nextChunk.trimStart()))
+                isIndependentSentence(nextChunk.trimStart()))
             : strIsTitleCase(nextChunk)) &&
           !excepReg.test(gateSuffix) &&
           !(
@@ -693,9 +707,13 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
   let start = -1;
   const quotes: QuoteState = { double: false, smartDouble: false, single: false, apostrophes };
   const brackets = { depth: 0, standalone: false, inlineStart: -1 };
+  let straightSingle = false;
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
+    if (char === "'") {
+      straightSingle = straightSingleQuotationState(input, index, straightSingle);
+    }
     quotes.double = quotationState(input, index, quotes.double);
     quotes.smartDouble = char === '“' || (quotes.smartDouble && char !== '”');
     quotes.single = singleQuotationState(input, index, quotes.single, apostrophes);
@@ -717,7 +735,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
       char === '?' ||
       char === '!'
     ) {
-      const end = sentenceEnd(input, index, quotes, brackets, caseNeutral);
+      const end = sentenceEnd(input, index, quotes, brackets, caseNeutral, straightSingle);
       if (end === -1) {
         continue;
       }
@@ -828,10 +846,11 @@ function sentenceEnd(
   quotes: QuoteState,
   brackets: BracketState,
   caseNeutral: boolean,
+  straightSingle: boolean,
 ): number {
   const insideQuotes = quotes.double || quotes.smartDouble || quotes.single;
   if (
-    !insideQuotes &&
+    !(insideQuotes || (straightSingle && input[index + 1] === "'")) &&
     brackets.depth === 0 &&
     isUnspacedDelimitedSentenceStart(input, index, caseNeutral)
   ) {
@@ -857,7 +876,7 @@ function sentenceEnd(
     closesQuotation &&
     openingBracketReg.test(input[continuation] ?? '') &&
     abbrvReg.test(gateSuffix) &&
-    !isIndependentParenthetical(input, continuation)
+    !isIndependentParenthetical(input, continuation, caseNeutral)
   ) {
     // Retain this interruption's context even when a line wrap resets the scanner prefix.
     brackets.inlineStart = continuation;
@@ -914,18 +933,22 @@ function quotationCitationEnd(
   });
 }
 
-function isIndependentParenthetical(input: string, index: number): boolean {
+function isIndependentParenthetical(input: string, index: number, caseNeutral: boolean): boolean {
   const contents = input.slice(index + 1);
   const sentence = contents.match(/^[^()[\]{}<>]*[.!?]\s*[)\]}>]/)?.[0];
   if (sentence === undefined) {
     return false;
   }
   const following = contents.slice(sentence.length).trimStart();
-  if (following.length > 0 && !independentSentenceReg.test(following)) {
+  if (
+    following.length > 0 &&
+    !isIndependentSentence(following) &&
+    (caseNeutral || !charIsUpperCase(characterAt(following, 0)))
+  ) {
     return false;
   }
   const suffix = sentence.slice(0, -1).trimEnd().slice(-sentenceSuffixLength).toLowerCase();
-  return independentSentenceReg.test(contents.trimStart()) || !abbrvReg.test(suffix);
+  return isIndependentSentence(contents.trimStart()) || !abbrvReg.test(suffix);
 }
 
 function sentenceEndAfterDelimiter(
@@ -1063,7 +1086,7 @@ function isNeutralSentenceStart(input: string, previousEnd: number, next: number
   const continuation = input.slice(next);
   return (
     !sentenceContinuationReg.test(continuation) ||
-    independentSentenceReg.test(continuation) ||
+    isIndependentSentence(continuation) ||
     /["'“‘]/.test(input.slice(previousEnd, next))
   );
 }

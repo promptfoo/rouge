@@ -2132,6 +2132,68 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['Bob left.', 'The office closed.', 'Yesterday was busy.'])(
+      'uses default casing for an ordinary sentence after a parenthetical: %s',
+      (third) => {
+        for (const quotes of [
+          ['“', '”'],
+          ['"', '"'],
+        ]) {
+          const first = `He joined ${quotes[0]}Acme Co.${quotes[1]}`;
+          const second = '(Was it the right choice?)';
+          const input = `${first} ${second} ${third}`;
+          expect(ss(input)).toEqual([first, second, third]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+        }
+      },
+    );
+
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+    ])('attaches a pending straight single closer before adjacent %s%s', (open, close) => {
+      const first = "He said 'Stop.'";
+      const second = `${open}Next.${close}`;
+      const input = `${first}${second}`;
+      expect(ss(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+      const nested = `'${open}Beta.${close}'`;
+      expect(ss(`Alpha.${nested}`)).toEqual(['Alpha.', nested]);
+      expect(segmentCaseNeutrally(`Alpha.${nested}`)).toEqual(['Alpha.', nested]);
+    });
+
+    test.each([
+      ['which operates abroad.', 'Which operates abroad?'],
+      ['who works abroad.', 'Who works abroad?'],
+      ['whose office closed.', 'Whose office closed?'],
+      ['whom we consulted.', 'Whom did we consult?'],
+    ])('distinguishes a quoted relative clause from a question: %s', (relative, question) => {
+      for (const [open, close] of [
+        ['“', '”'],
+        ['‘', '’'],
+      ]) {
+        const first = `She described ${open}Acme Co.`;
+        const input = `${first}\n${relative}${close}`;
+        expect(ss(input)).toEqual([input.replaceAll('\n', ' ')]);
+        expect(segmentCaseNeutrally(input)).toEqual([input.replaceAll('\n', ' ')]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          input.toLowerCase().replaceAll('\n', ' '),
+        ]);
+        const second = `${question}${close}`;
+        expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      }
+    });
+
     test.each([
       ['‘', '’'],
       ['“', '”'],
