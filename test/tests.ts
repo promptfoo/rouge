@@ -850,6 +850,20 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual([input]);
     });
 
+    test.each([
+      ['[', ']'],
+      ['{', '}'],
+      ['<', '>'],
+      ['[{<', '>}]'],
+    ])('keeps label-like text inside %s%s prose', (opening, closing) => {
+      const input = `The winners were ${opening}team A) Alice and team B) Bob${closing}.`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      const list = `${input} Options: a) Alpha b) Beta.`;
+      expect(ss(list)).toEqual([input, 'Options:', 'a) Alpha', 'b) Beta.']);
+      expect(segmentCaseNeutrally(list)).toEqual([input, 'Options:', 'a) Alpha', 'b) Beta.']);
+    });
+
     test('keeps four-dot boundaries invariant under case folding', () => {
       expect(segmentCaseNeutrally('First.... Second.')).toEqual(['First....', 'Second.']);
       expect(segmentCaseNeutrally('first.... second.')).toEqual(['first....', 'second.']);

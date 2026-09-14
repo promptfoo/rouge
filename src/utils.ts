@@ -454,7 +454,7 @@ export function sentenceSegment(input: string, options: SentenceSegmentOptions =
 
 interface ListScanState {
   cursor: number;
-  parenthesisDepth: number;
+  bracketDepth: number[];
   quote: string | undefined;
 }
 
@@ -498,10 +498,12 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
       state.quote = quote;
       continue;
     }
-    if (character === '(') {
-      state.parenthesisDepth++;
-    } else if (character === ')') {
-      state.parenthesisDepth = Math.max(0, state.parenthesisDepth - 1);
+    const opening = '([{<'.indexOf(character);
+    const closing = ')]}>'.indexOf(character);
+    if (opening !== -1) {
+      state.bracketDepth[opening]++;
+    } else if (closing !== -1) {
+      state.bracketDepth[closing] = Math.max(0, state.bracketDepth[closing] - 1);
     }
   }
 }
@@ -538,8 +540,9 @@ function nextListMarker(
       hasBody ||= input.slice(bodyStart, marker.index).trim().length > 0;
       bodyStart = marker.index + marker[0].length;
     }
-    const closesParenthesis =
-      marker[0].endsWith(')') && (state.parenthesisDepth > 0 || state.quote !== undefined);
+    const enclosedMarker =
+      marker[0].endsWith(')') &&
+      (state.bracketDepth.some((depth) => depth > 0) || state.quote !== undefined);
     const yearInProse =
       /^(?:1\d{3}|20\d{2})\.$/.test(marker[0].trim()) && !listMarkerPrefix(input, marker).boundary;
     const countInProse =
@@ -550,7 +553,7 @@ function nextListMarker(
     if (
       (family === undefined || family.test(marker[0])) &&
       hasBody &&
-      !closesParenthesis &&
+      !enclosedMarker &&
       !yearInProse &&
       !countInProse &&
       (marker.index === 0 ||
@@ -649,7 +652,7 @@ function findListCandidate(
       deferred ??= {
         candidate,
         expressionIndex: expression.lastIndex,
-        state: { ...state },
+        state: { ...state, bracketDepth: [...state.bracketDepth] },
       };
     }
 
@@ -686,7 +689,7 @@ function segmentList(input: string, caseNeutral: boolean, depth: number): string
     return undefined;
   }
   const expression = new RegExp(listMarkerReg);
-  const state: ListScanState = { cursor: 0, parenthesisDepth: 0, quote: undefined };
+  const state: ListScanState = { cursor: 0, bracketDepth: [0, 0, 0, 0], quote: undefined };
   const candidate = findListCandidate(input, caseNeutral, expression, state);
   if (candidate === undefined) {
     return undefined;
