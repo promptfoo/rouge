@@ -361,10 +361,12 @@ export function sentenceSegment(
         const abbreviation = gateSuffix.trimEnd();
         const separator =
           suffix.slice(suffix.trimEnd().length) + (nextChunk?.match(/^\s*/)?.[0] ?? '');
-        const continuesVersus =
-          /\bv\.?s\.$/i.test(abbreviation) &&
-          isAbbreviationException(abbreviation, nextSentence ?? '') &&
-          !/\n[^\S\n]*\n/.test(separator.replace(/\r\n?/g, '\n'));
+        const continuesAbbreviation =
+          !/\n[^\S\n]*\n/.test(separator.replace(/\r\n?/g, '\n')) &&
+          ((/\bv\.?s\.$/i.test(abbreviation) &&
+            isAbbreviationException(abbreviation, nextSentence ?? '')) ||
+            (geographicAcronymReg.test(abbreviation) &&
+              geographicContinuationReg.test(nextChunk?.trimStart() ?? '')));
         if (
           nextSentence &&
           abbrvReg.test(abbreviation) &&
@@ -386,7 +388,7 @@ export function sentenceSegment(
         } else if (
           nextChunk &&
           (chunk.startsWithTitleCase ||
-            continuesVersus ||
+            continuesAbbreviation ||
             (caseNeutral &&
               sentenceContinuationReg.test(nextChunk.trimStart()) &&
               /[.!?]["'\])}>]\s*[\r\n]/.test(suffix)))
@@ -692,19 +694,11 @@ function sentenceEnd(
     return index + 1;
   }
   const end = closingDelimiterEnd(input, index, insideQuotes);
-  const { closedBrackets, closesAbbreviationQuotation } = closingDelimiterContext(
-    input,
-    index + 1,
-    end,
-    insideQuotes,
-  );
-  const closesQuotation = insideQuotes && /(?:"|'')$/.test(input.slice(end - 2, end));
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-  if (
-    closesAbbreviationQuotation &&
-    closedBrackets < brackets.depth &&
-    /\bv\.?s\.$/i.test(suffix)
-  ) {
+  const { closedBrackets, closesAbbreviationQuotation, closesVersusQuotation } =
+    closingDelimiterContext(input, index + 1, end, insideQuotes, suffix);
+  const closesQuotation = insideQuotes && /(?:"|'')$/.test(input.slice(end - 2, end));
+  if (closesVersusQuotation && closedBrackets < brackets.depth) {
     return -1;
   }
   if (end < input.length && !/\s/.test(input[end])) {
@@ -718,7 +712,8 @@ function sentenceEnd(
 
   if (
     closedBrackets > 0 &&
-    (closedBrackets < brackets.depth || !(brackets.standalone || closesQuotation))
+    (closedBrackets < brackets.depth ||
+      !(brackets.standalone || closesQuotation || closesVersusQuotation))
   ) {
     return -1;
   }
@@ -776,7 +771,12 @@ function closingDelimiterContext(
   start: number,
   end: number,
   insideQuotes: boolean,
-): { closedBrackets: number; closesAbbreviationQuotation: boolean } {
+  suffix: string,
+): {
+  closedBrackets: number;
+  closesAbbreviationQuotation: boolean;
+  closesVersusQuotation: boolean;
+} {
   let closedBrackets = 0;
   let closesAbbreviationQuotation = false;
   for (let index = start; index < end; index++) {
@@ -785,7 +785,11 @@ function closingDelimiterContext(
     }
     closesAbbreviationQuotation ||= input[index] === "'" || (insideQuotes && input[index] === '"');
   }
-  return { closedBrackets, closesAbbreviationQuotation };
+  return {
+    closedBrackets,
+    closesAbbreviationQuotation,
+    closesVersusQuotation: closesAbbreviationQuotation && /\bv\.?s\.$/i.test(suffix),
+  };
 }
 
 function isUnspacedDelimitedSentenceStart(

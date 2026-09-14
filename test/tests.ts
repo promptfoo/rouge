@@ -1164,6 +1164,22 @@ describe('Utility Functions', () => {
       }
     });
 
+    test.each(['Senate', 'Commission', 'Government'])(
+      'preserves wrapped geographic continuation %s after non-titlecase starts',
+      (continuation) => {
+        for (const prefix of ['2026', 'recent']) {
+          const first = `${prefix} U.S.`;
+          const next = `${continuation} elections begin.`;
+          for (const separator of ['\n', '\r\n', '\r']) {
+            for (const segment of [ss, segmentCaseNeutrally]) {
+              expect(segment(`${first}${separator}${next}`)).toEqual([`${first} ${next}`]);
+              expect(segment(`${first}${separator}${separator}${next}`)).toEqual([first, next]);
+            }
+          }
+        }
+      },
+    );
+
     test('retains parenthetical company-name continuations', () => {
       const input = 'We invested in Acme Co. (International Holdings) last year.';
       expect(ss(input)).toEqual([input]);
@@ -1199,6 +1215,7 @@ describe('Utility Functions', () => {
             for (const separator of [' ', '\n\n']) {
               expect(segment(`${first}${separator}${next}`)).toEqual([first, next]);
             }
+            expect(segment(`${first} 2 days passed.`)).toEqual([first, '2 days passed.']);
             for (const continuation of ['100 times correctly.', '100% correctly.']) {
               const input = `${first} ${continuation}`;
               expect(segment(input)).toEqual([input]);
@@ -1238,6 +1255,12 @@ describe('Utility Functions', () => {
           const next = 'Examples followed.';
           expect(ss(`${first} ${next}`)).toEqual([first, next]);
           expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual([first, next]);
+          const embedded = `He wrote ${opening}"${abbreviation}"${closing}`;
+          expect(ss(`${embedded} ${next}`)).toEqual([embedded, next]);
+          expect(segmentCaseNeutrally(`${embedded} ${next}`)).toEqual([embedded, next]);
+          const singleQuoted = embedded.replaceAll('"', "'");
+          expect(ss(`${singleQuoted} ${next}`)).toEqual([singleQuoted, next]);
+          expect(segmentCaseNeutrally(`${singleQuoted} ${next}`)).toEqual([singleQuoted, next]);
         }
       },
     );
