@@ -530,7 +530,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const brackets = { depth: 0, standalone: false };
   const { apostrophes, overflowed } = citationApostrophes(input);
   const citationQuotes: CitationQuotationState = { closers: [], overflowed };
-  const isNetworkToken = networkTokenChecker(input);
+  const isPathOrAddress = pathOrAddressTokenChecker(input);
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
@@ -569,7 +569,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
           insideQuotes,
           brackets,
           citationQuotes,
-          isNetworkToken,
+          isPathOrAddress,
         ) ?? sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
       if (end === -1) {
         continue;
@@ -999,7 +999,7 @@ function citationEnd(
   insideQuotes: boolean,
   brackets: { depth: number; standalone: boolean },
   quotationQuotes: CitationQuotationState,
-  isNetworkToken: (index: number) => boolean,
+  isPathOrAddress: (index: number) => boolean,
 ): number | undefined {
   if (quotationQuotes.overflowed) {
     return undefined;
@@ -1024,7 +1024,7 @@ function citationEnd(
   if (
     citationStart === index + 1 &&
     /^\p{Number}$/u.test(characterAt(input, citationStart)) &&
-    isNetworkToken(index)
+    isPathOrAddress(index)
   ) {
     return undefined;
   }
@@ -1040,6 +1040,7 @@ function citationEnd(
     contentEnd - 1,
     insideQuotes && !closedQuote,
     pendingClosers,
+    true,
   );
   const closing = leadingClosers + input.slice(contentEnd, end);
   if (!closesCitationQuotations(closing, insideQuotes, quotationQuotes.closers)) {
@@ -1064,7 +1065,7 @@ function citationEnd(
   if (end === input.length || /^\s+$/.test(input.slice(end))) {
     return end;
   }
-  if (!/\s/.test(input[end])) {
+  if (!/[\s"'“‘«([{<]/.test(input[end])) {
     return undefined;
   }
 
@@ -1135,18 +1136,15 @@ function citationDelimiterEnd(
   index: number,
   insideQuotes: boolean,
   pending: string[],
+  preserveOpeners = false,
 ): number {
   let end = index + 1;
-  let doublePending = insideQuotes;
+  const state = { doublePending: insideQuotes, pending, preserveOpeners };
   for (;;) {
-    const nextEnd = closingDelimiterEnd(input, end - 1, doublePending);
-    for (let position = end; position < nextEnd; position++) {
-      if (input[position] === pending.at(-1)) {
-        pending.pop();
-      }
-      if (input[position] === '"' || input.startsWith("''", position)) {
-        doublePending = false;
-      }
+    const nextEnd = closingDelimiterEnd(input, end - 1, state.doublePending);
+    const consumed = advanceCitationClosers(input, end, nextEnd, state);
+    if (consumed < nextEnd) {
+      return consumed;
     }
     end = nextEnd;
     let next = end;
@@ -1164,6 +1162,35 @@ function citationDelimiterEnd(
     }
     end = next + 1;
   }
+}
+
+function advanceCitationClosers(
+  input: string,
+  start: number,
+  end: number,
+  state: { doublePending: boolean; pending: string[]; preserveOpeners: boolean },
+): number {
+  for (let position = start; position < end; position++) {
+    if (
+      state.preserveOpeners &&
+      /["']/.test(input[position]) &&
+      !state.doublePending &&
+      input[position] !== state.pending.at(-1)
+    ) {
+      return position;
+    }
+    if (input[position] === state.pending.at(-1)) {
+      state.pending.pop();
+      continue;
+    }
+    if (input[position] === '"') {
+      state.doublePending = false;
+    } else if (state.doublePending && input.startsWith("''", position)) {
+      state.doublePending = false;
+      position++;
+    }
+  }
+  return end;
 }
 
 function closesCitationQuotations(
@@ -1191,12 +1218,12 @@ function closesCitationQuotations(
 }
 
 /** Classify each whitespace-delimited token once across monotone citation lookaheads. */
-function networkTokenChecker(input: string): (index: number) => boolean {
+function pathOrAddressTokenChecker(input: string): (index: number) => boolean {
   let end = 0;
-  let network = false;
+  let pathOrAddress = false;
   return (index) => {
     if (index < end) {
-      return network;
+      return pathOrAddress;
     }
     let start = index;
     while (start > 0 && !/\s/.test(input[start - 1])) {
@@ -1206,13 +1233,38 @@ function networkTokenChecker(input: string): (index: number) => boolean {
     while (end < input.length && !/\s/.test(input[end])) {
       end++;
     }
-    const token = input.slice(start, end).replace(/^["'“‘([{<]+/, '');
-    network =
-      /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i.test(token) ||
-      token.includes('@') ||
-      /^[\p{Letter}\p{Number}._-]+\.[\p{Letter}]{2,}\//u.test(token);
-    return network;
+    const token = input.slice(start, end).replace(/^["'“‘«([{<]+/, '');
+    pathOrAddress = /[\\/]/.test(token) || token.includes('@') || /^www\./i.test(token);
+    return pathOrAddress;
   };
+}
+
+/** Candidate terminals bound these backwards scans to disjoint identifier ranges. */
+function citationIdentifierStart(input: string, index: number): number {
+  let start = index;
+  while (start > 0) {
+    const precedingPair = input.codePointAt(start - 2);
+    const width = precedingPair !== undefined && precedingPair > 0xff_ff ? 2 : 1;
+    if (!/^[\p{Letter}\p{Mark}\p{Number}_-]$/u.test(input.slice(start - width, start))) {
+      break;
+    }
+    start -= width;
+  }
+  return start;
+}
+
+function isLabeledCitationIdentifier(input: string, start: number, token: string): boolean {
+  let labelEnd = start;
+  while (labelEnd > 0 && /\s/.test(input[labelEnd - 1])) {
+    labelEnd--;
+  }
+  return (
+    labelEnd < start &&
+    /^[\p{Letter}\p{Number}_-]+$/u.test(token) &&
+    /\b(?:appendix|section|chapter|part|figure|table|paragraph|article|clause)$/iu.test(
+      input.slice(Math.max(0, labelEnd - 16), labelEnd),
+    )
+  );
 }
 
 function isCitationContext(
@@ -1234,18 +1286,14 @@ function isCitationContext(
 
   const previous = Array.from(input.slice(Math.max(0, index - 2), index)).at(-1) ?? '';
   const previousStart = index - previous.length;
-  const precedingToken =
-    input.slice(Math.max(0, index - 64), index).match(/[\p{Letter}\p{Mark}\p{Number}_-]+$/u)?.[0] ??
-    '';
+  const tokenStart = citationIdentifierStart(input, index);
+  const precedingToken = input.slice(tokenStart, index);
   // Letter-only identifiers and cited words are indistinguishable after case folding.
   const standaloneIdentifier =
     input[index] === '.' &&
     (/[\p{Number}_]/u.test(precedingToken) ||
       (!caseNeutral && /^[\p{Lu}\p{Number}_-]{2,}$/u.test(precedingToken)));
-  const labeledSection =
-    /\b(?:appendix|section|chapter|part|figure|table|paragraph|article|clause)\s+[\p{Letter}\p{Number}_-]+$/iu.test(
-      input.slice(Math.max(0, index - 96), index),
-    );
+  const labeledSection = isLabeledCitationIdentifier(input, tokenStart, precedingToken);
   return (
     /^[\p{Letter}\p{Mark})\]!?]$/u.test(previous) &&
     !standaloneIdentifier &&

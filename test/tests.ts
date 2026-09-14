@@ -711,6 +711,17 @@ describe('Utility Functions', () => {
       );
     });
 
+    test('makes the attached bare-citation ambiguity explicit across casing modes', () => {
+      const input = 'Stop!2 people stayed.';
+      expect(ss(input)).toEqual(['Stop!', '2 people stayed.']);
+      expect(segmentCaseNeutrally(input)).toEqual(['Stop!2', 'people stayed.']);
+      expect(ss('Stop!2 People stayed.')).toEqual(['Stop!2', 'People stayed.']);
+      for (const segment of [ss, segmentCaseNeutrally]) {
+        expect(segment('Stop! 2 people stayed.')).toEqual(['Stop!', '2 people stayed.']);
+        expect(segment('Stop![2] People stayed.')).toEqual(['Stop![2]', 'People stayed.']);
+      }
+    });
+
     test.each([
       'https://example.com/release.1',
       'https://example.com/release.𝟙',
@@ -718,18 +729,30 @@ describe('Utility Functions', () => {
       'www.example.com/release.1',
       'example.com/release.1',
       'alice@example.com.1',
-    ])('preserves numeric URL and email components: %s', (address) => {
+      '/tmp/release.1',
+      './release.1',
+      '../release.1',
+      '~/release.1',
+      'package/release.1',
+      'C:\\tmp\\release.1',
+      '\\\\server\\share\\release.1',
+      '«https://example.com/release.1»',
+      '«www.release.1»',
+    ])('preserves numeric path and address components: %s', (address) => {
       const input = `Download ${address} Candidate builds remain.`;
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);
     });
 
-    test('keeps an explicit citation after a quoted URL', () => {
-      const first = 'He cited "https://example.com/release."1';
-      const input = `${first} Next sentence.`;
-      expect(ss(input)).toEqual([first, 'Next sentence.']);
-      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
-    });
+    test.each(['https://example.com/release.', '/tmp/release.', 'package/release.'])(
+      'keeps an explicit citation after a quoted path or address: %s',
+      (address) => {
+        const first = `He cited "${address}"1`;
+        const input = `${first} Next sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+      },
+    );
 
     test('classifies a citation-like URL token once', () => {
       const input = `Download https://example.com/${'release.1/'.repeat(20_000)}final.1 Candidate builds remain.`;
@@ -864,6 +887,39 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['"Next."', "'Next.'", '“Next.”', '‘Next.’', '«Next.»', '(Next sentence.)'])(
+      'retains an adjacent opening delimiter after a citation: %s',
+      (following) => {
+        const first = 'Alpha.[1]';
+        const input = `${first}${following}`;
+        expect(ss(input)).toEqual([first, following]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, following]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          following.toLowerCase(),
+        ]);
+      },
+    );
+
+    test('distinguishes an existing citation quotation closer from the next opener', () => {
+      const first = 'He said "Alpha.[1]"';
+      const following = '"Next."';
+      expect(ss(`${first}${following}`)).toEqual([first, following]);
+      expect(segmentCaseNeutrally(`${first}${following}`)).toEqual([first, following]);
+    });
+
+    test.each(["He said ``She said 'Alpha.[1]'''", "He said '``Alpha.[1]'''"])(
+      'consumes each pending single and Treebank closer once: %s',
+      (first) => {
+        expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first.toLowerCase()} next.`)).toEqual([
+          first.toLowerCase(),
+          'next.',
+        ]);
+      },
+    );
+
     test('does not mistake decimal numbers for numeric citation suffixes', () => {
       const input = 'She has $100.00 in her bag.';
       expect(ss(input)).toEqual([input]);
@@ -906,6 +962,20 @@ describe('Utility Functions', () => {
       'See abc2d.1 Introduction.',
       'See abc_d.1 Introduction.',
     ])('preserves identifiers with structural evidence in both modes: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each(['2', '_', '𝟚'])('retains identifier evidence before a long suffix: %s', (prefix) => {
+      const input = `See ${prefix}${'A'.repeat(128)}.1 Introduction.`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test('retains a section label before a long identifier and whitespace', () => {
+      const input = `Section${' '.repeat(100)}${'A'.repeat(128)}.1 Introduction.`;
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
