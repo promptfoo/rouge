@@ -1542,14 +1542,57 @@ describe('Utility Functions', () => {
     );
 
     test.each([
-      'The “U.S.” Economy grew.',
-      'the firm “acme co.” grew.',
-      'The ‘U.S.’ Economy grew.',
-      'the firm ‘acme co.’ grew.',
-    ])('preserves a quoted abbreviation inside its sentence: %s', (input) => {
-      expect(ss(input)).toEqual([input]);
-      expect(segmentCaseNeutrally(input)).toEqual([input]);
-      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      ['The “U.S.” Economy grew.', '"'],
+      ['the firm “acme co.” grew.', '"'],
+      ['The ‘U.S.’ Economy grew.', "'"],
+      ['the firm ‘acme co.’ grew.', "'"],
+    ])('keeps quoted-abbreviation rules consistent across quote styles: %s', (input, quote) => {
+      const straightQuotes = (text: string): string => text.replace(/[“”‘’]/g, quote);
+      for (const caseNeutral of [false, true]) {
+        for (const text of [input, input.toLowerCase()]) {
+          expect(ss(text, { caseNeutral }).map(straightQuotes)).toEqual(
+            ss(straightQuotes(text), { caseNeutral }),
+          );
+        }
+      }
+    });
+
+    test.each(['Bob left.', 'The office closed.', 'Yesterday was busy.', 'Did it close?'])(
+      'retains a sentence after a quoted abbreviation before %s',
+      (next) => {
+        const first = 'The company is “Acme Co.”';
+        const input = `${first} ${next}`;
+        expect(ss(input)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          next.toLowerCase(),
+        ]);
+      },
+    );
+
+    test.each(['Hawai‘i', 'don‘t', 'á‘b', '𝒜‘b'])(
+      'does not open a quotation at a word-internal left apostrophe: %s',
+      (word) => {
+        const first = `${word} etc.`;
+        const input = `${first}\nNext sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          'next sentence.',
+        ]);
+      },
+    );
+
+    test('keeps an outer quotation open through a word-internal left apostrophe', () => {
+      const input =
+        'She described ‘the students’ Hawai‘i project at Acme Co.\nInternational site’ today.';
+      const expected = [
+        'She described ‘the students’ Hawai‘i project at Acme Co. International site’ today.',
+      ];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
     test.each([

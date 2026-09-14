@@ -107,7 +107,7 @@ function singleQuotationState(
   apostrophes: Uint8Array,
 ): boolean {
   if (input[index] === '‘') {
-    return true;
+    return insideQuotes || apostrophes[index] !== 1;
   }
   return insideQuotes && (input[index] !== '’' || apostrophes[index] === 1);
 }
@@ -134,7 +134,14 @@ function smartApostrophes(input: string): Uint8Array {
     const previous = previousNonClosingIndex(input, index);
     const afterTerminal = /[.!?]/.test(input[previous] ?? '');
     if (quote[0] === '‘') {
-      candidateStart = undefined;
+      if (
+        /[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+        /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, index + 1))
+      ) {
+        apostrophes[index] = 1;
+      } else {
+        candidateStart = undefined;
+      }
     } else if (
       (/^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1)) &&
         (!afterTerminal || smartContractionReg.test(input.slice(index, index + 4)))) ||
@@ -199,7 +206,7 @@ const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b
 const sentenceContinuationReg =
   /^(?:and|or|but|nor|for|yet|so|at|in|on|of|to|from|with|by|as|then|because|while|after|before|although|though|since|unless|until|when|where|whether|if|once|whereas)\b/i;
 const independentSentenceReg =
-  /^(?:(?:i|we|he|she|they|you|it|what|who|why|how)\b|in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
+  /^(?:in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
@@ -379,6 +386,9 @@ class SentenceBuffer {
 /**
  * Splits a body of text into an array of sentences
  * using a rule-based segmentation approach.
+ *
+ * Typographic double quotes use the existing straight-quote boundary heuristics,
+ * including their ambiguity around quoted abbreviations and phrase boundaries.
  *
  * Ambiguous smart-single quotes after s-ending words close their span unless a
  * later unambiguous closer confirms a possessive. This conservative rule can
@@ -777,18 +787,6 @@ function sentenceEnd(
     return index + 1;
   }
   const end = closingDelimiterEnd(input, index, quotes);
-  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
-  const abbreviation = abbrvReg.test(gateSuffix);
-  // Preserve quoted names unless the following text clearly starts another sentence.
-  if (
-    input[index] === '.' &&
-    /[”’]/.test(input[end - 1]) &&
-    abbreviation &&
-    !independentSentenceReg.test(input.slice(end).replace(/^[\s"'“‘’([{<]+/, ''))
-  ) {
-    return -1;
-  }
   if (end < input.length && !/\s/.test(input[end])) {
     return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
   }
@@ -812,8 +810,18 @@ function sentenceEnd(
   if (next === input.length) {
     return end;
   }
-  const startsWithLetter = isLetterSentenceStart(input, end, next, caseNeutral);
-  const startsWithNumber = isNumberSentenceStart(input, next, abbreviation);
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  const nextCharacter = characterAt(input, next);
+  const startsWithLetter = caseNeutral
+    ? isNeutralSentenceStart(input, end, next)
+    : charIsUpperCase(nextCharacter);
+  const startsWithNumber =
+    /^\p{Number}$/u.test(nextCharacter) &&
+    !abbrvReg.test(gateSuffix) &&
+    !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
+      input.slice(next),
+    );
   if (!(startsWithLetter || startsWithNumber)) {
     return -1;
   }
@@ -822,7 +830,7 @@ function sentenceEnd(
   if (ellipseReg.test(suffix) && closedBrackets > 0) {
     return -1;
   }
-  return abbreviation && excepReg.test(gateSuffix) ? -1 : end;
+  return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
 }
 
 function countClosingBrackets(input: string, start: number, end: number): number {
@@ -917,15 +925,7 @@ function isUnspacedSentenceBoundary(
   );
 }
 
-function isLetterSentenceStart(
-  input: string,
-  previousEnd: number,
-  next: number,
-  caseNeutral: boolean,
-): boolean {
-  if (!caseNeutral) {
-    return charIsUpperCase(characterAt(input, next));
-  }
+function isNeutralSentenceStart(input: string, previousEnd: number, next: number): boolean {
   if (!isCasedCharacter(characterAt(input, next))) {
     return false;
   }
@@ -935,16 +935,6 @@ function isLetterSentenceStart(
     !sentenceContinuationReg.test(continuation) ||
     independentSentenceReg.test(continuation) ||
     /["“‘]/.test(input.slice(previousEnd, next))
-  );
-}
-
-function isNumberSentenceStart(input: string, next: number, abbreviation: boolean): boolean {
-  return (
-    /^\p{Number}$/u.test(characterAt(input, next)) &&
-    !abbreviation &&
-    !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
-      input.slice(next),
-    )
   );
 }
 
