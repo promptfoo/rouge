@@ -112,6 +112,7 @@ const upperCaseReg = /^\p{Uppercase}$/u;
 // Recognize unambiguous page-reference forms: p. 10, p. (10), and p. #10.
 const pageNumberContinuationReg =
   /^\s*(?:\(\s*\p{Number}+\s*\)|#\s*\p{Number}+|\p{Number}+)(?=\s|[.,;:!?)]|$)/u;
+const numericSentenceStartReg = /^(?:[+−-]?\p{Sc}?|\p{Sc}[+−-]?)\p{Number}/u;
 const numericSentenceContinuationReg =
   /^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu;
 const ellipsisQuantityContinuationReg =
@@ -136,7 +137,12 @@ const independentSentenceReg =
 /** Store exact nesting in one byte per opener without per-element heap objects. */
 class TypographicQuotationStack {
   #quotes = new Uint8Array(32);
+  #englishDepth = 0;
   length = 0;
+
+  get hasEnglishQuote(): boolean {
+    return this.#englishDepth > 0;
+  }
 
   at(index: number): string | undefined {
     const position = index < 0 ? this.length + index : index;
@@ -150,10 +156,16 @@ class TypographicQuotationStack {
       this.#quotes = expanded;
     }
     this.#quotes[this.length++] = '”’»“'.indexOf(quote);
+    if (quote === '”') {
+      this.#englishDepth++;
+    }
   }
 
   pop(): void {
     if (this.length > 0) {
+      if (this.#quotes[this.length - 1] === 0) {
+        this.#englishDepth--;
+      }
       this.length--;
     }
   }
@@ -162,43 +174,194 @@ class TypographicQuotationStack {
 interface QuotationSource {
   input: string;
   index: number;
-  apostrophes: Uint8Array;
+  flags: Uint8Array;
 }
 
-/** Confirm ambiguous possessives independently in both single-quote families. */
-function singleQuoteApostrophes(input: string): Uint8Array {
-  const apostrophes = new Uint8Array(input.length);
-  const candidates: (number | undefined)[] = [undefined, undefined];
-  for (const quote of input.matchAll(/['‘’]/g)) {
-    const index = quote.index;
-    const family = quote[0] === "'" ? 1 : 0;
-    const flag = 1 << family;
-    const previous = input.slice(Math.max(0, index - 2), index);
-    const following = characterAt(input, index + 1);
-    if (/[\p{Letter}\p{Mark}]$/u.test(previous) && /^[\p{Letter}\p{Mark}]$/u.test(following)) {
-      apostrophes[index] |= flag;
+/** Store sparse ambiguous quote candidates; ordinary nesting needs no stored frame. */
+class CurlyApostropheCandidates {
+  #entries = new Int32Array(32);
+  #length = 0;
+  depth = 0;
+
+  add(index: number): void {
+    if (this.depth === 0) {
+      return;
+    }
+    if (this.#length === this.#entries.length) {
+      const expanded = new Int32Array(this.#entries.length * 2);
+      expanded.set(this.#entries);
+      this.#entries = expanded;
+    }
+    this.#entries[this.#length++] = this.depth;
+    this.#entries[this.#length++] = index;
+  }
+
+  close(flags: Uint8Array): void {
+    while (this.#length > 0 && this.#entries[this.#length - 2] === this.depth) {
+      const candidate = this.#entries[this.#length - 1];
+      if (candidate < 0) {
+        // A negative index records a tentative elision opening, now confirmed as a quote.
+        flags[-candidate - 1] &= ~1;
+      } else {
+        flags[candidate] |= 1;
+      }
+      this.#length -= 2;
+    }
+    this.depth = Math.max(0, this.depth - 1);
+  }
+}
+
+class StraightApostropheCandidates {
+  #candidate: number | undefined;
+  #opening: number | undefined;
+
+  track(
+    index: number,
+    previous: string,
+    following: string,
+    elision: boolean,
+    flags: Uint8Array,
+  ): void {
+    if (elision) {
+      flags[index] |= 2;
+      this.#opening ??= index;
     } else if (
-      quote[0] === '‘' ||
-      (family === 1 &&
-        (index === 0 || /[\s\p{Punctuation}]$/u.test(previous)) &&
-        following.length > 0 &&
-        !/^[\s.,!?;:)\]}”’»\p{Pd}]$/u.test(following))
+      (index === 0 || /[\s\p{Punctuation}]$/u.test(previous)) &&
+      following.length > 0 &&
+      !/^[\s.,!?;:)\]}”’»\p{Pd}]$/u.test(following)
     ) {
-      candidates[family] = undefined;
+      this.#candidate = undefined;
+      this.#opening = index;
     } else if (/[sS]$/.test(previous)) {
-      candidates[family] ??= index;
+      this.#candidate ??= index;
     } else {
-      const candidate = candidates[family];
-      if (candidate !== undefined) {
-        // Confirmed ranges do not overlap within either family.
-        for (let position = candidate; position < index; position++) {
-          apostrophes[position] |= flag;
+      if (this.#opening !== undefined) {
+        flags[this.#opening] &= ~2;
+      }
+      this.#opening = undefined;
+      if (this.#candidate !== undefined) {
+        // Straight-quote candidate ranges do not overlap.
+        for (let position = this.#candidate; position < index; position++) {
+          flags[position] |= 2;
         }
       }
-      candidates[family] = undefined;
+      this.#candidate = undefined;
     }
   }
-  return apostrophes;
+}
+
+function isLeadingElision(input: string, index: number): boolean {
+  return (
+    !/[.!?]/.test(input[index - 1] ?? '') &&
+    /^['‘’](?:[0-9]{2}s\b|(?:tis|twas|em)\b)/i.test(input.slice(index, index + 8))
+  );
+}
+
+function isWordInternalApostrophe(input: string, index: number): boolean {
+  return (
+    /[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+    /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1))
+  );
+}
+
+/** Reserve required right marks before treating an elision as another opening quote. */
+class CurlyElisionClosers {
+  #entries = new Uint32Array(32);
+  #length = 0;
+
+  constructor(input: string) {
+    let available = 0;
+    for (let index = input.length - 1; index >= 0; index--) {
+      const character = input[index];
+      if (!/[‘’]/.test(character) || isWordInternalApostrophe(input, index)) {
+        continue;
+      }
+      if (character === '’') {
+        if (!(isLeadingElision(input, index) || /[sS]/.test(input[index - 1] ?? ''))) {
+          available++;
+        }
+      } else if (isLeadingElision(input, index)) {
+        this.#add(index, available);
+      } else {
+        available = Math.max(0, available - 1);
+      }
+    }
+  }
+
+  #add(index: number, available: number): void {
+    if (this.#length === this.#entries.length) {
+      const expanded = new Uint32Array(this.#entries.length * 2);
+      expanded.set(this.#entries);
+      this.#entries = expanded;
+    }
+    this.#entries[this.#length++] = index;
+    this.#entries[this.#length++] = available;
+  }
+
+  availableAt(index: number): number {
+    while (this.#length > 0 && this.#entries[this.#length - 2] < index) {
+      this.#length -= 2;
+    }
+    return this.#length > 0 && this.#entries[this.#length - 2] === index
+      ? this.#entries[this.#length - 1]
+      : 0;
+  }
+}
+
+/** Mark curly/ASCII apostrophes (bits 1/2) and paired English openings (bit 4). */
+function quotationFlags(input: string): Uint8Array {
+  const flags = new Uint8Array(input.length);
+  markEnglishOpenings(input, flags);
+  const curlyCandidates = new CurlyApostropheCandidates();
+  const elisionClosers = new CurlyElisionClosers(input);
+  const straightCandidates = new StraightApostropheCandidates();
+  for (const quote of input.matchAll(/['‘’]/g)) {
+    const index = quote.index;
+    const straight = quote[0] === "'";
+    const previous = input.slice(Math.max(0, index - 2), index);
+    const following = characterAt(input, index + 1);
+    const elision = isLeadingElision(input, index);
+    if (isWordInternalApostrophe(input, index)) {
+      flags[index] |= straight ? 2 : 1;
+      continue;
+    }
+    if (straight) {
+      straightCandidates.track(index, previous, following, elision, flags);
+    } else if (elision) {
+      flags[index] |= 1;
+      if (quote[0] === '‘' && elisionClosers.availableAt(index) > curlyCandidates.depth) {
+        curlyCandidates.depth++;
+        curlyCandidates.add(-index - 1);
+      }
+    } else if (quote[0] === '‘') {
+      curlyCandidates.depth++;
+    } else if (/[sS]$/.test(previous)) {
+      curlyCandidates.add(index);
+    } else {
+      curlyCandidates.close(flags);
+    }
+  }
+  return flags;
+}
+
+function markEnglishOpenings(input: string, flags: Uint8Array): void {
+  let nextEnglishCloser = -1;
+  let nextSharedMark = -1;
+  for (const quote of input.matchAll(/“/g)) {
+    const index = quote.index;
+    // Infer an English inner pair only before a later closing mark for the German outer pair.
+    if (nextEnglishCloser <= index) {
+      const next = input.indexOf('”', index + 1);
+      nextEnglishCloser = next === -1 ? input.length : next;
+    }
+    if (nextSharedMark <= index) {
+      const next = input.indexOf('“', index + 1);
+      nextSharedMark = next === -1 ? input.length : next;
+    }
+    if (nextEnglishCloser < nextSharedMark && nextSharedMark < input.length) {
+      flags[index] |= 4;
+    }
+  }
 }
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
@@ -287,15 +450,15 @@ class SentenceBuffer {
     for (let index = 0; index < text.length; index++) {
       const character = text[index];
       const previous = text[index - 1] ?? this.#lastCharacter;
-      const apostrophe = this.#isApostrophe(character);
-      if (trackTypographicQuote(text, index, this.#typographicQuoteClosers, apostrophe)) {
+      const flags = this.#quoteFlags(character);
+      if (trackTypographicQuote(text, index, this.#typographicQuoteClosers, flags)) {
         continue;
       }
       if (character === '"') {
         this.#insideDoubleQuotes =
           !this.#insideDoubleQuotes &&
           (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous));
-      } else if (character === "'" && !apostrophe) {
+      } else if (character === "'" && (flags & 2) === 0) {
         this.#trackSingleQuote(text, index);
       } else if (
         !(this.#insideDoubleQuotes || this.#insideSingleQuotes) &&
@@ -316,14 +479,14 @@ class SentenceBuffer {
     this.#lastCharacter = text.at(-1) ?? this.#lastCharacter;
   }
 
-  #isApostrophe(character: string): boolean {
-    if (!/['‘’]/.test(character)) {
-      return false;
+  #quoteFlags(character: string): number {
+    if (!/['‘’“]/.test(character)) {
+      return 0;
     }
     const source = this.#quotationSource;
     const position = source.input.indexOf(character, source.index);
     source.index = position + 1;
-    return (source.apostrophes[position] & (character === "'" ? 2 : 1)) !== 0;
+    return source.flags[position];
   }
 
   #trackSingleQuote(text: string, index: number): void {
@@ -409,9 +572,9 @@ export function sentenceSegment(
   const quotationSource = {
     input: sourceInput,
     index: 0,
-    apostrophes: singleQuoteApostrophes(sourceInput),
+    flags: quotationFlags(sourceInput),
   };
-  const chunks = sentenceChunks(sourceInput, caseNeutral, quotationSource.apostrophes);
+  const chunks = sentenceChunks(sourceInput, caseNeutral, quotationSource.flags);
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -535,7 +698,7 @@ export function sentenceSegment(
                   independentSentenceReg.test(sentenceStart))))
           : strIsTitleCase(sentenceStart);
         const startsWithNumber =
-          /^\p{Number}/u.test(sentenceStart) &&
+          numericSentenceStartReg.test(sentenceStart) &&
           !ellipsisQuantityContinuationReg.test(sentenceStart);
         const parentheticalContext = breakReg.test(nextChunk)
           ? `${nextChunk.trimStart()}${chunks[idx + 2] ?? ''}`
@@ -575,13 +738,17 @@ function trackTypographicQuote(
   text: string,
   index: number,
   closers: TypographicQuotationStack,
-  apostrophe: boolean,
+  flags: number,
 ): boolean {
   const character = text[index];
-  if (/[‘’]/.test(character) && apostrophe) {
+  if (/[‘’]/.test(character) && (flags & 1) !== 0) {
     return false;
   }
-  if (character === closers.at(-1)) {
+  // An existing English outer pair takes precedence over another ambiguous English opening.
+  if (
+    character === closers.at(-1) &&
+    !(character === '“' && !closers.hasEnglishQuote && (flags & 4) !== 0)
+  ) {
     closers.pop();
     return true;
   }
@@ -600,11 +767,11 @@ function hasInlineParenthetical(input: string, caseNeutral: boolean): boolean {
     return false;
   }
   const closing = ')]}>"\'”’»“'[openingIndex];
-  const apostrophes = /['‘]/.test(opening) ? singleQuoteApostrophes(input) : undefined;
+  const flags = /['‘]/.test(opening) ? quotationFlags(input) : undefined;
   const flag = opening === "'" ? 2 : 1;
   let depth = 1;
   for (let index = 1; index < input.length; index++) {
-    if (((apostrophes?.[index] ?? 0) & flag) !== 0 && /['‘’]/.test(input[index])) {
+    if (((flags?.[index] ?? 0) & flag) !== 0 && /['‘’]/.test(input[index])) {
       continue;
     }
     if (input[index] === opening && opening !== closing) {
@@ -677,7 +844,7 @@ export interface SentenceSegmentOptions {
 }
 
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
-function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8Array): string[] {
+function sentenceChunks(input: string, caseNeutral: boolean, flags: Uint8Array): string[] {
   const chunks: string[] = [];
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
@@ -690,7 +857,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
     insideQuotes = quotationState(input, index, insideQuotes);
-    trackTypographicQuote(input, index, typographicQuoteClosers, (apostrophes[index] & 1) !== 0);
+    trackTypographicQuote(input, index, typographicQuoteClosers, flags[index]);
     if (openingBracketReg.test(char)) {
       if (brackets.depth === 0) {
         brackets.standalone = start === -1;
@@ -884,15 +1051,25 @@ function sentenceEnd(
   const startsWithLetter = caseNeutral
     ? isNeutralEllipsisSentenceStart(input, end, next, suffix)
     : charIsUpperCase(nextCharacter);
-  const startsWithNumber =
-    /^\p{Number}$/u.test(nextCharacter) &&
-    !abbrvReg.test(gateSuffix) &&
-    !numericSentenceContinuationReg.test(input.slice(next));
+  const startsWithNumber = startsNumericSentence(input, next, gateSuffix, terminalEllipsis);
   // Bracketed omission markers remain part of the surrounding sentence.
   if (!(startsWithLetter || startsWithNumber) || /[[(]\.{2,10}$/.test(suffix)) {
     return -1;
   }
   return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
+}
+
+function startsNumericSentence(
+  input: string,
+  next: number,
+  suffix: string,
+  ellipsis: boolean,
+): boolean {
+  const numericStart = ellipsis
+    ? numericSentenceStartReg.test(input.slice(next, next + 6))
+    : /^\p{Number}$/u.test(characterAt(input, next));
+  const continuation = ellipsis ? ellipsisQuantityContinuationReg : numericSentenceContinuationReg;
+  return numericStart && !abbrvReg.test(suffix) && !continuation.test(input.slice(next));
 }
 
 function isNeutralEllipsisSentenceStart(

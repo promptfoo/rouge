@@ -1567,6 +1567,122 @@ describe('Utility Functions', () => {
         expect(ss('Wait...what?')).toEqual(['Wait...what?']);
       });
 
+      test.each(["'", '‘', '’'])(
+        'treats unpaired leading decade mark %s as an apostrophe',
+        (mark) => {
+          const first = `The ${mark}90s ended...`;
+          const input = `${first} A new era began.`;
+          expect(ss(input)).toEqual([first, 'A new era began.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'A new era began.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            'a new era began.',
+          ]);
+        },
+      );
+
+      test.each([
+        ["'", "'"],
+        ['‘', '’'],
+      ])('preserves paired %s%s decade quotations and internal elisions', (open, close) => {
+        for (const input of [
+          `${open}90s fashion... More followed.${close}`,
+          `She said ${open}Use the ${close}90s style... Keep it.${close}`,
+          `She said ${open}Use the ${close}em notes... Keep them.${close}`,
+        ]) {
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+        }
+      });
+
+      test.each(['$100', '£100', '€100', '-5', '+5', '−5', '-$100', '+£5', '$-100', '€+5'])(
+        'recognizes a prefixed numeric sentence after an ellipsis: %s',
+        (number) => {
+          for (const first of ['Alpha...', 'He said “Enough...”', '(Enough...)']) {
+            const second = `${number} was the result.`;
+            expect(ss(`${first} ${second}`)).toEqual([first, second]);
+            expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+            expect(segmentCaseNeutrally(`${first} ${second}`.toLowerCase())).toEqual([
+              first.toLowerCase(),
+              second.toLowerCase(),
+            ]);
+          }
+          const fragment = `Alpha... ${number} points.`;
+          expect(ss(fragment)).toEqual([fragment]);
+          expect(segmentCaseNeutrally(fragment)).toEqual([fragment]);
+        },
+      );
+
+      test.each(['Tis true.', 'Twas odd.'])(
+        'closes a quotation before the independent elision-shaped word %s',
+        (second) => {
+          const first = 'She said ‘Alpha...’';
+          const third = 'He said ‘Beta...’';
+          const input = `${first}${second} ${third} Next.`;
+          const expected = [first, second, third, 'Next.'];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+            expected.map((part) => part.toLowerCase()),
+          );
+        },
+      );
+
+      test.each(['90s fashion', 'twas odd', 'em notes'])(
+        'pairs nested elision-shaped quotes without borrowing required closers: %s',
+        (words) => {
+          const nested = `She said ‘Use ‘${words}... More.’ tail... Still inside.’ Next.`;
+          expect(ss(nested)).toEqual([nested]);
+          expect(segmentCaseNeutrally(nested)).toEqual([nested]);
+          expect(segmentCaseNeutrally(nested.toLowerCase())).toEqual([nested.toLowerCase()]);
+
+          const first = `The ‘${words} ended...`;
+          const second = 'A new era ‘began quietly’ here.';
+          expect(ss(`${first} ${second}`)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+
+          const inside = `She said ‘Use ‘${words} with ‘plain notes’ here... Stay inside.’`;
+          expect(ss(inside)).toEqual([inside]);
+          expect(segmentCaseNeutrally(inside)).toEqual([inside]);
+        },
+      );
+
+      test.each(['100 years have passed.', '100% of voters agreed.', '5 stars appeared.'])(
+        'separates complete numeric clauses after quoted ellipses: %s',
+        (second) => {
+          for (const first of ['He said “Enough...”', "He said 'Enough...'", '(Enough...)']) {
+            expect(ss(`${first} ${second}`)).toEqual([first, second]);
+            expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+          }
+          for (const fragment of ['100 years.', '100%.', '5 stars.']) {
+            const input = `He said “Enough...” ${fragment}`;
+            expect(ss(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input)).toEqual([input]);
+          }
+        },
+      );
+
+      test.each(['„Outer “Inner... ” tail... “', '“Outer „Inner... “ tail... ”'])(
+        'preserves paired English/German nesting through ellipses: %s',
+        (first) => {
+          const input = `${first} Next.`;
+          expect(ss(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+        },
+      );
+
+      test('closes German nesting before a later independent English quotation', () => {
+        const expected = ['“Outer „Inner... “ tail... ”', 'Next “More...”', 'Final.'];
+        const input = expected.join(' ');
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+      });
+
       test.each([
         ['Alpha... Beta.', ['Alpha...', 'Beta.']],
         ['Alpha... "Beta."', ['Alpha...', '"Beta."']],
@@ -1781,6 +1897,33 @@ describe('Utility Functions', () => {
         const expected = ['He said “Enough...”', 'Next.', 'She said “Later...”', 'Final.'];
         expect(ss(input)).toEqual(expected);
         expect(segmentCaseNeutrally(input)).toEqual(expected);
+      });
+
+      test.each([
+        'She said ‘The dogs’ owners quoted ‘something’ Alpha... Beta.’ Next.',
+        'She said ‘The dogs’ owners quoted ‘the cats’ owner’ Alpha... Beta.’ Next.',
+      ])('preserves outer quotation context through nested possessives: %s', (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      });
+
+      test('retains an ellipsis boundary after separate quotations ending in s', () => {
+        const first = 'She said ‘dogs’ and ‘cat’ Alpha...';
+        expect(ss(`${first} Beta.`)).toEqual([first, 'Beta.']);
+        expect(segmentCaseNeutrally(`${first} Beta.`)).toEqual([first, 'Beta.']);
+      });
+
+      test('confirms deeply nested possessive candidates without a depth cap', () => {
+        const input = `${'‘dogs’ '.repeat(512)}Alpha... Beta ${'end’ '.repeat(512)}`.trimEnd();
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      });
+
+      test('pairs deeply nested elision-shaped quotations without borrowing outer closers', () => {
+        const input = `${'‘90s '.repeat(128)}Alpha... Beta ${'end’ '.repeat(128)}`.trimEnd();
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
       });
 
       test('keeps an unmatched outer quote beyond 64 nested openers', () => {
