@@ -1625,6 +1625,15 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each([' ', '\n'])(
+      'closes Treebank quotations before a following quoted sentence across %j',
+      (separator) => {
+        const input = `He said \`\`Stop.''${separator}"Next."`;
+        expect(ss(input)).toEqual(["He said ``Stop.''", '"Next."']);
+        expect(segmentCaseNeutrally(input)).toEqual(["He said ``Stop.''", '"Next."']);
+      },
+    );
+
     test('recognizes Treebank closing quotes after bracketed sentences', () => {
       expect(ss("He said ``(Stop.)'' Next.")).toEqual(["He said ``(Stop.)''", 'Next.']);
       expect(ss("He said ''(Stop.)'' Next.")).toEqual(["He said ''(Stop.)''", 'Next.']);

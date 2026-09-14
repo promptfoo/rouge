@@ -838,6 +838,9 @@ function closingDelimiterEnd(input: string, index: number, closingQuotes: string
   let pendingQuotes = closingQuotes;
   while (end < input.length) {
     if (closingDelimiterReg.test(input[end]) || pendingQuotes.includes(input[end])) {
+      if (input.startsWith("''", end)) {
+        pendingQuotes = pendingQuotes.replace('"', '');
+      }
       if (pendingQuotes.includes(input[end])) {
         pendingQuotes = pendingQuotes.replace(input[end], '');
       }
