@@ -129,7 +129,7 @@ function smartApostrophes(input: string): Uint8Array {
         (!/[.!?]/.test(input[index - 1] ?? '') ||
           smartContractionReg.test(input.slice(index, index + 4)))) ||
       (/^\p{Number}$/u.test(characterAt(input, index + 1)) &&
-        !/[\p{Letter}\p{Mark}\p{Number}]$/u.test(input.slice(Math.max(0, index - 2), index))) ||
+        !/[\p{Letter}\p{Mark}\p{Number}.!?]$/u.test(input.slice(Math.max(0, index - 2), index))) ||
       input.slice(index - 2, index).toLowerCase() === '’n'
     ) {
       apostrophes[index] = 1;
@@ -442,7 +442,8 @@ export function sentenceSegment(
         } else if (
           nextChunk &&
           (chunk.startsWithTitleCase ||
-            chunk.hasOpenDelimiter ||
+            quoteSource.double ||
+            quoteSource.single ||
             (caseNeutral &&
               sentenceContinuationReg.test(nextChunk.trimStart()) &&
               /[.!?]["'”’\])}>]\s*[\r\n]/.test(suffix)))
@@ -763,6 +764,13 @@ function sentenceEnd(
     return index + 1;
   }
   const end = closingDelimiterEnd(input, index, quotes);
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  const abbreviation = abbrvReg.test(gateSuffix);
+  // Quoting an abbreviation does not make its period a sentence boundary.
+  if (input[index] === '.' && /[”’]/.test(input[end - 1]) && abbreviation) {
+    return -1;
+  }
   if (end < input.length && !/\s/.test(input[end])) {
     return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
   }
@@ -786,18 +794,8 @@ function sentenceEnd(
   if (next === input.length) {
     return end;
   }
-  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
-  const nextCharacter = characterAt(input, next);
-  const startsWithLetter = caseNeutral
-    ? isNeutralSentenceStart(input, end, next)
-    : charIsUpperCase(nextCharacter);
-  const startsWithNumber =
-    /^\p{Number}$/u.test(nextCharacter) &&
-    !abbrvReg.test(gateSuffix) &&
-    !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
-      input.slice(next),
-    );
+  const startsWithLetter = isLetterSentenceStart(input, end, next, caseNeutral);
+  const startsWithNumber = isNumberSentenceStart(input, next, abbreviation);
   if (!(startsWithLetter || startsWithNumber)) {
     return -1;
   }
@@ -806,7 +804,7 @@ function sentenceEnd(
   if (ellipseReg.test(suffix) && closedBrackets > 0) {
     return -1;
   }
-  return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
+  return abbreviation && excepReg.test(gateSuffix) ? -1 : end;
 }
 
 function countClosingBrackets(input: string, start: number, end: number): number {
@@ -901,7 +899,15 @@ function isUnspacedSentenceBoundary(
   );
 }
 
-function isNeutralSentenceStart(input: string, previousEnd: number, next: number): boolean {
+function isLetterSentenceStart(
+  input: string,
+  previousEnd: number,
+  next: number,
+  caseNeutral: boolean,
+): boolean {
+  if (!caseNeutral) {
+    return charIsUpperCase(characterAt(input, next));
+  }
   if (!isCasedCharacter(characterAt(input, next))) {
     return false;
   }
@@ -911,6 +917,16 @@ function isNeutralSentenceStart(input: string, previousEnd: number, next: number
     !sentenceContinuationReg.test(continuation) ||
     independentSentenceReg.test(continuation) ||
     /["“‘]/.test(input.slice(previousEnd, next))
+  );
+}
+
+function isNumberSentenceStart(input: string, next: number, abbreviation: boolean): boolean {
+  return (
+    /^\p{Number}$/u.test(characterAt(input, next)) &&
+    !abbreviation &&
+    !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
+      input.slice(next),
+    )
   );
 }
 

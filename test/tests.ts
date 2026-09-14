@@ -1531,6 +1531,41 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(["'Twas", "'99"])(
+      'preserves line breaks after the straight-apostrophe elision %s',
+      (elision) => {
+        const first = `${elision} etc.`;
+        const input = `${first}\nNext sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+      },
+    );
+
+    test.each([
+      'The “U.S.” Economy grew.',
+      'the firm “acme co.” grew.',
+      'The ‘U.S.’ Economy grew.',
+      'the firm ‘acme co.’ grew.',
+    ])('preserves a quoted abbreviation inside its sentence: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each(['2', '²', '𝟚'])(
+      'closes a punctuation-ending smart quotation before citation %s',
+      (citation) => {
+        const first = `The result was ‘Stop.’${citation}.`;
+        const input = `${first} We use Acme Co.\nNext.`;
+        const expected = [first, 'We use Acme Co.', 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
     test.each(['6', '𝟞'])('does not use a later %s-feet mark as a quotation closer', (feet) => {
       const first = 'The label ‘Success’ appears in Calif.';
       const second = `The board is ${feet}’ wide.`;
