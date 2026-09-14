@@ -404,11 +404,13 @@ class SentenceBuffer {
  *
  * Typographic double quotes use the existing straight-quote boundary heuristics,
  * including their ambiguity around quoted abbreviations and phrase boundaries.
- * Unpaired left-curly marks do not open a quotation span.
+ * Unpaired left-curly single marks do not open a quotation span; an unmatched
+ * double opening quote keeps its span open.
  *
  * Ambiguous smart-single quotes after s-ending words close their span unless a
  * later unambiguous closer confirms a possessive. This conservative rule can
  * split a quoted phrase containing both a possessive and an s-ending closer.
+ * An unrelated unmatched right mark can also be mistaken for that later closer.
  *
  * Adapted from Spencer Mountain's nlp_compromise library
  * found at https://github.com/spencermountain/nlp_compromise/

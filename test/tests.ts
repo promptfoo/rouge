@@ -1490,6 +1490,10 @@ describe('Utility Functions', () => {
     test.each([
       ['The students’ work continues.', ['The students’ work continues.']],
       ['John’s car.', ['John’s car.']],
+      [
+        'Next sentence. The children’s protest continued.',
+        ['Next sentence.', 'The children’s protest continued.'],
+      ],
       ['Next sentence. ‘Another.’', ['Next sentence.', '‘Another.’']],
     ] as const)(
       'does not borrow a later apostrophe from %s to close a quotation',
@@ -1586,6 +1590,13 @@ describe('Utility Functions', () => {
         expect(ss(`${first}\nNext sentence.`)).toEqual(expected.slice(0, 2));
       },
     );
+
+    test('retains the open span of an unmatched smart double quote across a line wrap', () => {
+      const input = 'he said “Use etc.\nNext sentence.';
+      const expected = ['he said “Use etc. Next sentence.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
 
     test('preserves a paired quotation starting with an abbreviated year', () => {
       const input = 'She said ‘99 etc.\nMore notes.’';
