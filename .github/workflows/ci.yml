@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [dependency-review, build]
     if: always()
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       checks: read
       statuses: read
@@ -69,4 +69,4 @@ jobs:
         uses: promptfoo/.github/.github/actions/ci-success@10fb60ee3167be1ffffaff46b0ad23ea66ab0d33 # main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          timeout-seconds: 300
+          timeout-seconds: 900
