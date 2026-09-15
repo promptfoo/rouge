@@ -10,11 +10,11 @@ describe('Core Functions', () => {
     const cands = ['police kill the gunman', 'the gunman kill police', 'the gunman police killed'];
 
     test('should throw RangeError for empty candidate', () => {
-      expect(() => s('', ref, undefined as any)).toThrow(RangeError);
+      expect(() => s('', ref)).toThrow(RangeError);
     });
 
     test('should throw RangeError for empty ref', () => {
-      expect(() => s(cands[0], '', undefined as any)).toThrow(RangeError);
+      expect(() => s(cands[0], '')).toThrow(RangeError);
     });
 
     test.each([
@@ -30,7 +30,7 @@ describe('Core Functions', () => {
     });
 
     test('should return 0 for summaries with zero overlap', () => {
-      expect(s('banana yoghurt', ref, undefined as any)).toBe(0);
+      expect(s('banana yoghurt', ref)).toBe(0);
     });
 
     test('should correctly compute ROUGE-S score for cand 1 with different opts', () => {
@@ -136,6 +136,21 @@ describe('Core Functions', () => {
           }
           if (module.exports.s(summary, summary, { maxSkip: 1 }) !== 1) {
             throw new Error('finite-window score changed');
+          }
+          process.stdout.write('ok');
+        `,
+        3000,
+      );
+    }, 10_000);
+
+    test('scores distinct long summaries through finite-window matching', () => {
+      expectBundledScriptToPass(
+        `
+          const tokens = Array.from({ length: 30001 }, (_, index) => \`token\${index}\`);
+          const candidate = tokens.join(' ');
+          const reference = [...tokens.slice(0, 15001), ...tokens.slice(15001).reverse()].join(' ');
+          if (module.exports.s(candidate, reference, { maxSkip: 1 }) !== 0.5) {
+            throw new Error('Finite-window partial score changed');
           }
           process.stdout.write('ok');
         `,

@@ -41,8 +41,8 @@ export default {
     },
   },
 
-  // The maximum amount of workers used to run your tests
-  maxWorkers: '50%',
+  // Keep resource-limit regressions from competing across suites.
+  maxWorkers: 1,
 
   // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped
   testPathIgnorePatterns: ['/node_modules/'],

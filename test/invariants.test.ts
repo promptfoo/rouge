@@ -10,7 +10,7 @@ const summaries = [
 test.each(summaries)('preserves case, whitespace, and content invariants: %s', (summary) => {
   for (const separator of [' ', '\t', '\n', '\r\n']) {
     const variant = summary.replaceAll(' ', separator);
-    expect(sentenceSegment(variant).join('').replace(/\s/g, '')).toBe(summary.replace(/\s/g, ''));
+    expect(sentenceSegment(variant).join(' ').replace(/\s+/g, ' ')).toBe(summary);
     for (const score of [n, s, l]) {
       expect(score(variant, summary)).toBe(1);
       expect(score(variant, summary.toLowerCase(), { caseSensitive: false })).toBe(1);
