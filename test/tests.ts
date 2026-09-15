@@ -4236,3 +4236,43 @@ test('preserves hostname casing and complete-label evidence', () => {
     'Next.',
   ]);
 });
+
+describe('Citation attachment stays within an explicit line', () => {
+  test.each(['\n', '\r\n', '\u2028', '\u2029'])(
+    'does not attach the following citation across %j',
+    (gap) => {
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`Alpha.${gap}[1] Beta.`, { caseNeutral })).toEqual([
+          'Alpha.',
+          '[1] Beta.',
+        ]);
+        expect(rouge.sentenceSegment(`Alpha.[1]${gap}[2] Beta.`, { caseNeutral })).toEqual([
+          'Alpha.[1]',
+          '[2] Beta.',
+        ]);
+        for (const separator of [',', ';']) {
+          expect(
+            rouge.sentenceSegment(`Alpha.[1] ${gap}${separator} [2] Beta.`, { caseNeutral }),
+          ).toEqual(['Alpha.[1]', `${separator} [2] Beta.`]);
+        }
+      }
+    },
+  );
+
+  test.each(['\u2028', '\u2029'])('does not parse a numeric citation group across %j', (gap) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`Alpha.[1,${gap}2] Beta.`, { caseNeutral })).toEqual([
+        'Alpha.',
+        `[1,${gap}2] Beta.`,
+      ]);
+    }
+  });
+
+  test.each([' ', '\t', '\u00a0'])('retains horizontal citation whitespace %j', (gap) => {
+    for (const caseNeutral of [false, true]) {
+      for (const first of [`Alpha.${gap}[1]`, `Alpha.[1]${gap}[2]`, `Alpha.[1,${gap}2]`]) {
+        expect(rouge.sentenceSegment(`${first} Beta.`, { caseNeutral })).toEqual([first, 'Beta.']);
+      }
+    }
+  });
+});

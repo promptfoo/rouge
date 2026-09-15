@@ -133,6 +133,8 @@ const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
 const hostnameLabels = 'com|org|net|edu|gov|mil|io|dev|app|co|uk|us|ca|ai|info|biz|me|tv';
 const hostnameLabelReg = new RegExp(`^(${hostnameLabels})(?=[/.\\s]|$)`, 'i');
 const hostnameTokenReg = new RegExp(`\\.(${hostnameLabels})(?=[/.\\s]|$)`, 'gi');
+const numericCitationReg =
+  /(?:\[\p{Number}+(?:[^\S\r\n\u2028\u2029]*[,;\p{Pd}][^\S\r\n\u2028\u2029]*\p{Number}+)*\]|\(\p{Number}+(?:[^\S\r\n\u2028\u2029]*[,;\p{Pd}][^\S\r\n\u2028\u2029]*\p{Number}+)*\)|\p{Number}+)/uy;
 const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
 const citedPlaceAcronymReg = new RegExp(
   `\\b(?:${ABBR_PLACES.filter((place) => place.includes('.'))
@@ -1199,7 +1201,7 @@ function citationEnd(
     quotationQuotes.flags,
   );
   let citationStart = delimiterEnd;
-  while (citationStart < input.length && /[^\S\r\n]/.test(input[citationStart])) {
+  while (citationStart < input.length && /[^\S\r\n\u2028\u2029]/.test(input[citationStart])) {
     citationStart++;
   }
   if (citationStart > delimiterEnd && input[citationStart] !== '[') {
@@ -1423,36 +1425,34 @@ function numericContinuationChecker(input: string): (index: number) => boolean {
 
 /** Separated bare numbers may start a sentence; brackets disambiguate citation chains. */
 function numericCitationEnd(input: string, start: number): number | undefined {
-  const expression =
-    /(?:\[\p{Number}+(?:[^\S\r\n]*[,;\p{Pd}][^\S\r\n]*\p{Number}+)*\]|\(\p{Number}+(?:[^\S\r\n]*[,;\p{Pd}][^\S\r\n]*\p{Number}+)*\)|\p{Number}+)/uy;
-  expression.lastIndex = start;
-  if (expression.exec(input) === null) {
+  numericCitationReg.lastIndex = start;
+  if (numericCitationReg.exec(input) === null) {
     return undefined;
   }
-  let end = expression.lastIndex;
+  let end = numericCitationReg.lastIndex;
   if (!/[[(]/.test(input[start])) {
     return end;
   }
   while (end < input.length) {
     let next = end;
-    while (next < input.length && /[^\S\r\n]/.test(input[next])) {
+    while (next < input.length && /[^\S\r\n\u2028\u2029]/.test(input[next])) {
       next++;
     }
     const punctuation = input[next] === ',' || input[next] === ';';
     if (punctuation) {
       next++;
-      while (next < input.length && /[^\S\r\n]/.test(input[next])) {
+      while (next < input.length && /[^\S\r\n\u2028\u2029]/.test(input[next])) {
         next++;
       }
     }
     if (!/[[(]/.test(input[next] ?? '') || (!punctuation && next > end && input[next] !== '[')) {
       break;
     }
-    expression.lastIndex = next;
-    if (expression.exec(input) === null) {
+    numericCitationReg.lastIndex = next;
+    if (numericCitationReg.exec(input) === null) {
       break;
     }
-    end = expression.lastIndex;
+    end = numericCitationReg.lastIndex;
   }
   return end;
 }
