@@ -3862,3 +3862,60 @@ test.each(['vs.', 'v.s.', 'etc.', 'Jan.', 'U.S.', 'Value.'])(
     }
   },
 );
+
+describe('literal backticks and normalized versus context', () => {
+  test.each(['vs.', 'v.s.'])(
+    'keeps angle operators inside single-backtick literals around %s',
+    (vs) => {
+      for (const caseNeutral of [false, true]) {
+        const input = `Use \`a < b\`. He wrote "${vs}" Alice replied > 3.`;
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          'Use `a < b`.',
+          `He wrote "${vs}"`,
+          'Alice replied > 3.',
+        ]);
+        const bracketed = `He noted <\`literal >\` and "${vs}" Examples followed> today.`;
+        expect(rouge.sentenceSegment(bracketed, { caseNeutral })).toEqual([bracketed]);
+      }
+    },
+  );
+
+  test.each([
+    'He noted <`literal `` >`` code` and "vs." Examples followed> today.',
+    'He noted <``literal >\'\' and "vs." Examples followed> today.',
+    'He noted <`literal `` >\'\' and "vs." Examples followed> today.',
+  ])('distinguishes isolated backticks from the existing Treebank pair in %s', (input) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test.each(['vs.', 'v.s.'])('uses the same normalized following context after %s', (vs) => {
+    for (const second of ['(It is clearer.)', '[It is clearer.]', '{It is clearer.}']) {
+      const first = `The abbreviation ${vs}`;
+      const third = 'Alice replied.';
+      const input = `${first} ${second} ${third}`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([first, second, third]);
+      }
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+        third.toLowerCase(),
+      ]);
+    }
+    const comparison = `Android ${vs} (Windows is common.) mattered.`;
+    expect(rouge.sentenceSegment(comparison)).toEqual([comparison]);
+    expect(rouge.sentenceSegment(comparison, { caseNeutral: true })).toEqual([comparison]);
+  });
+
+  test('scans repeated backtick literals without reusing literal angle operators', () => {
+    const first = `Use ${'`a < b` '.repeat(10_000).trimEnd()}.`;
+    const input = `${first} He wrote "vs." Alice replied > 3.`;
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([
+      first,
+      'He wrote "vs."',
+      'Alice replied > 3.',
+    ]);
+  }, 3000);
+});

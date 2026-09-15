@@ -564,6 +564,10 @@ function isAngleApostrophe(input: string, index: number): boolean {
   );
 }
 
+function isSingleBacktick(input: string, index: number): boolean {
+  return input[index] === '`' && input[index - 1] !== '`' && input[index + 1] !== '`';
+}
+
 function angleQuoteCloser(input: string, index: number): string | undefined {
   const character = input[index];
   if (
@@ -578,6 +582,9 @@ function angleQuoteCloser(input: string, index: number): string | undefined {
     (input.startsWith("''", index) && quotationState(input, index, false))
   ) {
     return "''";
+  }
+  if (character === '`') {
+    return isSingleBacktick(input, index) ? '`' : undefined;
   }
   if (angleQuoteClosers[character] !== undefined) {
     return angleQuoteClosers[character];
@@ -647,7 +654,11 @@ function angleQuotationEnd(
     }
     if (
       found === cached ||
-      !(isEscapedAngleQuote(input, found) || isAngleApostrophe(input, found))
+      !(
+        isEscapedAngleQuote(input, found) ||
+        isAngleApostrophe(input, found) ||
+        (closer === '`' && !isSingleBacktick(input, found))
+      )
     ) {
       positions[closer] = found;
       return hasLaterAngleElisionOpening(input, start, found) ? -1 : found + closer.length;
@@ -841,7 +852,10 @@ function keepsAbbreviationContext(
   return (
     end === index + 1 &&
     abbrvReg.test(gateSuffix) &&
-    !(/\bv\.?s\.$/i.test(gateSuffix) && !isAbbreviationException(gateSuffix, input.slice(end)))
+    !(
+      /\bv\.?s\.$/i.test(gateSuffix) &&
+      !isAbbreviationException(gateSuffix, input.slice(end).replace(/^[\s"'([{<]+/, ''))
+    )
   );
 }
 
