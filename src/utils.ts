@@ -307,13 +307,14 @@ export function sentenceSegment(
     return [];
   }
 
-  const list = segmentList(input, caseNeutral);
+  const text = input.replace(/\u0085/g, ' ');
+  const list = segmentList(text, caseNeutral);
   if (list !== undefined) {
     return list;
   }
 
   // Scan terminals before applying abbreviation and line-wrap rules.
-  const chunks = sentenceChunks(input.replace(/\u0085/g, ' '), caseNeutral);
+  const chunks = sentenceChunks(text, caseNeutral);
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
