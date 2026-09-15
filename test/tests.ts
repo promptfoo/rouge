@@ -1855,6 +1855,108 @@ describe('Utility Functions', () => {
         },
       );
 
+      test.each([
+        ['He paused... (Perhaps)—before answering.', ['He paused... (Perhaps)—before answering.']],
+        ['He paused... (Perhaps)–before answering.', ['He paused... (Perhaps)–before answering.']],
+        ['He paused... [Perhaps]—before answering.', ['He paused... [Perhaps]—before answering.']],
+        ['He paused... [Perhaps]–before answering.', ['He paused... [Perhaps]–before answering.']],
+        ['He paused... {Perhaps}—before answering.', ['He paused... {Perhaps}—before answering.']],
+        ['He paused... {Perhaps}–before answering.', ['He paused... {Perhaps}–before answering.']],
+        ['He paused... <Perhaps>—before answering.', ['He paused... <Perhaps>—before answering.']],
+        ['He paused... <Perhaps>–before answering.', ['He paused... <Perhaps>–before answering.']],
+        ['He paused... “Perhaps”—before answering.', ['He paused... “Perhaps”—before answering.']],
+        ['He paused... “Perhaps”–before answering.', ['He paused... “Perhaps”–before answering.']],
+        ['He paused... ‘Perhaps’—before answering.', ['He paused... ‘Perhaps’—before answering.']],
+        ['He paused... ‘Perhaps’–before answering.', ['He paused... ‘Perhaps’–before answering.']],
+        ['He paused... „Perhaps“—before answering.', ['He paused... „Perhaps“—before answering.']],
+        ['He paused... „Perhaps“–before answering.', ['He paused... „Perhaps“–before answering.']],
+        ["We noted ``Alpha... Beta'' today.", ["We noted ``Alpha... Beta'' today."]],
+        ["We noted ''Alpha... Beta'' today.", ["We noted ''Alpha... Beta'' today."]],
+        ["We noted '``Alpha... Beta'' tail' today.", ["We noted '``Alpha... Beta'' tail' today."]],
+        ["We noted ``'Alpha... Beta' tail'' today.", ["We noted ``'Alpha... Beta' tail'' today."]],
+        [
+          "We noted ``the dogs' Alpha... Beta'' today.",
+          ["We noted ``the dogs' Alpha... Beta'' today."],
+        ],
+        [
+          'Er sagte: „Sie rief “Halt...” “Weiter...” und ging.“',
+          ['Er sagte: „Sie rief “Halt...” “Weiter...” und ging.“'],
+        ],
+        ["We noted ``Alpha... Beta'' today. Next.", ["We noted ``Alpha... Beta'' today.", 'Next.']],
+        ['He paused... “Perhaps”—Alice replied.', ['He paused...', '“Perhaps”—Alice replied.']],
+      ])('preserves reviewed ellipsis quotation and dash context: %s', (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(ss(input, { caseNeutral: true })).toEqual(expected);
+        expect(ss(input.toLowerCase(), { caseNeutral: true })).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      });
+
+      test.each([
+        [
+          'He said “German „Maybe...“ finished.” today.',
+          ['He said “German „Maybe...“ finished.” today.'],
+        ],
+        ['He said „“Enough...” “Next...”“ Next.', ['He said „“Enough...” “Next...”“', 'Next.']],
+      ])('preserves mixed quotation closure after ellipses: %s', (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(ss(input, { caseNeutral: true })).toEqual(expected);
+        expect(ss(input.toLowerCase(), { caseNeutral: true })).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      });
+
+      test.each([
+        ['„Alpha...“Next.', ['„Alpha...“', 'Next.']],
+        ['He said "Done." “Next.”', ['He said "Done." “Next.”']],
+        ['He paused... “100 points arrived.”', ['He paused...', '“100 points arrived.”']],
+        [
+          'He paused... ([Perhaps) before answering.',
+          ['He paused...', '([Perhaps) before answering.'],
+        ],
+        ['Alpha... (100 points.)', ['Alpha... (100 points.)']],
+        ['Alpha... (5 years.)', ['Alpha... (5 years.)']],
+        ['Alpha... [100 points.]', ['Alpha... [100 points.]']],
+        ['Alpha... [5 years.]', ['Alpha... [5 years.]']],
+        ['Alpha... {100 points.}', ['Alpha... {100 points.}']],
+        ['Alpha... {5 years.}', ['Alpha... {5 years.}']],
+        ['Alpha... <100 points.>', ['Alpha... <100 points.>']],
+        ['Alpha... <5 years.>', ['Alpha... <5 years.>']],
+        ['Alpha... “100 points.”', ['Alpha... “100 points.”']],
+        ['Alpha... “5 years.”', ['Alpha... “5 years.”']],
+        ['Alpha... ‘100 points.’', ['Alpha... ‘100 points.’']],
+        ['Alpha... ‘5 years.’', ['Alpha... ‘5 years.’']],
+        ['Alpha... „100 points.“', ['Alpha... „100 points.“']],
+        ['Alpha... „5 years.“', ['Alpha... „5 years.“']],
+        ['Alpha... "100 points."', ['Alpha... "100 points."']],
+        ['Alpha... "5 years."', ['Alpha... "5 years."']],
+      ])('preserves reviewed delimiter and quantity precedence: %s', (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(ss(input, { caseNeutral: true })).toEqual(expected);
+        expect(ss(input.toLowerCase(), { caseNeutral: true })).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      });
+
+      test.each([
+        ["He said ``'Enough...''' Next.", ["He said ``'Enough...'''", 'Next.']],
+        ["He said '``Enough...''' Next.", ["He said '``Enough...'''", 'Next.']],
+        [
+          "We noted ``'Alpha... Beta''' and left... Next.",
+          ["We noted ``'Alpha... Beta''' and left...", 'Next.'],
+        ],
+        [
+          "We noted '``Alpha... Beta''' and left... Next.",
+          ["We noted '``Alpha... Beta''' and left...", 'Next.'],
+        ],
+      ])('releases both nested Treebank orders after triple closers: %s', (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(ss(input, { caseNeutral: true })).toEqual(expected);
+        expect(ss(input.toLowerCase(), { caseNeutral: true })).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      });
+
       test('retains Unicode case-folded abbreviation evidence before numeric starts', () => {
         for (const abbreviation of ['Kan', 'Kan', 'kan']) {
           const input = `He said "${abbreviation}." 2 people remained.`;
