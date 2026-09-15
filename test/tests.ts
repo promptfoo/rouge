@@ -1358,6 +1358,72 @@ describe('Utility Functions', () => {
     });
 
     test.each([
+      '0.foo',
+      '0.05abc',
+      '0.05𝔞',
+      '0.05́',
+      '0.05_x',
+      '0.05.foo',
+      '0.05.3',
+      '0.05e',
+      '0.05e-',
+      '0.05e+foo',
+      '0.05e3foo',
+      '0.05ms',
+      '0.05eV',
+    ])('retains angle context around the identifier operand %s', (operand) => {
+      const input = `p < ${operand} Alpha.[1] Beta.>`;
+      expect(ss(input)).toEqual([input]);
+      // Neutral ordinary scanning already separates the earlier letter-led dotted component.
+      const expected = operand.endsWith('.foo')
+        ? [`p < ${operand.slice(0, -3)}`, 'foo Alpha.[1] Beta.>']
+        : [input];
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each([
+      '0.05',
+      '0',
+      '.05',
+      '123',
+      '0.05e3',
+      '0.05e-3',
+      '0.05E+3',
+      '.05e2',
+      '1e-5',
+      '𝟎.𝟎𝟓',
+      '１２.５',
+      'Ⅳ',
+      '0.05%',
+    ])('retains numeric comparison %s before a cited terminal', (operand) => {
+      for (const first of [
+        `The result was significant (p < ${operand}).[1]`,
+        `p < ${operand}.[1]`,
+      ]) {
+        const input = `${first} Next sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          'next sentence.',
+        ]);
+      }
+    });
+
+    test('keeps numeric comparison recognition independent across repeated calls', () => {
+      const valid = 'The result was significant (p < 0.05e-3).[1]';
+      const invalid = 'p < 0.05abc Alpha.[1] Beta.>';
+      for (let attempt = 0; attempt < 4; attempt++) {
+        expect(ss(`${valid} Next.`)).toEqual([valid, 'Next.']);
+        expect(ss(invalid)).toEqual([invalid]);
+        expect(segmentCaseNeutrally(`${valid} Next.`)).toEqual([valid, 'Next.']);
+      }
+    });
+
+    test.each([
       ['"', '"'],
       ["'", "'"],
       ['“', '”'],

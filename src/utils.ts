@@ -1752,6 +1752,9 @@ function isCitationContext(
   );
 }
 
+const numericComparisonOperandReg =
+  /(?:\p{Number}+(?:\.\p{Number}+)?|\.\p{Number}+)(?:[eE][+-]?\p{Number}+)?(?![\p{Letter}\p{Mark}\p{Number}_]|\.[\p{Letter}\p{Mark}\p{Number}_])/uy;
+
 /** A numeric comparison needs operands; preserve literal and quoted angle wrappers. */
 function isNumericComparisonAngle(input: string, index: number): boolean {
   let left = index - 1;
@@ -1774,12 +1777,8 @@ function isNumericComparisonAngle(input: string, index: number): boolean {
     /^(?:\p{Letter}\p{Mark}*|\p{Number}+(?:\.\p{Number}+)?)$/u.test(
       input.slice(operandStart + 1, left + 1),
     );
-  const following = characterAt(input, right);
-  return (
-    operand &&
-    (/^\p{Number}$/u.test(following) ||
-      (following === '.' && /^\p{Number}$/u.test(characterAt(input, right + 1))))
-  );
+  numericComparisonOperandReg.lastIndex = right;
+  return operand && numericComparisonOperandReg.test(input);
 }
 
 function countClosingBrackets(
