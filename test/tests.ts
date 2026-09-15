@@ -9050,6 +9050,55 @@ describe('Citation attachment stays within an explicit line', () => {
   });
 });
 
+describe('Bare citation initial exclusions', () => {
+  test.each([
+    ['Á', 'A\u0301'],
+    ['Å', 'A\u030a'],
+    ['ά', 'α\u0301'],
+  ])('retains composed %s and decomposed %s bare initial components', (composed, decomposed) => {
+    for (const initial of [composed, decomposed]) {
+      for (const prefix of ['', 'Use ']) {
+        const input = `${prefix}${initial}.1 Next.`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        }
+      }
+    }
+  });
+
+  test('reads the complete combining-mark run after an astral initial', () => {
+    const initial = `𝒜${'\u0301'.repeat(16_384)}`;
+    const input = `Use ${initial}.1 Next.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test.each(['AB', 'A\u0301B', 'Cafe\u0301', '\u0345', 'prefix:A\u0301'])(
+    'retains neutral bare-citation precedence for the noninitial %s',
+    (word) => {
+      const first = `${word}.1`;
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral: true })).toEqual([
+        first,
+        'Next.',
+      ]);
+    },
+  );
+
+  test('preserves structural identifier and explicit grouped-citation controls', () => {
+    for (const caseNeutral of [false, true]) {
+      for (const first of ['A\u0301_', 'A\u03012', 'Section A\u0301']) {
+        const input = `${first}.1 Next.`;
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+      expect(rouge.sentenceSegment('A\u0301.[1] Next.', { caseNeutral })).toEqual([
+        'A\u0301.[1]',
+        'Next.',
+      ]);
+    }
+  });
+});
+
 describe('Citation state across quotation lookahead and partial closers', () => {
   test.each(['[1]', '(1)', '[¹]'])(
     'checks the final period of a four-dot citation %s during question lookahead',

@@ -3435,7 +3435,6 @@ function isCitationContext(
   }
 
   const previous = Array.from(input.slice(Math.max(0, index - 2), index)).at(-1) ?? '';
-  const previousStart = index - previous.length;
   const tokenStart = citationIdentifierStart(input, index);
   const precedingToken = input.slice(tokenStart, index);
   // Letter-only identifiers and cited words are indistinguishable after case folding.
@@ -3452,8 +3451,8 @@ function isCitationContext(
     !compactDate &&
     !(
       input[index] === '.' &&
-      /^\p{Letter}$/u.test(previous) &&
-      (previousStart === 0 || /\s/.test(input[previousStart - 1]))
+      /^\p{Letter}\p{Mark}*$/u.test(precedingToken) &&
+      (tokenStart === 0 || /\s/.test(input[tokenStart - 1]))
     )
   );
 }
