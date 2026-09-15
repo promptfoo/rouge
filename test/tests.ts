@@ -4170,3 +4170,69 @@ test('retains numeric hostname components inside right-double quotation marks', 
     }
   }
 });
+
+describe('Citation line separators and numeric prerequisites', () => {
+  test.each(['\n', '\r\n', '\u2028', '\u2029'])(
+    'honors explicit line separator %j after a complete citation',
+    (gap) => {
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`Alpha.[1]${gap}beta.`, { caseNeutral })).toEqual([
+          'Alpha.[1]',
+          'beta.',
+        ]);
+        for (const prefix of ['Dr.', 'Wait...']) {
+          const input = `${prefix}[1]${gap}smith.`;
+          const expected = input.replace(/[\r\n]+/g, ' ');
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([expected]);
+        }
+      }
+    },
+  );
+
+  test.each(['1', '١', '𝟙', 'Ⅳ', '½'])(
+    'retains citation inference for Unicode Number %s',
+    (number) => {
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`Alpha.[${number}] Next.`, { caseNeutral })).toEqual([
+          `Alpha.[${number}]`,
+          'Next.',
+        ]);
+      }
+    },
+  );
+});
+
+describe('Bare hostname numeric components and explicit citations', () => {
+  test.each(['com', 'COM', 'org', 'co.uk', 'io'])(
+    'retains numeric hostname components after the existing label %s',
+    (label) => {
+      for (const caseNeutral of [false, true]) {
+        const input = `See example.${label}.1 Next.`;
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        expect(rouge.sentenceSegment(`See example.${label}.[1] Next.`, { caseNeutral })).toEqual([
+          `See example.${label}.[1]`,
+          'Next.',
+        ]);
+      }
+    },
+  );
+});
+
+test('preserves hostname casing and complete-label evidence', () => {
+  expect(rouge.sentenceSegment('See example.Com.1 Next.')).toEqual([
+    'See example.',
+    'Com.1',
+    'Next.',
+  ]);
+  expect(rouge.sentenceSegment('See example.Com.1 Next.', { caseNeutral: true })).toEqual([
+    'See example.Com.1 Next.',
+  ]);
+  expect(rouge.sentenceSegment('See example.Com.org.1 Next.')).toEqual([
+    'See example.',
+    'Com.org.1 Next.',
+  ]);
+  expect(rouge.sentenceSegment('See example.company.1 Next.')).toEqual([
+    'See example.company.1',
+    'Next.',
+  ]);
+});

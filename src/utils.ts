@@ -130,6 +130,9 @@ const closingBracketReg = /[\])}>]/;
 const listMarkerReg =
   /(?:^|\s)(?:(?:[•⁃]\s*)?\d+(?:\.\)|[.)])|\p{Cased}\.)(?=\s+["'([{<]*\p{Cased})/gu;
 const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
+const hostnameLabels = 'com|org|net|edu|gov|mil|io|dev|app|co|uk|us|ca|ai|info|biz|me|tv';
+const hostnameLabelReg = new RegExp(`^(${hostnameLabels})(?=[/.\\s]|$)`, 'i');
+const hostnameTokenReg = new RegExp(`\\.(${hostnameLabels})(?=[/.\\s]|$)`, 'gi');
 const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
 const citedPlaceAcronymReg = new RegExp(
   `\\b(?:${ABBR_PLACES.filter((place) => place.includes('.'))
@@ -528,15 +531,8 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   let start = -1;
   let insideQuotes = false;
   const brackets = { depth: 0, standalone: false };
-  const { apostrophes, overflowed } = citationApostrophes(input);
-  const citationQuotes: CitationQuotationState = {
-    closers: [],
-    overflowed,
-    doubleDepth: -1,
-    pairThrough: 0,
-    flags: apostrophes,
-  };
-  const isPathOrAddress = pathOrAddressTokenChecker(input);
+  const citationQuotes = citationQuotationState(input);
+  const isPathOrAddress = pathOrAddressTokenChecker(input, caseNeutral);
   const hasIdentifierEvidence = citationIdentifierEvidenceChecker(input);
   const isNumericContinuation = numericContinuationChecker(input);
   let citationThrough = 0;
@@ -549,7 +545,6 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       input,
       index,
       citationQuotes,
-      apostrophes,
       index < citationThrough,
       previousQuotes,
       insideQuotes,
@@ -909,16 +904,25 @@ interface CitationQuotationState {
   flags: Uint8Array;
 }
 
+/** Numeric citations cannot exist in input without a Unicode Number character. */
+function citationQuotationState(input: string): CitationQuotationState | undefined {
+  if (!/\p{Number}/u.test(input)) {
+    return undefined;
+  }
+  const { apostrophes, overflowed } = citationApostrophes(input);
+  return { closers: [], overflowed, doubleDepth: -1, pairThrough: 0, flags: apostrophes };
+}
+
 function updateCitationQuotationState(
   input: string,
   index: number,
-  quotes: CitationQuotationState,
-  apostrophes: Uint8Array,
+  quotes: CitationQuotationState | undefined,
   confirmedClosing: boolean,
   previousQuotes: boolean,
   insideQuotes: boolean,
 ): void {
   if (
+    quotes === undefined ||
     quotes.overflowed ||
     updateCitationDoubleQuote(input, index, quotes, previousQuotes, insideQuotes)
   ) {
@@ -927,10 +931,10 @@ function updateCitationQuotationState(
   const character = input[index];
   const closers = quotes.closers;
   const apostropheFlag = character === "'" ? 2 : 1;
-  if (/['‘’]/.test(character) && (apostrophes[index] & apostropheFlag) !== 0) {
+  if (/['‘’]/.test(character) && (quotes.flags[index] & apostropheFlag) !== 0) {
     return;
   }
-  if (/[“‘]/.test(character) && isSharedCitationCloser(character, closers, apostrophes[index])) {
+  if (/[“‘]/.test(character) && isSharedCitationCloser(character, closers, quotes.flags[index])) {
     closers.pop();
     return;
   }
@@ -1168,15 +1172,15 @@ function citationEnd(
   caseNeutral: boolean,
   legacyInsideQuotes: boolean,
   brackets: { depth: number; standalone: boolean },
-  quotationQuotes: CitationQuotationState,
+  quotationQuotes: CitationQuotationState | undefined,
   isPathOrAddress: (index: number) => boolean,
   isNumericContinuation: (index: number) => boolean,
   hasIdentifierEvidence: (index: number) => boolean,
 ): number | undefined {
-  const insideQuotes = legacyInsideQuotes || quotationQuotes.doubleDepth >= 0;
-  if (quotationQuotes.overflowed) {
+  if (quotationQuotes?.overflowed !== false) {
     return undefined;
   }
+  const insideQuotes = legacyInsideQuotes || quotationQuotes.doubleDepth >= 0;
   const nextCharacter = characterAt(input, index + 1);
   if (!/^[\s\p{Number}[()\]}>"'“‘”’»›」』]$/u.test(nextCharacter)) {
     return undefined;
@@ -1329,7 +1333,10 @@ function isCitationSentenceStart(
   if (!caseNeutral && isCitedInitialContinuation(input, index, end, next)) {
     return false;
   }
-  if (!(ellipsis || abbrvReg.test(gateSuffix)) && breakReg.test(input.slice(end, next))) {
+  if (
+    !(ellipsis || abbrvReg.test(gateSuffix)) &&
+    /[\r\n\u2028\u2029]/.test(input.slice(end, next))
+  ) {
     return true;
   }
 
@@ -1578,7 +1585,10 @@ function closesCitationQuotations(
 }
 
 /** Classify each whitespace-delimited token once across monotone citation lookaheads. */
-function pathOrAddressTokenChecker(input: string): (index: number) => boolean {
+function pathOrAddressTokenChecker(
+  input: string,
+  caseNeutral: boolean,
+): (index: number) => boolean {
   let end = 0;
   let pathOrAddress = false;
   return (index) => {
@@ -1594,9 +1604,24 @@ function pathOrAddressTokenChecker(input: string): (index: number) => boolean {
       end++;
     }
     const token = input.slice(start, end).replace(/^["'“‘”«‹„‚「『([{<]+/, '');
-    pathOrAddress = /[\\/]/.test(token) || token.includes('@') || /^www\./i.test(token);
+    pathOrAddress =
+      /[\\/]/.test(token) ||
+      token.includes('@') ||
+      /^www\./i.test(token) ||
+      hasDottedHostname(token, caseNeutral);
     return pathOrAddress;
   };
+}
+
+/** Search each token once with the existing hostname vocabulary and casing policy. */
+function hasDottedHostname(token: string, caseNeutral: boolean): boolean {
+  for (const match of token.matchAll(hostnameTokenReg)) {
+    const label = match[1];
+    if (caseNeutral || label === label.toLowerCase() || label === label.toUpperCase()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Carry digit/underscore evidence across dotted components without prefix rescans. */
@@ -1741,9 +1766,7 @@ function isUnspacedSentenceBoundary(
   const following = input.slice(next);
   const insideAddress =
     precedingToken.includes('@') && !/@[^\s.]+(?:\.[^\s.]+)+\.$/u.test(precedingToken);
-  const hostnameLabel = following.match(
-    /^(com|org|net|edu|gov|mil|io|dev|app|co|uk|us|ca|ai|info|biz|me|tv)(?=[/.\s]|$)/i,
-  )?.[0];
+  const hostnameLabel = following.match(hostnameLabelReg)?.[0];
   const insideHostname =
     insideUrl ||
     (hostnameLabel !== undefined &&
