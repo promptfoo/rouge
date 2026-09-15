@@ -1,0 +1,38 @@
+name: Validate commit
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      checks: read
+    steps:
+      - name: Wait for exact-commit CI and security checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ inputs.sha }}
+        run: |
+          required=("build (18)" "build (20)" "build (22)" "build (24)" "Analyze (actions)" "Analyze (javascript-typescript)")
+          while true; do
+            runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$TARGET_SHA/check-runs?per_page=100")"
+            pending=0
+            for name in "${required[@]}"; do
+              result="$(jq -r --arg name "$name" '[.check_runs[] | select(.app.slug == "github-actions" and .name == $name)][0] | "\(.status // "missing") \(.conclusion // "")"' <<< "$runs")"
+              case "$result" in
+                'completed success') ;;
+                completed*) echo "$name failed: $result"; exit 1 ;;
+                *) pending=1 ;;
+              esac
+            done
+            if [ "$pending" -eq 0 ]; then
+              break
+            fi
+            sleep 10
+          done
