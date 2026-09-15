@@ -757,7 +757,10 @@ export function sentenceSegment(
           // Retain a boundary for other entities and unterminated final fragments.
           acc.push(chunk.text());
         }
-      } else if ((chunks[idx + 1] || chunks[idx + 2]) && ellipseReg.test(suffix)) {
+      } else if (
+        (chunks[idx + 1] || (chunks[idx + 2] && /\.{3,4}$/.test(suffix))) &&
+        ellipseReg.test(suffix)
+      ) {
         // Catch mid-sentence ellipses (and their derivatives) and merge them
         const nextChunk = chunks[idx + 1];
         const nextSentence = nextChunk.trim() || chunks[idx + 2] || '';
@@ -953,7 +956,10 @@ function indexAsideMatches(input: string, flags: Uint8Array): Uint32Array {
     const character = input[index];
     const openingKind = '([{<'.indexOf(character);
     const closingKind = ')]}>'.indexOf(character);
-    if (openingKind !== -1) {
+    if (
+      openingKind !== -1 &&
+      (character !== '<' || /^\p{Letter}$/u.test(characterAt(input, index + 1)))
+    ) {
       brackets.push(index);
     } else if (closingKind !== -1) {
       const opening = brackets.at(brackets.length - 1);
@@ -1171,6 +1177,14 @@ function closingDelimiterEnd(
       end++;
       continue;
     }
+    if (
+      input[end] === '"' &&
+      !quotePending &&
+      remaining === 0 &&
+      (typographicQuoteClosers?.length ?? 0) > 0
+    ) {
+      break;
+    }
     if (closingDelimiterReg.test(input[end])) {
       quotePending &&= input[end] !== '"';
       end++;
@@ -1178,10 +1192,7 @@ function closingDelimiterEnd(
     }
 
     // Only consume a spaced quote when it closes an existing quotation.
-    let next = end;
-    while (next < input.length && /\s/.test(input[next])) {
-      next++;
-    }
+    const next = skipWhitespace(input, end);
     if (
       next > end &&
       next < input.length &&
@@ -1201,6 +1212,14 @@ function closingDelimiterEnd(
     break;
   }
   return end > index + 1 && remaining > 0 ? -1 : end;
+}
+
+function skipWhitespace(input: string, index: number): number {
+  let end = index;
+  while (end < input.length && /\s/.test(input[end])) {
+    end++;
+  }
+  return end;
 }
 
 /** Include closing delimiters, or return -1 when the sentence continues. */
@@ -1252,7 +1271,9 @@ function sentenceEnd(
   ) {
     return -1;
   }
-  if (end < input.length && !/\s/.test(input[end])) {
+  const adjacentQuotation =
+    terminalEllipsis && typographicQuoteClosers.length > 0 && input[end] === '"';
+  if (end < input.length && !/\s/.test(input[end]) && !adjacentQuotation) {
     return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
   }
   if (end === index + 1) {

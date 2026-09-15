@@ -1957,6 +1957,60 @@ describe('Utility Functions', () => {
         );
       });
 
+      test.each([
+        ['Alpha..Beta.', ['Alpha..', 'Beta.']],
+        ['Alpha.. Beta.', ['Alpha.. Beta.']],
+        ['Alpha...Beta.', ['Alpha...', 'Beta.']],
+        ['Alpha....Beta.', ['Alpha....', 'Beta.']],
+        ['Alpha.....Beta.', ['Alpha.....', 'Beta.']],
+      ])('preserves the period-run boundary policy in %s', (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(ss(input, { caseNeutral: true })).toEqual(expected);
+        expect(ss(input.toLowerCase(), { caseNeutral: true })).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      });
+
+      test.each([
+        ['He paused... < 5 > before answering.', ['He paused...', '< 5 > before answering.']],
+        ['He paused... <5> before answering.', ['He paused...', '<5> before answering.']],
+        ['He paused... <Perhaps> before answering.', ['He paused... <Perhaps> before answering.']],
+        ['He paused... <Élan> before answering.', ['He paused... <Élan> before answering.']],
+        ['He paused... (< 5 >) before answering.', ['He paused... (< 5 >) before answering.']],
+        ['He paused... <100 points.>', ['He paused... <100 points.>']],
+        ['He said Done." Next.', ['He said Done."', 'Next.']],
+        ['He said "Done." Next.', ['He said "Done."', 'Next.']],
+      ])('preserves angle-aside and ordinary quote policies: %s', (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(ss(input, { caseNeutral: true })).toEqual(expected);
+        expect(ss(input.toLowerCase(), { caseNeutral: true })).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      });
+
+      test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['„', '“'],
+        ['«', '»'],
+      ])(
+        'keeps an adjacent opening ASCII quote after completed %s%s ellipses',
+        (opening, closing) => {
+          const first = `He said ${opening}Enough...${closing}`;
+          const second = '"Next..."';
+          const input = `${first}${second} Final.`;
+          const expected = [first, second, 'Final.'];
+          expect(ss(input)).toEqual(expected);
+          expect(ss(input, { caseNeutral: true })).toEqual(expected);
+          expect(ss(input.toLowerCase(), { caseNeutral: true })).toEqual(
+            expected.map((sentence) => sentence.toLowerCase()),
+          );
+          const nested = `He said ${opening}"Enough..."${closing}`;
+          expect(ss(`${nested} Next.`)).toEqual([nested, 'Next.']);
+          expect(ss(`${nested} Next.`, { caseNeutral: true })).toEqual([nested, 'Next.']);
+        },
+      );
+
       test('retains Unicode case-folded abbreviation evidence before numeric starts', () => {
         for (const abbreviation of ['Kan', 'Kan', 'kan']) {
           const input = `He said "${abbreviation}." 2 people remained.`;
