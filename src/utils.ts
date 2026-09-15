@@ -4028,6 +4028,31 @@ function isQuestionAbbreviation(
         matchesAcronymSuffix(suffix, suffix.match(/\S+$/)?.[0] ?? '', true);
 }
 
+function questionTokenChecker(
+  input: string,
+  caseNeutral: boolean,
+): (terminal: SentenceTerminal) => boolean {
+  const hasUrlPrefix = urlPrefixChecker(input);
+  const hasFollowingAt = followingAtChecker(input);
+  return (terminal) => {
+    const following = characterAt(input, terminal.index + 1);
+    const insideUrl = hasUrlPrefix(terminal.index + 1);
+    return (
+      (terminal[0].length === 1 && insideUrl && /^[^\s"'`”’“»›\])}>]$/u.test(following)) ||
+      ((/^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following) ||
+        (terminal[0] === '.' && !terminal.enclosed && openingBracketReg.test(following))) &&
+        !isUnspacedSentenceBoundary(
+          input,
+          terminal.index,
+          terminal.index + 1,
+          caseNeutral,
+          insideUrl,
+          hasFollowingAt,
+        ))
+    );
+  };
+}
+
 /** Reuse the next real terminal across monotone quotation-boundary lookaheads. */
 function questionTerminalChecker(
   input: string,
@@ -4039,8 +4064,7 @@ function questionTerminalChecker(
 ): (start: number, boundaryEnd: number) => boolean {
   const questionCitations = citationQuestionChecker(input, caseNeutral, citationState);
   const nextTerminal = unquotedTerminalScanner(input, pairs, caseNeutral);
-  const hasUrlPrefix = urlPrefixChecker(input);
-  const hasFollowingAt = followingAtChecker(input);
+  const continuesToken = questionTokenChecker(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
   let through = -1;
   let question = false;
@@ -4074,20 +4098,7 @@ function questionTerminalChecker(
         question = terminal[0] === '?';
         break;
       }
-      const following = characterAt(input, terminal.index + 1);
-      const insideUrl = hasUrlPrefix(terminal.index + 1);
-      if (
-        (terminal[0].length === 1 && insideUrl && /^[^\s"'`”’“»›\])}>]$/u.test(following)) ||
-        (/^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following) &&
-          !isUnspacedSentenceBoundary(
-            input,
-            terminal.index,
-            terminal.index + 1,
-            caseNeutral,
-            insideUrl,
-            hasFollowingAt,
-          ))
-      ) {
+      if (continuesToken(terminal)) {
         terminal = nextTerminal(terminal.index + terminal[0].length, argumentStart);
         continue;
       }
