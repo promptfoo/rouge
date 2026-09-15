@@ -2204,6 +2204,36 @@ describe('Utility Functions', () => {
       expect(rouge.treeBankTokenize(first)).toEqual([open, '``', 'Stop.', "''", close]);
     });
 
+    test.each(['http://', 'https://', 'www.'])(
+      'ignores query and path punctuation in scoped questions with %s',
+      (prefix) => {
+        const first = 'She asked “Acme Co.';
+        for (const punctuation of ['?', '!']) {
+          const second = `Which ${prefix}example.com/a${punctuation}b was it?”`;
+          const input = `${first}\n${second}`;
+          expect(ss(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+          ]);
+          const relative = `She described “Acme Co.\nwhose link is ${prefix}example.com/a${punctuation}b and stays here.”`;
+          expect(ss(relative)).toEqual([relative.replaceAll('\n', ' ')]);
+          expect(segmentCaseNeutrally(relative)).toEqual([relative.replaceAll('\n', ' ')]);
+          expect(segmentCaseNeutrally(relative.toLowerCase())).toEqual([
+            relative.toLowerCase().replaceAll('\n', ' '),
+          ]);
+        }
+      },
+    );
+
+    test('retains an actual question after a long punctuated URL', () => {
+      const first = 'She asked “Acme Co.';
+      const second = `Which https://example.com/${'path!query?'.repeat(20_000)}end was it?”`;
+      expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+    }, 5000);
+
     test.each([
       'Which example.com?',
       'Which https://example.xyz?',
@@ -2714,6 +2744,61 @@ describe('Utility Functions', () => {
           first.toLowerCase(),
           '‘next.’',
         ]);
+      },
+    );
+
+    test.each([
+      ['[', ']'],
+      ['(', ')'],
+    ])('retains a bracketed modifier citation within %s%s', (left, right) => {
+      for (const [open, close] of [
+        ['“', '”'],
+        ['‘', '’'],
+      ]) {
+        for (const marker of ['ᵃ', 'ᵇ', '\u{107a5}']) {
+          const first = `The result was ${open}Stop?${close}${left}${marker}${right}.`;
+          const expected = [first, 'Next.'];
+          expect(ss(`${first} Next.`)).toEqual(expected);
+          expect(segmentCaseNeutrally(`${first} Next.`)).toEqual(expected);
+          expect(segmentCaseNeutrally(`${first} Next.`.toLowerCase())).toEqual(
+            expected.map((sentence) => sentence.toLowerCase()),
+          );
+        }
+      }
+    });
+
+    test.each(['[ᵃword]', '[a]', '[ᵃ)', '(ᵃ]'])(
+      'retains ordinary delimited text instead of treating %s as a modifier citation',
+      (tail) => {
+        const input = `“Stop?”${tail}. Next.`;
+        expect(ss(input)).toEqual([`“Stop?”${tail}.`, 'Next.']);
+        expect(segmentCaseNeutrally(input)).toEqual(['“Stop?”', `${tail}.`, 'Next.']);
+      },
+    );
+
+    test('requires an open ASCII single quotation before attaching an inner citation', () => {
+      const input = "‘He said Stop?'2 people agreed.’";
+      expect(ss(input)).toEqual(["‘He said Stop?'", '2 people agreed.’']);
+      expect(segmentCaseNeutrally(input)).toEqual(["‘He said Stop?'", '2 people agreed.’']);
+    });
+
+    test.each(['2', '²', '𝟚', 'ᵃ', '\u{107a5}'])(
+      'attaches the citation %s after an inner ASCII single closer',
+      (marker) => {
+        for (const [open, close] of [
+          ['“', '”'],
+          ['‘', '’'],
+        ]) {
+          const first = `${open}He said 'Stop?'${marker}${close}`;
+          expect(ss(first)).toEqual([first]);
+          expect(segmentCaseNeutrally(first)).toEqual([first]);
+          expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(`${first} Next.`.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            'next.',
+          ]);
+        }
       },
     );
 

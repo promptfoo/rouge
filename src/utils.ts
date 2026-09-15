@@ -312,9 +312,20 @@ function questionStartChecker(
   caseNeutral: boolean,
 ): (offset: number) => boolean {
   let checker: QuestionTerminalChecker | undefined;
+  let previous = -1;
+  let contentStart = 0;
+  let scoped = false;
   return (offset) => {
+    if (offset !== previous) {
+      previous = offset;
+      contentStart = questionContentStart(source.input, offset);
+      scoped = scopedQuestionStartReg.test(source.input.slice(contentStart, contentStart + 6));
+    }
+    if (!scoped) {
+      return false;
+    }
     checker ??= new QuestionTerminalChecker(source, caseNeutral);
-    return checker.questionTerminal(offset) >= 0;
+    return checker.questionTerminal(contentStart) >= 0;
   };
 }
 
@@ -412,7 +423,7 @@ class QuestionTerminalChecker {
         }
         tokens.lastIndex = endpoint;
       } else if (
-        !(token[0] === '.' && (apostrophes[token.index] & 2) !== 0) &&
+        (apostrophes[token.index] & 2) === 0 &&
         (/[.!?]/.test(token[0]) || endpoint < 0 || token[0] === '”')
       ) {
         scope.through = token.index;
@@ -519,13 +530,17 @@ function questionQuotationPairs(source: QuestionSource, caseNeutral: boolean): I
   const ellipses = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
   const hasUrlPrefix = urlPrefixChecker(input);
-  for (const period of input.matchAll(/\./g)) {
+  for (const terminal of input.matchAll(/[.!?]/g)) {
+    const index = terminal.index;
+    const insideUrl = hasUrlPrefix(index);
     if (
-      isProtectedEllipsisPeriod(period.index, ellipses, ellipsisCursor) ||
-      isProtectedQuestionPeriod(input, period.index, hasUrlPrefix(period.index))
+      (insideUrl && /^[^\s.!?"'“”‘’()[\]{}<>]/.test(input.slice(index + 1, index + 3))) ||
+      (terminal[0] === '.' &&
+        (isProtectedEllipsisPeriod(index, ellipses, ellipsisCursor) ||
+          isProtectedQuestionPeriod(input, index)))
     ) {
-      // Quote classification reads only quotation positions; periods use a separate bit.
-      apostrophes[period.index] |= 2;
+      // Quote classification reads only quotation positions; terminals use a separate bit.
+      apostrophes[index] |= 2;
     }
   }
   source.questionPairs = pairs;
@@ -546,14 +561,13 @@ function urlPrefixChecker(input: string): (index: number) => boolean {
   };
 }
 
-function isProtectedQuestionPeriod(text: string, index: number, hasUrlPrefix: boolean): boolean {
+function isProtectedQuestionPeriod(text: string, index: number): boolean {
   const suffix = text.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const word = suffix.match(/\S+$/)?.[0] ?? '';
   const following = text.slice(index + 1, index + 33);
   return (
     abbrvReg.test(suffix.toLowerCase()) ||
     caseNeutralAcronymReg.test(word) ||
-    (/^[^\s.!?"'“”‘’()[\]{}<>]/.test(following) && hasUrlPrefix) ||
     hostnameLabelReg.test(following) ||
     (/\p{Number}$/u.test(text.slice(Math.max(0, index - 2), index)) &&
       /^\p{Number}/u.test(following))
@@ -1185,7 +1199,7 @@ function sentenceEnd(
   }
   const delimiterEnd = closingDelimiterEnd(input, index, quotes);
   const end = insideQuotes
-    ? quotationCitationEnd(input, index, delimiterEnd, quotes)
+    ? quotationCitationEnd(input, index, delimiterEnd, quotes, straightSingle)
     : delimiterEnd;
   const hasCitation = end > delimiterEnd;
   const closesQuotation =
@@ -1237,10 +1251,16 @@ function quotationCitationEnd(
   index: number,
   delimiterEnd: number,
   quotes: QuoteState,
+  straightSingle: boolean,
 ): number {
   let end = delimiterEnd;
   const delimiters = input.slice(index + 1, end);
-  if (!/(?:["”’]|'')[\s)\]}>]*$/.test(delimiters)) {
+  if (
+    !(
+      /(?:["”’]|'')[\s)\]}>]*$/.test(delimiters) ||
+      (straightSingle && /^'[\s)\]}>]*$/.test(delimiters))
+    )
+  ) {
     return end;
   }
   while (/^\p{Number}$/u.test(characterAt(input, end))) {
@@ -1345,6 +1365,14 @@ function isUnspacedDelimitedSentenceStart(
     return false;
   }
   if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {
+    return false;
+  }
+  const bracket = input[next] === '[' ? ']' : ')';
+  if (
+    /[[(]/.test(input[next]) &&
+    isAlphabeticFootnote(input, next) &&
+    input[next + 1 + characterAt(input, next + 1).length] === bracket
+  ) {
     return false;
   }
   while (next < input.length && /["'“‘’([{<]/.test(input[next])) {
