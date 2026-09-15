@@ -2196,7 +2196,7 @@ describe('Utility Functions', () => {
       test('bounds unmatched citation quotation state within a constrained heap', () => {
         expectBundledScriptToPass(
           `
-            const summary = '‘'.repeat(7000000);
+            const summary = '‘'.repeat(7000000) + ' Alpha.[1] Beta.';
             const sentences = module.exports.sentenceSegment(summary);
             if (sentences.length !== 1 || sentences[0] !== summary) {
               throw new Error('Unmatched quotation content changed');
