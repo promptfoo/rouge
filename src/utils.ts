@@ -1574,6 +1574,18 @@ function precedingIdentifierToken(input: string, index: number): string {
   return input.slice(tokenStart, index);
 }
 
+function hasCaseNeutralTrailingInitial(input: string, index: number, tokenLength: number): boolean {
+  let start = index - tokenLength;
+  // A cased symbol can precede the token's marks; include its predecessor too.
+  for (let context = 0; context < 2 && start > 0; context++) {
+    const previous = input.codePointAt(start - 2);
+    start -= previous !== undefined && previous > 0xff_ff ? 2 : 1;
+  }
+  return /(?:^|[^\p{Letter}\p{Mark}\p{Number}_-])(?!\p{Mark})\p{Cased}\p{M}*$/u.test(
+    input.slice(start, index),
+  );
+}
+
 function caseNeutralIdentifierContext(token: string): boolean {
   if (!/\p{Cased}/u.test(token)) {
     return false;
@@ -1665,7 +1677,7 @@ function isUnspacedSentenceBoundary(
       /^[\p{Lu}\p{Number}_-]+(?=\s|[/.]|$)/u.test(following);
   const initial = caseNeutral ? /^\p{Cased}\p{M}*\./u : /^\p{Lu}\./u;
   const trailingInitial = caseNeutral
-    ? /^(?!\p{Mark})\p{Cased}\p{M}*$/u.test(token)
+    ? hasCaseNeutralTrailingInitial(input, index, token.length)
     : /\b\p{Lu}\.$/u.test(suffix);
   const nextInitial = caseNeutral
     ? /^(?![ai](?:\s|$))\p{Cased}\p{M}*(?=\s|$)/iu

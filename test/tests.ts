@@ -1955,6 +1955,61 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally('use \u0345.b next.')).toEqual(['use \u0345.', 'b next.']);
     });
 
+    test.each(['Ⓐ', 'ⓐ', '🄰'])('keeps cased symbol initial %s before another initial', (base) => {
+      for (const marks of ['', '\u0307'.repeat(16_000)]) {
+        for (const prefix of ['', 'Use ']) {
+          const input = `${prefix}${base}${marks}.B next.`;
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+        }
+      }
+    });
+
+    test.each([
+      ['A', 'Ⓐ', false],
+      ['𐐀', '🄰', false],
+      ['0', 'Ⓐ', false],
+      ['_', 'Ⓐ', false],
+      ['-', 'Ⓐ', false],
+      ['\u0301', 'Ⓐ', false],
+      ['Ⓐ', 'Ⓑ', true],
+      ['Ⓐ', 'Я', true],
+      ['😀', '🄰', true],
+      ['\ud800', '🄰', true],
+      ['\udc00', '🄰', true],
+    ])('checks the complete predecessor %s of initial %s', (prefix, base, joins) => {
+      for (const marks of ['', '\u0307'.repeat(16_000)]) {
+        const first = `Use ${prefix}${base}${marks}.`;
+        const input = `${first}B next.`;
+        const expected = joins ? [input] : [first, 'B next.'];
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      }
+    });
+
+    test.each(['A test.', 'I agree.', 'No one answered.'])(
+      'keeps an adjacent sentence after a marked symbol before %s',
+      (continuation) => {
+        const first = `Use 🄰${'\u0307'.repeat(16_000)}.`;
+        const input = `${first}${continuation}`;
+        expect(segmentCaseNeutrally(input)).toEqual([first, continuation]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          [first, continuation].map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('keeps symbols outside ordinary-word identifier evidence', () => {
+      const input = 'Use AⒶg\u0303.No one answered.';
+      const expected = ['Use AⒶg\u0303.', 'No one answered.'];
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
     test('keeps bracketed references inside their sentence', () => {
       expect(ss('He wrote (see Fig.[2] for details). Next.')).toEqual([
         'He wrote (see Fig.[2] for details).',
