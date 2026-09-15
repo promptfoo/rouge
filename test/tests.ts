@@ -841,6 +841,50 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual([input]);
     }, 5000);
 
+    test.each([
+      ["Authors: A. O'Neil and B. Jones.", ["Authors: A. O'Neil and B. Jones."]],
+      ['Authors: A. Smith-Jones and B. D’Arcy.', ['Authors: A. Smith-Jones and B. D’Arcy.']],
+      [
+        "Authors: A. Smith and B. O'Neil and C. D’Arcy.",
+        ["Authors: A. Smith and B. O'Neil and C. D’Arcy."],
+      ],
+      [
+        "Authors: A. O'Neil and B. Jones. Finally, C. is important.",
+        ["Authors: A. O'Neil and B. Jones.", 'Finally, C.', 'is important.'],
+      ],
+      ['Authors: A. D’Arcy and B. O’Neil.', ['Authors: A. D’Arcy and B. O’Neil.']],
+      [
+        "Authors: A. O'Neil and B. Jones. Options: C. First D. Last.",
+        ["Authors: A. O'Neil and B. Jones.", 'Options:', 'C. First', 'D. Last.'],
+      ],
+      ['2020. Alpha 2021. Beta', ['2020. Alpha', '2021. Beta']],
+      [' 2020. Alpha 2021. Beta 2022. Gamma', ['2020. Alpha', '2021. Beta', '2022. Gamma']],
+      ['Intro: 2020. Alpha 2021. Beta', ['Intro:', '2020. Alpha', '2021. Beta']],
+      [
+        'We started in 2020. Work ended in 2021. Next.',
+        ['We started in 2020.', 'Work ended in 2021.', 'Next.'],
+      ],
+      [
+        '1. Alpha in 2020. More prose 2. Beta in 2021. Last.',
+        ['1. Alpha in 2020.', 'More prose', '2. Beta in 2021.', 'Last.'],
+      ],
+      [
+        'Intro: 1. Alpha 2020. More prose 2. Beta',
+        ['Intro:', '1. Alpha 2020.', 'More prose', '2. Beta'],
+      ],
+      ['2020. Alpha. More detail 2021. Beta', ['2020. Alpha.', 'More detail', '2021. Beta']],
+      [
+        'Options: A. Alpha in 2020. B. Beta in 2021.',
+        ['Options:', 'A. Alpha in 2020.', 'B. Beta in 2021.'],
+      ],
+    ])('retains punctuated author names and year-shaped list labels: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
     test('keeps a numeric-leading single quotation around apparent list markers', () => {
       const input = "He said '100 options were a) Alpha and b) Beta.'";
       expect(ss(input)).toEqual([input]);
@@ -3390,6 +3434,47 @@ describe('Core Functions', () => {
         index % 2 === 0 ? 'a) Alpha' : 'b) Beta',
       ).join(' ');
       expect(() => l(summary, summary)).toThrow(/sentence comparison exceeds the work limit/);
+    });
+
+    test('applies the exact sentence-pair work limit with a custom tokenizer', () => {
+      const tokenizer = (): string[] => ['x'];
+      const candidate = new Array(250).fill('Alpha.').join(' ');
+      const reference = new Array(400).fill('Beta.').join(' ');
+      expect(l(candidate, reference, { tokenizer })).toBeCloseTo((2 * 250) / 650, 15);
+      const overCandidate = new Array(11).fill('Alpha.').join(' ');
+      const overReference = new Array(9091).fill('Beta.').join(' ');
+      expect(() => l(overCandidate, overReference, { tokenizer })).toThrow(
+        /sentence comparison exceeds the work limit/,
+      );
+    });
+
+    test('retains the work-limit bypass for an explicit custom segmenter', () => {
+      const segmenter = (input: string): string[] =>
+        new Array(input === 'candidate' ? 11 : 9091).fill('x');
+      const tokenizer = (): string[] => ['x'];
+      expect(l('candidate', 'reference', { segmenter, tokenizer })).toBeCloseTo(22 / 9102, 15);
+    });
+
+    test.each(['lcs', 'lcsIndices'] as const)(
+      'retains the work-limit bypass for a custom %s callback',
+      (mode) => {
+        const candidate = new Array(11).fill('Alpha.').join(' ');
+        const reference = new Array(9091).fill('Beta.').join(' ');
+        let comparisons = 0;
+        const callback = (): [] => {
+          comparisons++;
+          return [];
+        };
+        const options = mode === 'lcs' ? { lcs: callback } : { lcsIndices: callback };
+        expect(l(candidate, reference, { tokenizer: () => ['x'], ...options })).toBe(0);
+        expect(comparisons).toBe(100_001);
+      },
+    );
+
+    test('returns for empty custom tokens before applying the sentence-pair limit', () => {
+      const candidate = new Array(11).fill('Alpha.').join(' ');
+      const reference = new Array(9091).fill('Beta.').join(' ');
+      expect(l(candidate, reference, { tokenizer: () => [] })).toBe(0);
     });
 
     test('should preserve word separation after an ellipsis for custom tokenizers', () => {

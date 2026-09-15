@@ -121,6 +121,16 @@ const closingDelimiterReg = /[\])}>"']/;
 const openingBracketReg = /[([{<]/;
 const closingBracketReg = /[\])}>]/;
 const listMarkerReg = /(?:^|\s)(?:(?:[•⁃]\s*)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+\S)/gu;
+const yearListMarkerReg = /^(?:1\d{3}|20\d{2})\.$/;
+const nameWordPattern = String.raw`\p{Letter}[\p{Letter}\p{Mark}]*(?:['’\p{Pd}]\p{Letter}[\p{Letter}\p{Mark}]*)*`;
+const firstAuthorNameReg = new RegExp(
+  String.raw`^\s+${nameWordPattern}(?:\s+(?:and|or|&)|[,;])\s+\p{Cased}\p{M}*\.\s+\p{Letter}`,
+  'iu',
+);
+const laterAuthorInitialReg = new RegExp(
+  String.raw`:\s+\p{Cased}\p{M}*\.(?:\s+${nameWordPattern}(?:\s+(?:and|or|&)|[,;])\s+\p{Cased}\p{M}*\.)+$`,
+  'iu',
+);
 const nestedListDepth = Symbol('nestedListDepth');
 const skipListDetection = Symbol('skipListDetection');
 const singleQuoteElisionReg =
@@ -471,6 +481,7 @@ interface ListScanState {
   quoteFlags?: Uint8Array;
   angleOpeners?: Uint8Array;
   parenthesisLabels?: Uint8Array;
+  yearList?: boolean;
 }
 
 /** Confirm numeric quote openers without treating unpaired year elisions as quotes. */
@@ -838,8 +849,10 @@ function nextListMarker(
     }
     const enclosedMarker =
       state.bracketDepth.some((depth) => depth > 0) || state.quote !== undefined;
+    const prefix = listMarkerPrefix(input, marker);
     const yearInProse =
-      /^(?:1\d{3}|20\d{2})\.$/.test(marker[0].trim()) && !listMarkerPrefix(input, marker).boundary;
+      yearListMarkerReg.test(marker[0].trim()) &&
+      !(state.yearList || prefix.empty || prefix.boundary);
     const countInProse =
       /^\d+\.$/.test(marker[0].trim()) &&
       /\b(?:am|is|are|was|were|be|been|being|has|have|had|reached|numbered|total(?:ed)?|hit|equals?|equaled|became|remained|scored|costs?|in|of|at|by|to|from|about|around|roughly|approximately)$/i.test(
@@ -971,6 +984,7 @@ function findListCandidate(
     }
 
     if (first === undefined && (context.empty || !ambiguousMarker || context.boundary)) {
+      state.yearList ||= yearListMarkerReg.test(marker);
       firstByFamily.set(family.source, {
         marker: current,
         emptyPrefix: context.empty,
@@ -1316,14 +1330,11 @@ function colonIntroducedNameBoundary(input: string, index: number): number {
   }
   const before = input.slice(Math.max(0, index - 96), index + 1);
   const after = input.slice(index + 1, index + 96);
-  const firstInitial =
-    /:\s+\p{Cased}\p{M}*\.$/iu.test(before) &&
-    /^\s+\p{Letter}+(?:\s+(?:and|or|&)|[,;])\s+\p{Cased}\p{M}*\.\s+\p{Letter}/iu.test(after);
-  const laterInitial =
-    /:\s+\p{Cased}\p{M}*\.(?:\s+\p{Letter}+(?:\s+(?:and|or|&)|[,;])\s+\p{Cased}\p{M}*\.)+$/iu.test(
-      before,
-    );
-  const joinsName = (firstInitial || laterInitial) && /^\s+\p{Cased}\p{Letter}/u.test(after);
+  const firstInitial = /:\s+\p{Cased}\p{M}*\.$/iu.test(before) && firstAuthorNameReg.test(after);
+  const laterInitial = laterAuthorInitialReg.test(before);
+  const joinsName =
+    (firstInitial || laterInitial) &&
+    /^\s+\p{Cased}(?:\p{Mark}|['’\p{Pd}])*\p{Letter}/u.test(after);
   return joinsName ? -1 : index + 1;
 }
 
