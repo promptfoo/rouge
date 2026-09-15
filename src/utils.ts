@@ -2769,7 +2769,8 @@ function questionTerminalChecker(
       const insideUrl = hasUrlPrefix(terminal.index + 1);
       if (
         (terminal[0].length === 1 && insideUrl && /^[^\s"'`”’“»›\])}>]$/u.test(following)) ||
-        (/^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following) &&
+        ((/^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following) ||
+          (terminal[0] === '.' && !terminal.enclosed && openingBracketReg.test(following))) &&
           !isUnspacedSentenceBoundary(
             input,
             terminal.index,

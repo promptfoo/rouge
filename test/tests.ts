@@ -7338,3 +7338,81 @@ describe('Reference punctuation respects shared literal ownership', () => {
     ).toBeLessThan(1);
   }, 5000);
 });
+
+describe('Attached annotations in quotation question lookahead', () => {
+  test.each(['[x]', '(x)', '{x}', '<x>', '[word]'])(
+    'uses the ordinary boundary decision before %s',
+    (annotation) => {
+      const question = `Was Alice choosing Alpha.${annotation} or Beta?`;
+      for (const quotation of ['"No."', '“No.”', '‹No.›']) {
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(question, { caseNeutral })).toEqual(
+            caseNeutral ? ['Was Alice choosing Alpha.', `${annotation} or Beta?`] : [question],
+          );
+          expect(rouge.sentenceSegment(`${quotation} ${question}`, { caseNeutral })).toEqual(
+            caseNeutral
+              ? [`${quotation} Was Alice choosing Alpha.`, `${annotation} or Beta?`]
+              : [quotation, question],
+          );
+        }
+      }
+    },
+  );
+
+  test('preserves actual boundaries before spaced, uppercase and numeric annotations', () => {
+    for (const annotation of [' [x]', '[X]', '{1}', '<1>']) {
+      const input = `"No." Was Alice choosing Alpha.${annotation} or Beta?`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          '"No." Was Alice choosing Alpha.',
+          `${annotation.trimStart()} or Beta?`,
+        ]);
+      }
+    }
+  });
+
+  test('keeps a real period after a quoted-subject predicate authoritative', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('"No." Was Alice\'s answer.', { caseNeutral })).toEqual([
+        '"No." Was Alice\'s answer.',
+      ]);
+      expect(
+        rouge.sentenceSegment('"No." Was Alice\'s answer. Was Bob ready?', { caseNeutral }),
+      ).toEqual(['"No." Was Alice\'s answer.', 'Was Bob ready?']);
+    }
+  });
+
+  test('uses the next real terminal after a retained annotation in ambiguous auxiliary prose', () => {
+    const body = "Was Alice's answer.[x] Was Bob ready?";
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`"No." ${body}`, { caseNeutral })).toEqual(
+        caseNeutral ? ['"No." Was Alice\'s answer.', '[x] Was Bob ready?'] : ['"No."', body],
+      );
+    }
+  });
+
+  test('retains attribution when the continued annotation ends in a statement', () => {
+    const input = '"No." Was Alice choosing Alpha.[x] or Beta.';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual(
+        caseNeutral ? ['"No." Was Alice choosing Alpha.', '[x] or Beta.'] : [input],
+      );
+    }
+  });
+
+  test('keeps repeated annotation question queries independent', () => {
+    expectBundledScriptToPass(
+      `
+        const spans = ['"No."', 'Was Alice choosing Alpha.[x] or Beta?',
+          '"Yes."', 'Was Bob choosing Gamma.(word) or Delta?'];
+        const input = Array(128).fill(spans.join(' ')).join(' ');
+        const actual = module.exports.sentenceSegment(input);
+        if (actual.length !== 512 || actual.some((span, index) => span !== spans[index % 4])) {
+          throw new Error('Repeated annotation question boundaries changed');
+        }
+        process.stdout.write('ok');
+      `,
+      5000,
+    );
+  }, 10_000);
+});
