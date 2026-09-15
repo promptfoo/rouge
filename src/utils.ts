@@ -479,6 +479,9 @@ function numericQuoteFlags(input: string): Uint8Array | undefined {
   let candidate: number | undefined;
   for (const quote of input.matchAll(/'/g)) {
     const index = quote.index;
+    if (isEscapedListQuote(input, index)) {
+      continue;
+    }
     const previous = input[index - 1] ?? '';
     const following = characterAt(input, index + 1);
     const opener = index === 0 || /^[\s\p{Punctuation}<=]$/u.test(previous);
@@ -490,7 +493,7 @@ function numericQuoteFlags(input: string): Uint8Array | undefined {
         !possiblePossessive &&
         (/[.!?]/.test(previous) ||
           following.length === 0 ||
-          /^[\s.,!?;:)\]}"”»\p{Pd}]$/u.test(following))
+          /^[\s.,!?;:)\]}>"”»\p{Pd}]$/u.test(following))
       ) {
         openings ??= new Uint8Array(input.length);
         openings[candidate] = 1;
@@ -525,7 +528,7 @@ function confirmedListQuoteFlags(
     const closer = character === "'" ? "'" : '’';
     const state = pending[closer];
     markNestedNumericQuote(flags, index, state.opening >= 0);
-    if (flags?.[index] === 2 || isListApostrophe(input, index)) {
+    if (flags?.[index] === 2 || isLiteralListQuote(input, index)) {
       continue;
     }
     const opening = listQuoteCloser(input, index, flags) === closer;
@@ -597,6 +600,9 @@ function listQuoteCloser(
   quoteFlags: Uint8Array | undefined,
 ): string | undefined {
   const character = input[index];
+  if (isEscapedListQuote(input, index)) {
+    return undefined;
+  }
   if (
     input.startsWith('``', index) ||
     (input.startsWith("''", index) && quotationState(input, index, false))
@@ -626,7 +632,22 @@ function listQuoteCloser(
   return character === '‘' ? '’' : undefined;
 }
 
-function isListApostrophe(input: string, index: number, quoteFlags?: Uint8Array): boolean {
+/** Backslash runs preceding distinct quote tokens are disjoint. */
+function isEscapedListQuote(input: string, index: number): boolean {
+  if (!/["'`“”‘’«»‹›]/.test(input[index])) {
+    return false;
+  }
+  let preceding = index - 1;
+  while (preceding >= 0 && input[preceding] === '\\') {
+    preceding--;
+  }
+  return (index - preceding - 1) % 2 === 1;
+}
+
+function isLiteralListQuote(input: string, index: number, quoteFlags?: Uint8Array): boolean {
+  if (isEscapedListQuote(input, index)) {
+    return true;
+  }
   if (!/['’]/.test(input[index])) {
     return false;
   }
@@ -650,7 +671,7 @@ function matchedAngleOpeners(
   let quote: string | undefined;
   for (let index = 0; index < input.length; index++) {
     if (quote !== undefined) {
-      if (input.startsWith(quote, index) && !isListApostrophe(input, index, quoteFlags)) {
+      if (input.startsWith(quote, index) && !isLiteralListQuote(input, index, quoteFlags)) {
         index += quote.length - 1;
         quote = undefined;
       }
@@ -686,7 +707,7 @@ function* unquotedListParentheses(
       continue;
     }
     if (quote !== undefined) {
-      if (input.startsWith(quote, index) && !isListApostrophe(input, index, quoteFlags)) {
+      if (input.startsWith(quote, index) && !isLiteralListQuote(input, index, quoteFlags)) {
         skipThrough = index + quote.length - 1;
         quote = undefined;
       }
@@ -752,7 +773,7 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
     const index = state.cursor++;
     const character = input[index];
     if (state.quote !== undefined) {
-      const apostrophe = isListApostrophe(input, index, state.quoteFlags);
+      const apostrophe = isLiteralListQuote(input, index, state.quoteFlags);
       if (input.startsWith(state.quote, index) && !apostrophe) {
         state.cursor += state.quote.length - 1;
         state.quote = undefined;
@@ -864,8 +885,12 @@ function listMarkerFamily(marker: string, caseNeutral: boolean): RegExp {
   return new RegExp(`${start}[^\\r\\n]*${ending}$`, 'u');
 }
 
+function numericMarkerValue(marker: string): number {
+  return Number(marker.match(/^(?:[•⁃]\s*)?(\d+)/)?.[1]);
+}
+
 function isDistantNumericMarker(first: number, marker: string, atBoundary: boolean): boolean {
-  const current = Number(marker.match(/^\d+/)?.[0]);
+  const current = numericMarkerValue(marker);
   return Number.isFinite(first) && Math.abs(current - first) > 10 && !atBoundary;
 }
 
@@ -950,7 +975,7 @@ function findListCandidate(
         marker: current,
         emptyPrefix: context.empty,
         identity,
-        number: Number(marker.match(/^\d+/)?.[0]),
+        number: numericMarkerValue(marker),
         bodyStart: current.index + current[0].length,
         hasBody: false,
       });

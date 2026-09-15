@@ -785,6 +785,62 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each([1, 2, 3, 4])('uses backslash parity for literal list quotes: %d', (count) => {
+      const backslashes = String.fromCharCode(92).repeat(count);
+      for (const quote of ['"', "'"]) {
+        const input = `Set value=${quote}x ${backslashes}${quote}team a) Alpha b) Beta${backslashes}${quote} tail${quote}.`;
+        if (count % 2 === 1) {
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(
+            rouge.l(input, input.replace('a) Alpha b) Beta', 'b) Beta a) Alpha')),
+          ).toBeLessThan(1);
+        } else {
+          expect(ss(input).length).toBeGreaterThan(1);
+          expect(segmentCaseNeutrally(input).length).toBeGreaterThan(1);
+        }
+      }
+    });
+
+    test.each([
+      ["<'99 > team A) Alice and team B) Bob'>", ["<'99 > team A) Alice and team B) Bob'>"]],
+      [
+        "He said '99 options \\'team a) Alpha b) Beta\\' tail.'",
+        ["He said '99 options \\'team a) Alpha b) Beta\\' tail.'"],
+      ],
+      ['<"x \\" > \\" team A) Alice and B) Bob">', ['<"x \\" > \\" team A) Alice and B) Bob">']],
+      [
+        '(He wrote "x \\" ) \\" team a) Alpha b) Beta".)',
+        ['(He wrote "x \\" ) \\" team a) Alpha b) Beta".)'],
+      ],
+      ['He wrote \\"team a) Alpha b) Beta.', ['He wrote \\"team', 'a) Alpha', 'b) Beta.']],
+    ])('shares escaped and numeric closing context across list scans: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['•', '⁃'])(
+      'compares bullet-prefixed numeric outliers consistently: %s',
+      (bullet) => {
+        const number = '9'.repeat(320);
+        for (const middlePrefix of ['', `${bullet} `]) {
+          const first = `${bullet} 1. First ${middlePrefix}${number}.`;
+          const last = `${bullet} 2. Next`;
+          const input = `${first} Last ${last}`;
+          const expected = [first, 'Last', last];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+        }
+      },
+    );
+
+    test('scans long escaped-quote backslash runs without rescanning nonquote characters', () => {
+      const backslashes = String.fromCharCode(92).repeat(99_999);
+      const input = `Set value="x ${backslashes}"team a) Alpha b) Beta${backslashes}" tail".`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    }, 5000);
+
     test('keeps a numeric-leading single quotation around apparent list markers', () => {
       const input = "He said '100 options were a) Alpha and b) Beta.'";
       expect(ss(input)).toEqual([input]);
