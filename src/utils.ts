@@ -1008,7 +1008,36 @@ export function arithmeticMean(input: number[]): number {
   if (input.length === 0) {
     throw new RangeError('Input array must have at least 1 element');
   }
-  return input.reduce((x, y) => x + y) / input.length;
+  const sum = input.reduce((x, y) => x + y);
+  if (Number.isFinite(sum) || !input.every(Number.isFinite)) {
+    return sum / input.length;
+  }
+
+  // Sum exact multiples of 2^-1074 only when ordinary addition overflows.
+  const view = new DataView(new ArrayBuffer(8));
+  const implicitBit = 1n << 52n;
+  const total = input.reduce((acc, value) => {
+    view.setFloat64(0, value);
+    const bits = view.getBigUint64(0);
+    const exponent = Number((bits >> 52n) & 0x7ffn);
+    const fraction = bits & (implicitBit - 1n);
+    const significand = exponent === 0 ? fraction : fraction + implicitBit;
+    const units = significand << BigInt(Math.max(0, exponent - 1));
+    return acc + (value < 0 ? -units : units);
+  }, 0n);
+
+  const negative = total < 0n;
+  const magnitude = negative ? -total : total;
+  const count = BigInt(input.length);
+  const shift = Math.max(0, (magnitude / count).toString(2).length - 53);
+  const denominator = count << BigInt(shift);
+  let significand = magnitude / denominator;
+  const remainder = magnitude % denominator;
+  // Round once to the nearest double, breaking exact ties toward an even significand.
+  if (2n * remainder > denominator || (2n * remainder === denominator && significand % 2n === 1n)) {
+    significand++;
+  }
+  return (negative ? -1 : 1) * Number(significand) * 2 ** (shift - 1074);
 }
 
 /**

@@ -123,6 +123,90 @@ describe('Utility Functions', () => {
   describe('arithmeticMean', () => {
     const am = rouge.arithmeticMean;
 
+    test.each([
+      [[1e308, 1e308], 1e308],
+      [[-1e308, -1e308], -1e308],
+      [[Number.MAX_VALUE, Number.MAX_VALUE], Number.MAX_VALUE],
+      [[1e308, 1e308, -1e308, -1e308], 0],
+      [[1e-308, 1e-308], 1e-308],
+      [[Number.MIN_VALUE, Number.MIN_VALUE], Number.MIN_VALUE],
+      [[Number.POSITIVE_INFINITY, 1], Number.POSITIVE_INFINITY],
+      [[Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY], Number.NaN],
+    ])('averages %p without introducing overflow or underflow', (values, expected) => {
+      expect(am(values)).toBe(expected);
+    });
+
+    test.each([
+      [Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE, 1],
+      [1, Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE],
+      [Number.MAX_VALUE, 1, Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE],
+    ])('preserves a residual after large cancellation: %p', (...values) => {
+      expect(am(values)).toBe(0.2);
+      expect(am(values.map((value) => -value))).toBe(-0.2);
+    });
+
+    test.each([
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          3 * Number.MIN_VALUE,
+        ],
+        Number.MIN_VALUE,
+      ],
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          3 * Number.MIN_VALUE,
+          0,
+        ],
+        0,
+      ],
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          9 * Number.MIN_VALUE,
+          0,
+        ],
+        2 * Number.MIN_VALUE,
+      ],
+      [new Array<number>(5).fill(Number.MAX_VALUE), Number.MAX_VALUE],
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          1,
+          -Number.MAX_VALUE,
+        ],
+        1 / 7,
+      ],
+    ])('rounds an overflowing finite mean once: %p', (values, expected) => {
+      expect(am(values)).toBe(expected);
+      expect(am(values.map((value) => -value))).toBe(-expected);
+    });
+
+    test('skips sparse holes consistently when a finite sum overflows', () => {
+      const values = [Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE];
+      values.length = 4;
+      expect(am(values)).toBe(Number.MAX_VALUE / 4);
+      expect(am(values.map((value) => -value))).toBe(-Number.MAX_VALUE / 4);
+    });
+
+    test('averages overflowing mixed-sign sums', () => {
+      expect(am([1e308, 1e308, -1e308]) / 1e308).toBeCloseTo(1 / 3, 14);
+    });
+
     test('should throw RangeError for empty array', () => {
       expect(() => am([])).toThrow(RangeError);
     });
