@@ -906,9 +906,10 @@ interface CitationQuotationState {
   flags: Uint8Array;
 }
 
-/** Numeric citations cannot exist in input without a Unicode Number character. */
+/** Candidate gaps contain no words/numbers; the first number attaches to punctuation. */
 function citationQuotationState(input: string): CitationQuotationState | undefined {
-  if (!/\p{Number}/u.test(input)) {
+  // Excluding terminals from each gap keeps failed candidate scans disjoint and linear.
+  if (!/[.!?](?:[^\p{Letter}\p{Number}.!?]*[^\p{Letter}\p{Number}\s.!?])?\p{Number}/u.test(input)) {
     return undefined;
   }
   const { apostrophes, overflowed } = citationApostrophes(input);

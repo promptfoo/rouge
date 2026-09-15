@@ -884,6 +884,14 @@ describe('Utility Functions', () => {
       },
     );
 
+    test('retains a cited name initial after repeated whitespace', () => {
+      const first = 'My name is Jonas  E.[1]';
+      const input = `${first} Smith.`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Smith.']);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'smith.']);
+    });
+
     test('requires existing name context for a cited uppercase initial', () => {
       for (const [first, second] of [
         ['The answer is E.[1]', 'Smith responded.'],
@@ -1390,6 +1398,7 @@ describe('Utility Functions', () => {
     test.each([
       `${'“'.repeat(65)}inside${'”'.repeat(64)} Alpha.[1] Beta.`,
       `${'“'.repeat(64)}‘inside’${'”'.repeat(64)} Alpha.[1] Beta.`,
+      `${'‚'.repeat(65)}inside${'‘'.repeat(64)} Alpha.[1] Beta.`,
     ])('keeps citation recognition conservative after quotation depth overflows: %s', (input) => {
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);
