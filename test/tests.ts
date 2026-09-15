@@ -612,13 +612,34 @@ describe('Utility Functions', () => {
       expect(rouge.l(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
     });
 
-    test('compares final-sigma list markers with full Unicode case folding', () => {
+    test('preserves distinct final-sigma labels under JavaScript lowercasing', () => {
       const input = 'Intro: Σ. Alpha ς. Beta.';
-      const expected = ['Intro: Σ.', 'Alpha ς.', 'Beta.'];
+      const expected = ['Intro:', 'Σ. Alpha', 'ς. Beta.'];
       expect(segmentCaseNeutrally(input)).toEqual(expected);
-      expect(segmentCaseNeutrally(input.toUpperCase())).toEqual(
-        expected.map((sentence) => sentence.toUpperCase()),
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
       );
+      expect(rouge.l(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+    });
+
+    test.each(['ı. Alpha i. Beta.', 'I. Alpha ı. Beta.'])(
+      'preserves distinct dotless-i labels under JavaScript lowercasing: %s',
+      (items) => {
+        const input = `Intro: ${items}`;
+        const expected = ['Intro:', items.slice(0, 8), items.slice(9)];
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+        expect(rouge.l(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      },
+    );
+
+    test('keeps an explicitly quoted letter separate from a later real list', () => {
+      const input = 'He wrote ‘n’ on the card. Options: a) Alpha b) Beta.';
+      const expected = ['He wrote ‘n’ on the card.', 'Options:', 'a) Alpha', 'b) Beta.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
     test('compares case-expanding sharp-S list markers consistently', () => {
@@ -884,6 +905,66 @@ describe('Utility Functions', () => {
         expected.map((sentence) => sentence.toLowerCase()),
       );
     });
+
+    test.each([
+      [
+        'He said ‘rock ’n’ roll has a) Alpha and b) Beta.’',
+        ['He said ‘rock ’n’ roll has a) Alpha and b) Beta.’'],
+      ],
+      [
+        "He said 'rock 'n' roll has a) Alpha and b) Beta.'",
+        ["He said 'rock 'n' roll has a) Alpha and b) Beta.'"],
+      ],
+      [
+        'He said ‘rock ’N’ roll has a) Alpha and b) Beta.’',
+        ['He said ‘rock ’N’ roll has a) Alpha and b) Beta.’'],
+      ],
+      [
+        "He said '100 rock 'n' roll choices a) Alpha and b) Beta.'",
+        ["He said '100 rock 'n' roll choices a) Alpha and b) Beta.'"],
+      ],
+      [
+        "Rock 'n' roll. Options: a) Alpha b) Beta.",
+        ["Rock 'n' roll.", 'Options:', 'a) Alpha', 'b) Beta.'],
+      ],
+      [
+        'Rock ’n’ roll. Options: a) Alpha b) Beta.',
+        ['Rock ’n’ roll.', 'Options:', 'a) Alpha', 'b) Beta.'],
+      ],
+      [
+        "He wrote 'n' on the card. Options: a) Alpha b) Beta.",
+        ["He wrote 'n' on the card.", 'Options:', 'a) Alpha', 'b) Beta.'],
+      ],
+      [
+        "In '99, a) Alpha b) Beta. He wrote 'n'.",
+        ["In '99,", 'a) Alpha', 'b) Beta.', "He wrote 'n'."],
+      ],
+      [
+        '<He wrote ‘rock ’n’ roll > team A) Alpha and B) Beta’>',
+        ['<He wrote ‘rock ’n’ roll > team A) Alpha and B) Beta’>'],
+      ],
+      [
+        '(He wrote ‘rock ’n’ roll ) team a) Alpha and b) Beta’.)',
+        ['(He wrote ‘rock ’n’ roll ) team a) Alpha and b) Beta’.)'],
+      ],
+    ])('preserves both marks of paired n elisions during list scans: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+      if (expected.length === 1 && input.includes('a) Alpha and b) Beta')) {
+        expect(
+          rouge.l(input, input.replace('a) Alpha and b) Beta', 'b) Beta and a) Alpha')),
+        ).toBeLessThan(1);
+      }
+    });
+
+    test('classifies repeated paired n elisions with bounded local context', () => {
+      const input = `He said ‘${'rock ’n’ roll '.repeat(20_000)}has a) Alpha and b) Beta.’`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    }, 5000);
 
     test('keeps a numeric-leading single quotation around apparent list markers', () => {
       const input = "He said '100 options were a) Alpha and b) Beta.'";

@@ -490,7 +490,7 @@ function numericQuoteFlags(input: string): Uint8Array | undefined {
   let candidate: number | undefined;
   for (const quote of input.matchAll(/'/g)) {
     const index = quote.index;
-    if (isEscapedListQuote(input, index)) {
+    if (isEscapedListQuote(input, index) || isPairedNElision(input, index)) {
       continue;
     }
     const previous = input[index - 1] ?? '';
@@ -611,7 +611,7 @@ function listQuoteCloser(
   quoteFlags: Uint8Array | undefined,
 ): string | undefined {
   const character = input[index];
-  if (isEscapedListQuote(input, index)) {
+  if (isEscapedListQuote(input, index) || isPairedNElision(input, index)) {
     return undefined;
   }
   if (
@@ -655,8 +655,15 @@ function isEscapedListQuote(input: string, index: number): boolean {
   return (index - preceding - 1) % 2 === 1;
 }
 
+function isPairedNElision(input: string, index: number): boolean {
+  return (
+    /^(['’])n\1$/i.test(input.slice(index, index + 3)) ||
+    /^(['’])n\1$/i.test(input.slice(Math.max(0, index - 2), index + 1))
+  );
+}
+
 function isLiteralListQuote(input: string, index: number, quoteFlags?: Uint8Array): boolean {
-  if (isEscapedListQuote(input, index)) {
+  if (isEscapedListQuote(input, index) || isPairedNElision(input, index)) {
     return true;
   }
   if (!/['’]/.test(input[index])) {
@@ -947,7 +954,7 @@ function findListCandidate(
       context,
       proseInitialEnd,
     );
-    const identity = caseNeutral ? marker.toLowerCase().toUpperCase().toLowerCase() : marker;
+    const identity = caseNeutral ? marker.toLowerCase() : marker;
     if (context.joinedNameInitial) {
       firstByFamily.delete(family.source);
       deferredByFamily.delete(family.source);
