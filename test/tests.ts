@@ -1479,6 +1479,69 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
+    test.each([
+      ['She said "First. Then ‘inner’"Next.', ['She said "First. Then ‘inner’"Next.']],
+      ["She said 'First. Then “inner”'Next.", ["She said 'First. Then “inner”'Next."]],
+      ['She said "First. Then ‘inner’ "Next.', ['She said "First. Then ‘inner’ "Next.']],
+      ['She said "First. Then (‘inner’)"Next.', ['She said "First. Then (‘inner’)"Next.']],
+      ['She said "First. Then \'inner\'"Next.', ['She said "First. Then \'inner\'"Next.']],
+      ["She said 'First. Then ``inner'''Next.", ["She said 'First. Then ``inner'''Next."]],
+      [
+        'She said "First. Then ‘inner’ word "Next. Last." End.',
+        ['She said "First.', 'Then ‘inner’ word "Next. Last."', 'End.'],
+      ],
+      [
+        '"It ended." Was https://example.com/valid valid? Next.',
+        ['"It ended."', 'Was https://example.com/valid valid?', 'Next.'],
+      ],
+      [
+        '"It ended." Was https://example.com/dir./file valid? Next.',
+        ['"It ended."', 'Was https://example.com/dir./file valid?', 'Next.'],
+      ],
+      [
+        '"It ended." Was https://example.com/dir..//file valid? Next.',
+        ['"It ended."', 'Was https://example.com/dir..//file valid?', 'Next.'],
+      ],
+      [
+        '"It ended." Was https://example.com/dir.?key=value valid? Next.',
+        ['"It ended."', 'Was https://example.com/dir.?key=value valid?', 'Next.'],
+      ],
+      [
+        '"It ended." Was https://example.com/dir.#section valid? Next.',
+        ['"It ended."', 'Was https://example.com/dir.#section valid?', 'Next.'],
+      ],
+      [
+        '"It ended." Was https://example.com/dir.;value valid? Next.',
+        ['"It ended."', 'Was https://example.com/dir.;value valid?', 'Next.'],
+      ],
+      [
+        '"It ended." Was https://example.com/dir._value valid? Next.',
+        ['"It ended."', 'Was https://example.com/dir._value valid?', 'Next.'],
+      ],
+      [
+        '"It ended." Was https://example.com/dir.%20value valid? Next.',
+        ['"It ended."', 'Was https://example.com/dir.%20value valid?', 'Next.'],
+      ],
+    ])('retains paired inner closers and URL path context: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('keeps paired-inner recovery linear across repeated quotations', () => {
+      const sentence = 'She said "First. Then ‘inner’"Next.';
+      const input = new Array(4000).fill(sentence).join(' ');
+      expect(ss(input)).toEqual(new Array(4000).fill(sentence));
+      expect(segmentCaseNeutrally(input)).toEqual(new Array(4000).fill(sentence));
+    }, 5000);
+
+    test('keeps URL punctuation lookahead linear across a long path', () => {
+      const question = `Was https://example.com/${'dir./'.repeat(8000)}file valid?`;
+      const input = `"It ended." ${question} Next.`;
+      const expected = ['"It ended."', question, 'Next.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
     test('recognizes astral digits before measurement apostrophes', () => {
       const input = "The answer 'Yes' worked. It was 𝟝' tall. Next.";
       const expected = ["The answer 'Yes' worked.", "It was 𝟝' tall.", 'Next.'];

@@ -370,6 +370,7 @@ class QuotationPairing {
   #nextTreebankClose = -1;
   #contextCursor = 0;
   #precedingContent = '';
+  #precedingPairedQuote = false;
 
   constructor(input: string, apostrophes: Uint8Array) {
     this.#input = input;
@@ -383,7 +384,7 @@ class QuotationPairing {
     }
     const character = this.#input[index];
     if (character === '"') {
-      if (this.#openings.straightDouble >= 0 && !this.#opensAfterUnmatched(index)) {
+      if (this.#openings.straightDouble >= 0 && this.#quotationRecovery(index) !== 'open') {
         this.#close('straightDouble', index);
       } else if (opensDoubleQuote(this.#input, index, false)) {
         this.#openings.straightDouble = index;
@@ -398,40 +399,51 @@ class QuotationPairing {
       const kind = character === "'" ? 'straightSingle' : 'curlySingle';
       const inside = this.#openings[kind] >= 0;
       const next = singleQuoteState(this.#input, index, inside, this.#apostrophes);
-      if (next && (!inside || (kind === 'straightSingle' && this.#reopensSingle(index)))) {
+      const recovery =
+        next && inside && kind === 'straightSingle' ? this.#singleRecovery(index) : undefined;
+      if (next && (!inside || recovery === 'open')) {
         this.#openings[kind] = index;
-      } else if (!next && inside) {
+      } else if (inside && (!next || recovery === 'close')) {
         this.#close(kind, index);
       }
     }
   }
 
-  #reopensSingle(index: number): boolean {
-    return (
-      (this.#apostrophes[index] & 2) === 0 &&
-      !isLeadingElision(this.#input, index) &&
-      !numericQuoteIsElision(this.#input, index) &&
-      this.#opensAfterUnmatched(index)
-    );
+  #singleRecovery(index: number): 'open' | 'close' | undefined {
+    if (
+      (this.#apostrophes[index] & 2) !== 0 ||
+      isLeadingElision(this.#input, index) ||
+      numericQuoteIsElision(this.#input, index)
+    ) {
+      return undefined;
+    }
+    return this.#quotationRecovery(index);
   }
 
-  #opensAfterUnmatched(index: number): boolean {
+  #quotationRecovery(index: number): 'open' | 'close' | undefined {
     if (
       !(
         opensDoubleQuote(this.#input, index, false) &&
         isQuoteOpeningContent(characterAt(this.#input, index + 1))
       )
     ) {
-      return false;
+      return undefined;
     }
     // Reuse significant left context even across long runs of nested/spaced closers.
     while (this.#contextCursor < index) {
-      const character = this.#input[this.#contextCursor++];
-      if (!/[\s"'”’“\])}>]/.test(character)) {
+      const position = this.#contextCursor++;
+      const character = this.#input[position];
+      if (this.pairs[position] < 0) {
+        this.#precedingPairedQuote = true;
+      } else if (!/[\s"'”’“\])}>]/.test(character)) {
         this.#precedingContent = character;
+        this.#precedingPairedQuote = false;
       }
     }
-    return !/[.!?]/.test(this.#precedingContent);
+    if (this.#precedingPairedQuote) {
+      return 'close';
+    }
+    return /[.!?]/.test(this.#precedingContent) ? undefined : 'open';
   }
 
   #close(kind: QuotationKind, index: number): void {
@@ -1337,15 +1349,18 @@ function questionTerminalChecker(
         terminal = nextTerminal(terminal.index + terminal[0].length);
         continue;
       }
+      const following = characterAt(input, terminal.index + 1);
+      const insideUrl = hasUrlPrefix(terminal.index + 1);
       if (
-        /^[\p{Letter}\p{Mark}\p{Number}]$/u.test(characterAt(input, terminal.index + 1)) &&
-        !isUnspacedSentenceBoundary(
-          input,
-          terminal.index,
-          terminal.index + 1,
-          caseNeutral,
-          hasUrlPrefix(terminal.index + 1),
-        )
+        (terminal[0] === '.' && insideUrl && /^[^\s"'`”’“\])}>]$/u.test(following)) ||
+        (/^[\p{Letter}\p{Mark}\p{Number}]$/u.test(following) &&
+          !isUnspacedSentenceBoundary(
+            input,
+            terminal.index,
+            terminal.index + 1,
+            caseNeutral,
+            insideUrl,
+          ))
       ) {
         terminal = nextTerminal(terminal.index + terminal[0].length);
         continue;
