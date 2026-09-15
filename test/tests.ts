@@ -1636,6 +1636,88 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
     }, 5000);
 
+    test.each([
+      ['(', ')'],
+      ['[', ']'],
+      ['{', '}'],
+      ['<', '>'],
+    ])(
+      'distinguishes inline bracket questions from entire auxiliary arguments: %s',
+      (open, close) => {
+        for (const inner of ['was it?', '“was it?”']) {
+          const sentence = `The word “No.” was documented ${open}${inner}${close} yesterday.`;
+          expect(ss(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+          expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+          expect(segmentCaseNeutrally(`${sentence} Next.`.toLowerCase())).toEqual([
+            sentence.toLowerCase(),
+            'next.',
+          ]);
+        }
+        const question = `Was ${open}it?${close}`;
+        expect(ss(`“It ended.” ${question}`)).toEqual(['“It ended.”', question]);
+        expect(segmentCaseNeutrally(`“It ended.” ${question}`)).toEqual(['“It ended.”', question]);
+        // The existing bracket scanner keeps the trailing prose with this question.
+        expect(ss(`“It ended.” ${question} Next.`)).toEqual(['“It ended.”', `${question} Next.`]);
+        expect(segmentCaseNeutrally(`“It ended.” ${question} Next.`)).toEqual([
+          '“It ended.”',
+          `${question} Next.`,
+        ]);
+      },
+    );
+
+    test.each([
+      'The word “No.” was documented at (https://example.com/? ) today.',
+      'The word “No.” was documented (“was ) it?”) yesterday.',
+      'The word “No.” was documented (“was ( it?”) yesterday.',
+      'The word “No.” was documented ([was it?]) yesterday.',
+      'The word “No.” was documented ([was it?}) yesterday.',
+    ])('keeps bracket context outside paired literal quotations: %s', (sentence) => {
+      expect(ss(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+    });
+
+    test.each([
+      ['“It ended.” Was ((it?))', ['“It ended.”', 'Was ((it?))']],
+      ['“It ended.” Was (“it?”)', ['“It ended.”', 'Was (“it?”)']],
+      ['“It ended.” Was Alice asking (really?)', ['“It ended.”', 'Was Alice asking (really?)']],
+      ['“It ended.” Was “(it?” Next.', ['“It ended.”', 'Was “(it?”', 'Next.']],
+      ['“It ended.” Was “it)?” Next.', ['“It ended.”', 'Was “it)?”', 'Next.']],
+    ])(
+      'retains genuine enclosure-ended questions and quoted literal brackets: %s',
+      (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each([
+      "She said 'Rock 'n' roll. Dance.'",
+      "She said 'Rock 'N' roll. Dance.'",
+      "She said 'Rock 'n' roll with the dogs' music. Dance.'",
+      'She said ‘Rock ’n’ roll. Dance.’',
+      "He said 'n'.",
+      'He said ‘n’.',
+      "She said 'The letter 'n' means something. Take it.'",
+    ])('retains paired n elisions and explicit quoted letters: %s', (sentence) => {
+      expect(ss(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+    });
+
+    test('scans repeated bracketed questions and paired n elisions once', () => {
+      const sentence = `The word “No.” was documented ${'(was it?) '.repeat(8000)}yesterday.`;
+      expect(ss(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      const quoted = `She said 'Rock ${"'n' roll. ".repeat(8000)}Dance.'`;
+      expect(ss(`${quoted} Next.`)).toEqual([quoted, 'Next.']);
+      expect(segmentCaseNeutrally(`${quoted} Next.`)).toEqual([quoted, 'Next.']);
+    }, 5000);
+
+    test('keeps question lookahead linear across many nested brackets', () => {
+      const question = `Was ${'('.repeat(8000)}it?${')'.repeat(8000)}`;
+      expect(ss(`“It ended.” ${question}`)).toEqual(['“It ended.”', question]);
+      expect(segmentCaseNeutrally(`“It ended.” ${question}`)).toEqual(['“It ended.”', question]);
+    }, 5000);
+
     test('recognizes astral digits before measurement apostrophes', () => {
       const input = "The answer 'Yes' worked. It was 𝟝' tall. Next.";
       const expected = ["The answer 'Yes' worked.", "It was 𝟝' tall.", 'Next.'];
