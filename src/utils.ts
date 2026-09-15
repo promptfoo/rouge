@@ -1593,7 +1593,7 @@ function pathOrAddressTokenChecker(input: string): (index: number) => boolean {
     while (end < input.length && !/\s/.test(input[end])) {
       end++;
     }
-    const token = input.slice(start, end).replace(/^["'“‘«‹„‚「『([{<]+/, '');
+    const token = input.slice(start, end).replace(/^["'“‘”«‹„‚「『([{<]+/, '');
     pathOrAddress = /[\\/]/.test(token) || token.includes('@') || /^www\./i.test(token);
     return pathOrAddress;
   };

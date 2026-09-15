@@ -4162,3 +4162,11 @@ describe('Single-guillemet citation quotation context', () => {
     }
   });
 });
+
+test('retains numeric hostname components inside right-double quotation marks', () => {
+  for (const caseNeutral of [false, true]) {
+    for (const input of ['”www.example.com.1”', 'See ”www.example.com.1” Next.']) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  }
+});
