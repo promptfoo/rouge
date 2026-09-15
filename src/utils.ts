@@ -708,7 +708,7 @@ function isStandalonePronounContinuation(input: string): boolean {
 const numericSentenceStartReg = /^(?:[+−-]?\p{Sc}?|\p{Sc}[+−-]?)\.?\p{Number}/u;
 
 const ellipsisQuantityContinuationReg =
-  /^\S+(?:\s*%|\s+(?:time|year|month|week|day|hour|minute|second|star|point|percent)s?)(?=\s*[.!?][\])}>"'”’»“]*(?:\s|$)|\s*[\])}>"'”’»“]*$)/iu;
+  /^\S+(?:\s*%|\s+(?:time|year|month|week|day|hour|minute|second|star|point|percent)s?)(?=\s*[.!?][\])}>"'”’»“›]*(?:\s|$)|\s*[\])}>"'”’»“›]*$)/iu;
 
 class TypographicQuotationStack {
   #quotes = new Uint8Array(32);
@@ -721,7 +721,7 @@ class TypographicQuotationStack {
 
   at(index: number): string | undefined {
     const position = index < 0 ? this.length + index : index;
-    return position >= 0 && position < this.length ? '”’»“'[this.#quotes[position]] : undefined;
+    return position >= 0 && position < this.length ? '”’»“›'[this.#quotes[position]] : undefined;
   }
 
   push(quote: string): void {
@@ -730,7 +730,7 @@ class TypographicQuotationStack {
       expanded.set(this.#quotes);
       this.#quotes = expanded;
     }
-    this.#quotes[this.length++] = '”’»“'.indexOf(quote);
+    this.#quotes[this.length++] = '”’»“›'.indexOf(quote);
     if (quote === '”') {
       this.#englishDepth++;
     }
@@ -772,6 +772,8 @@ interface EllipsisQuotationSource {
   input: string;
   index: number;
   flags: Uint8Array;
+  angles: Uint8Array | undefined;
+  angleIndex: number;
 }
 
 class CurlyApostropheCandidates {
@@ -824,7 +826,7 @@ class StraightApostropheCandidates {
     } else if (
       (index === 0 || /[\s\p{Punctuation}]$/u.test(previous)) &&
       following.length > 0 &&
-      !/^[\s.,!?;:)\]}”’»\p{Pd}]$/u.test(following)
+      !/^[\s.,!?;:)\]}”’»›\p{Pd}]$/u.test(following)
     ) {
       this.#candidate = undefined;
       this.#opening = index;
@@ -1053,9 +1055,9 @@ function trackTypographicQuote(
     closers.pop();
     return true;
   }
-  const opening = '“‘«„'.indexOf(character);
+  const opening = '“‘«„‹'.indexOf(character);
   if (opening !== -1) {
-    closers.push('”’»“'[opening]);
+    closers.push('”’»“›'[opening]);
     return true;
   }
   return false;
@@ -1078,6 +1080,7 @@ class InlineAsideMatches {
   constructor(
     private readonly input: string,
     private readonly flags: Uint8Array,
+    private readonly angles: Uint8Array | undefined,
   ) {}
 
   isInline(offset: number, caseNeutral: boolean): boolean {
@@ -1087,11 +1090,11 @@ class InlineAsideMatches {
     }
     const opening = this.input.startsWith('``', start)
       ? 5
-      : '([{<"\'“‘«„'.indexOf(this.input[start] ?? '');
+      : '([{<"\'“‘«„‹'.indexOf(this.input[start] ?? '');
     if (opening === -1 || start === this.input.length) {
       return false;
     }
-    this.#ends ??= indexAsideMatches(this.input, this.flags);
+    this.#ends ??= indexAsideMatches(this.input, this.flags, this.angles);
     const end = this.#ends[start];
     if (end === 0) {
       return false;
@@ -1161,7 +1164,7 @@ function indexAsciiAsideMatch(
   return 0;
 }
 
-function indexAsideMatches(input: string, flags: Uint8Array): Uint32Array {
+function indexAsideQuotationMatches(input: string, flags: Uint8Array): Uint32Array {
   const ends = new Uint32Array(input.length);
   const typography = new TypographicQuotationStack();
   const typographicStarts = new SourcePositions();
@@ -1184,6 +1187,15 @@ function indexAsideMatches(input: string, flags: Uint8Array): Uint32Array {
       index += asciiLength - 1;
     }
   }
+  return ends;
+}
+
+function indexAsideMatches(
+  input: string,
+  flags: Uint8Array,
+  angles: Uint8Array | undefined,
+): Uint32Array {
+  const ends = indexAsideQuotationMatches(input, flags);
   const brackets = new SourcePositions();
   for (let index = 0; index < input.length; index++) {
     const quoteEnd = ends[index];
@@ -1192,6 +1204,9 @@ function indexAsideMatches(input: string, flags: Uint8Array): Uint32Array {
       continue;
     }
     const character = input[index];
+    if (/[<>]/.test(character) && angles?.[index] !== 1) {
+      continue;
+    }
     const openingKind = '([{<'.indexOf(character);
     const closingKind = ')]}>'.indexOf(character);
     if (
@@ -1253,9 +1268,10 @@ function ellipsisClosingDelimiterEnd(
   pendingAscii: AsciiQuotationContext & { closedBrackets: number },
   typographicQuoteClosers: TypographicQuotationStack,
   flags: Uint8Array,
-  protectQuotedBrackets: boolean,
+  threeDotEllipsis: boolean,
 ): number {
   let end = index + 1;
+  const startedSingle = pendingAscii.single;
   let remaining = typographicQuoteClosers.length;
   let englishDepth = typographicQuoteClosers.englishDepth;
   while (end < input.length) {
@@ -1279,7 +1295,8 @@ function ellipsisClosingDelimiterEnd(
     if (
       isUnpendingAsciiQuote(input, end, pendingAscii) &&
       remaining === 0 &&
-      typographicQuoteClosers.length > 0
+      (typographicQuoteClosers.length > 0 ||
+        (threeDotEllipsis && startedSingle && !pendingAscii.single && input[end] === '"'))
     ) {
       break;
     }
@@ -1293,7 +1310,7 @@ function ellipsisClosingDelimiterEnd(
     }
     if (ellipsisClosingDelimiterReg.test(input[end])) {
       pendingAscii.closedBrackets += Number(
-        isOuterClosingBracket(input[end], pendingAscii, remaining, protectQuotedBrackets),
+        isOuterClosingBracket(input[end], pendingAscii, remaining, threeDotEllipsis),
       );
       pendingAscii.double &&= input[end] !== '"';
       pendingAscii.single &&= input[end] !== "'";
@@ -1308,6 +1325,7 @@ function ellipsisClosingDelimiterEnd(
       next < input.length &&
       (closingBracketReg.test(input[next]) ||
         isPendingDoubleCloser(input, next, pendingAscii.double) ||
+        (threeDotEllipsis && isPendingSingleCloser(input, next, pendingAscii.single)) ||
         (remaining > 0 &&
           isTypographicCloser(
             input[next],
@@ -1352,6 +1370,15 @@ function isPendingDoubleCloser(input: string, index: number, pending: boolean): 
   return pending && (input[index] === '"' || input.startsWith("''", index));
 }
 
+function isPendingSingleCloser(input: string, index: number, pending: boolean): boolean {
+  const following = input[index + 1] ?? '';
+  return (
+    pending &&
+    input[index] === "'" &&
+    (following.length === 0 || /[\s.,!?;:)\]}"”’»›\p{Pd}]/u.test(following))
+  );
+}
+
 function skipWhitespace(input: string, index: number, allowLineBreaks = true): number {
   let end = index;
   while (
@@ -1382,7 +1409,7 @@ function blocksUnspacedQuotationStart(
     (threeDotEllipsis &&
       asciiQuotes.single &&
       input[index] === "'" &&
-      (/[“‘«„]/.test(input[index + 1] ?? '') || input.startsWith('``', index + 1)))
+      !input.startsWith("''", index))
   );
 }
 
@@ -1436,7 +1463,11 @@ function ellipsisSentenceEnd(
   }
   const adjacentQuotation =
     (closedAsciiQuotation || typographicQuoteClosers.length > 0) &&
-    isUnspacedEllipsisStart(input, end - 1, caseNeutral);
+    (isUnspacedEllipsisStart(input, end - 1, caseNeutral) ||
+      (threeDotEllipsis &&
+        asciiQuotes.single &&
+        closedAsciiQuotation &&
+        isCasedCharacter(characterAt(input, end))));
   if (end < input.length && !/\s/.test(input[end]) && !adjacentQuotation) {
     return isUnspacedBoundary(index, end) ? end : -1;
   }
@@ -1535,7 +1566,7 @@ function isNeutralEllipsisSentenceStart(
 
 function ellipsisOpeningDelimiterEnd(input: string, start: number, allowWhitespace = true): number {
   let next = start;
-  const opening = /["'([{<“‘«„]/;
+  const opening = /["'([{<“‘«„‹]/;
   while (next < input.length) {
     if (opening.test(input[next]) || (allowWhitespace && /\s/.test(input[next]))) {
       next++;
@@ -1616,7 +1647,14 @@ class EllipsisDelimiterState {
       const character = text[index];
       const previous = text[index - 1] ?? this.#lastCharacter;
       const flags = this.#quoteFlags(character);
-      if (trackTreebankQuotation(text, index, flags, this.#asciiQuotes)) {
+      if (
+        trackTreebankQuotation(
+          character === "'" ? this.quotationSource.input : text,
+          character === "'" ? this.quotationSource.index - 1 : index,
+          flags,
+          this.#asciiQuotes,
+        )
+      ) {
         if (character === "'") {
           this.#quoteFlags("'");
         }
@@ -1641,10 +1679,18 @@ class EllipsisDelimiterState {
   }
 
   #trackBracket(text: string, index: number): void {
+    const character = text[index];
+    if (/[<>]/.test(character)) {
+      const source = this.quotationSource;
+      const position = source.input.indexOf(character, source.angleIndex);
+      source.angleIndex = position + 1;
+      if (source.angles?.[position] !== 1) {
+        return;
+      }
+    }
     if (hasOpenQuotation(this.#asciiQuotes, this.#typographicQuoteClosers)) {
       return;
     }
-    const character = text[index];
     if (
       openingBracketReg.test(character) &&
       (character !== '<' || /^\p{Letter}$/u.test(characterAt(text, index + 1)))
@@ -1870,9 +1916,15 @@ export function sentenceSegment(input: string, options: SentenceSegmentOptions =
     input: normalizedInput,
     index: 0,
     flags: quotationFlags(normalizedInput),
+    angles: matchedAngleDelimiters(normalizedInput),
+    angleIndex: 0,
   };
   const chunkStarts = new SourcePositions();
-  const asideMatches = new InlineAsideMatches(normalizedInput, ellipsisSource.flags);
+  const asideMatches = new InlineAsideMatches(
+    normalizedInput,
+    ellipsisSource.flags,
+    ellipsisSource.angles,
+  );
   const { chunks, quotedEnds } = sentenceChunks(
     source.input,
     caseNeutral,
@@ -1880,6 +1932,7 @@ export function sentenceSegment(input: string, options: SentenceSegmentOptions =
     ellipsisSource.flags,
     chunkStarts,
     asideMatches,
+    ellipsisSource.angles,
     (options as InternalSentenceSegmentOptions)[skipListDetection]
       ? nestedMarkerPeriods(normalizedInput, caseNeutral)
       : undefined,
@@ -2097,9 +2150,16 @@ function ellipsisQuestionChecker(
   caseNeutral: boolean,
   flags: Uint8Array,
   asideMatches: InlineAsideMatches,
+  angles: Uint8Array | undefined,
 ): (boundaryEnd: number) => (index: number) => boolean {
   return (boundaryEnd) => {
-    const delimiters = new EllipsisDelimiterState({ input, index: boundaryEnd, flags });
+    const delimiters = new EllipsisDelimiterState({
+      input,
+      index: boundaryEnd,
+      flags,
+      angles,
+      angleIndex: boundaryEnd,
+    });
     let through = boundaryEnd;
     return (index) => {
       const end = index + 3;
@@ -3220,6 +3280,7 @@ function sentenceChunks(
   flags: Uint8Array,
   starts: SourcePositions,
   asideMatches: InlineAsideMatches,
+  angles: Uint8Array | undefined,
   markerPeriods?: Uint8Array,
 ): { chunks: string[]; quotedEnds: Set<number> } {
   const chunks: string[] = [];
@@ -3246,7 +3307,7 @@ function sentenceChunks(
     depth: 0,
     standalone: false,
     bracketQuoteEnd: -1,
-    angles: matchedAngleDelimiters(input),
+    angles,
   };
   const citationState: CitationScanState = {
     index: -1,
@@ -3264,6 +3325,7 @@ function sentenceChunks(
     citationState,
     flags,
     asideMatches,
+    angles,
     markerPeriods,
   );
   const isPathOrAddress = pathOrAddressTokenChecker(input, caseNeutral);
@@ -3299,7 +3361,7 @@ function sentenceChunks(
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
-    advanceEllipsisScan(input, index, flags[index], start === -1, ellipsisState);
+    advanceEllipsisScan(input, index, flags[index], start === -1, ellipsisState, angles);
     if (pairs[index] !== 0) {
       trackQuotations(input, index, quotations, pairs);
       closingQuotes = closingQuotationMarks(quotations);
@@ -3448,6 +3510,7 @@ function advanceEllipsisScan(
   flags: number,
   standalone: boolean,
   state: EllipsisScanState,
+  angles: Uint8Array | undefined,
 ): void {
   state.through = trackSourceAsciiQuotation(input, index, flags, state.ascii, state.through);
   trackTypographicQuote(input, index, state.typography, flags);
@@ -3455,7 +3518,10 @@ function advanceEllipsisScan(
   if (state.typography.length === state.typographyFloor) {
     state.retainedQuotation = false;
   }
-  if (!hasOpenQuotation(state.ascii, state.typography)) {
+  if (
+    !hasOpenQuotation(state.ascii, state.typography) &&
+    (!/[<>]/.test(input[index]) || angles?.[index] === 1)
+  ) {
     trackBracketDepth(input[index], standalone, state.brackets);
   }
 }
@@ -5343,9 +5409,10 @@ function questionTerminalChecker(
   citationState: CitationScanState,
   flags: Uint8Array,
   asideMatches: InlineAsideMatches,
+  angles: Uint8Array | undefined,
   markerPeriods?: Uint8Array,
 ): (start: number, boundaryEnd: number) => boolean {
-  const questionEllipses = ellipsisQuestionChecker(input, caseNeutral, flags, asideMatches);
+  const questionEllipses = ellipsisQuestionChecker(input, caseNeutral, flags, asideMatches, angles);
   const questionCitations = citationQuestionChecker(input, caseNeutral, citationState);
   const nextTerminal = unquotedTerminalScanner(input, pairs, caseNeutral);
   const continuesToken = questionTokenChecker(input, caseNeutral);

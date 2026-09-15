@@ -11099,3 +11099,198 @@ describe('Retained ellipsis forms keep only their current outer quotation', () =
     },
   );
 });
+
+describe('Ellipsis delimiter handoffs use the complete source context', () => {
+  test.each([' ', '\t', '\n', '  '])('consumes a pending single closer after %j', (gap) => {
+    const first = `He said 'Enough...${gap}'`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next sentence.`, { caseNeutral })).toEqual([
+        first.replaceAll('\n', ' '),
+        'Next sentence.',
+      ]);
+      const nested = `He said "She said 'Enough...${gap}' More."`;
+      expect(rouge.sentenceSegment(`${nested} Next.`, { caseNeutral })).toEqual([
+        nested.replaceAll('\n', ' '),
+        'Next.',
+      ]);
+    }
+  });
+
+  test.each(['Next sentence.', '"Next sentence."'])(
+    'keeps the single closer before an adjacent %s',
+    (next) => {
+      const first = "He said 'Enough...'";
+      expect(rouge.sentenceSegment(first + next)).toEqual([first, next]);
+      expect(rouge.sentenceSegment(first + next, { caseNeutral: true })).toEqual([first, next]);
+      expect(rouge.sentenceSegment((first + next).toLowerCase(), { caseNeutral: true })).toEqual([
+        first.toLowerCase(),
+        next.toLowerCase(),
+      ]);
+    },
+  );
+
+  test('consumes a spaced single closer before an ASCII opening quote', () => {
+    const first = "He said 'Enough... '";
+    const second = '"Next sentence."';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(first + second, { caseNeutral })).toEqual([first, second]);
+      const ambiguous = `${first}Next sentence.`;
+      expect(rouge.sentenceSegment(ambiguous, { caseNeutral })).toEqual([ambiguous]);
+    }
+  });
+
+  test.each([
+    "He said 'Enough...'and then continued.",
+    "He said 'Enough...'before leaving.",
+    "He said 'Enough...'5 examples followed.",
+    "He said 'Enough...''cause it rained.",
+    "He said 'Enough...''Next sentence.'",
+    "He said 'Enough... ' (or more) today.",
+    'He said "She said \'Enough...\'Next sentence."',
+  ])('retains the existing continuation or pending outer quotation in %s', (input) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test.each(['....', ' . . . .'])(
+    'preserves the spaced single-closer priority after %s',
+    (dots) => {
+      const first = `He said 'Enough${dots}`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`${first} ' Next sentence.`, { caseNeutral })).toEqual([
+          first,
+          "' Next sentence.",
+        ]);
+      }
+    },
+  );
+
+  test('retains single-guillemet contents and releases completed quotations', () => {
+    const input = 'He said ‹Alpha... Beta.› today.';
+    expect(rouge.sentenceSegment(input)).toEqual([input]);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([
+      'He said ‹Alpha... Beta.›',
+      'today.',
+    ]);
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('He said ‹Enough...› Next sentence.', { caseNeutral })).toEqual([
+        'He said ‹Enough...›',
+        'Next sentence.',
+      ]);
+      expect(rouge.sentenceSegment('He said ‹Enough...›"Next sentence."', { caseNeutral })).toEqual(
+        ['He said ‹Enough...›', '"Next sentence."'],
+      );
+      expect(rouge.sentenceSegment("He said 'Enough...'‹Next sentence.›", { caseNeutral })).toEqual(
+        ["He said 'Enough...'", '‹Next sentence.›'],
+      );
+    }
+  });
+
+  test.each([
+    'He paused... ‹Perhaps deliberately,› before answering.',
+    'He paused... (‹inside [literal› aside) before answering.',
+    'Alpha... ‹100 points.›',
+  ])('keeps a single-guillemet aside or complete quantity in %s', (input) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test.each([
+    'He said ‹“Alpha... Beta.” More.›',
+    'He said “‹Alpha... Beta.› More.”',
+    'He said ‹Alpha... [Beta...› and left...',
+  ])('retains mixed quotation ownership and literal brackets in %s', (first) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+    }
+  });
+
+  test.each(['a<b', 'a< b', 'a <b', 'a < b', 'α<β', '1<2'])(
+    'treats an unmatched angle comparison as prose before an ellipsis: %s',
+    (comparison) => {
+      const first = `The expression ${comparison} is true...`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`${first} Beta followed.`, { caseNeutral })).toEqual([
+          first,
+          'Beta followed.',
+        ]);
+      }
+    },
+  );
+
+  test.each(['"Quoted > symbol."', "'Quoted > symbol.'", '‹Quoted > symbol.›'])(
+    'does not borrow an angle closer from %s',
+    (quoted) => {
+      const first = 'The expression x<y is true...';
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`${first} ${quoted} Next.`, { caseNeutral })).toEqual([
+          first,
+          quoted,
+          'Next.',
+        ]);
+      }
+    },
+  );
+
+  test('keeps matched angle spans and the existing angle-aside syntax', () => {
+    for (const caseNeutral of [false, true]) {
+      const first = 'The expression <Alpha... Beta.> ended...';
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+      for (const input of [
+        'Alpha... <Perhaps> before answering.',
+        "Alpha... <quoted 'literal >' text> continued.",
+      ]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+      for (const next of ['<5> before answering.', '< 5 > before answering.']) {
+        expect(rouge.sentenceSegment(`Alpha... ${next}`, { caseNeutral })).toEqual([
+          'Alpha...',
+          next,
+        ]);
+      }
+    }
+  });
+
+  test('aligns angle context across accepted citations, line wraps and question lookahead', () => {
+    for (const caseNeutral of [false, true]) {
+      const body = 'The expression x<y is true... Beta followed.';
+      for (const [prefix, separator] of [
+        ['Alpha.[1]', ' '],
+        ['Intro.', '\n'],
+      ]) {
+        expect(rouge.sentenceSegment(prefix + separator + body, { caseNeutral })).toEqual([
+          prefix,
+          'The expression x<y is true...',
+          'Beta followed.',
+        ]);
+      }
+      expect(
+        rouge.sentenceSegment('"No." Was x<y true... Next question?', { caseNeutral }),
+      ).toEqual(['"No." Was x<y true...', 'Next question?']);
+    }
+  });
+
+  test.each(["''", '``'])(
+    'keeps a %s alias opener whose closer is in a later fragment',
+    (opening) => {
+      const input = `${opening}Outer... 'Inner...' tail... Next''`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        expect(rouge.sentenceSegment(`He said ${input}`, { caseNeutral })).toEqual([
+          `He said ${input}`,
+        ]);
+      }
+    },
+  );
+
+  test('preserves malformed alias recovery without consuming the next opening single quote', () => {
+    const input = "''Outer... 'Inner...' tail...";
+    expect(rouge.sentenceSegment(input)).toEqual([input]);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([
+      "''Outer... 'Inner...'",
+      'tail...',
+    ]);
+  });
+});
