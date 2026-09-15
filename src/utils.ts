@@ -777,10 +777,17 @@ export function sentenceSegment(
         const nextChunk = chunks[idx + 1];
         const nextSentence = nextChunk.trim() || chunks[idx + 2] || '';
         const sentenceStart = nextSentence.slice(openingDelimiterEnd(nextSentence, 0, true));
+        const parentheticalStart = chunkStarts.at(idx + 1) ?? sourceInput.length;
         const startsWithLetter = caseNeutral
           ? startsWithCasedCharacter(sentenceStart) &&
             (/\.{4}$/.test(suffix) ||
-              (!/^(?:what|and\s+then)\b/i.test(sentenceStart) &&
+              (!(
+                isElidedEllipsisContinuation(
+                  sourceInput,
+                  parentheticalStart,
+                  quotationSource.flags,
+                ) || /^(?:what|and\s+then)\b/i.test(sentenceStart)
+              ) &&
                 (!sentenceContinuationReg.test(sentenceStart) ||
                   independentSentenceReg.test(sentenceStart))))
           : strIsTitleCase(sentenceStart);
@@ -795,9 +802,9 @@ export function sentenceSegment(
               chunk.hasOpenDelimiter ||
               /\b(?:am|is|are|was|were|be|been|being|i)\.{3}$/i.test(suffix)
             ));
-        const parentheticalStart = chunkStarts.at(idx + 1) ?? sourceInput.length;
         if (terminalBoundary && !asideMatches.isInline(parentheticalStart, caseNeutral)) {
           acc.push(chunk.text());
+          chunks[idx + 1] = nextChunk.replace(/^[^\S\r\n]+/, '');
           continue;
         }
         chunk.append(nextChunk.replace(/ +/g, ' '));
@@ -815,6 +822,12 @@ export function sentenceSegment(
 
   // If no matches were found, return the input treated as a single sentence
   return acc.length === 0 ? [input] : acc;
+}
+
+/** Confirmed leading elisions of because/until retain their continuation meaning. */
+function isElidedEllipsisContinuation(input: string, start: number, flags: Uint8Array): boolean {
+  const index = skipWhitespace(input, start);
+  return (flags[index] & 3) !== 0 && /^['‘’](?:cause|till?)\b/i.test(input.slice(index, index + 8));
 }
 
 function isTypographicCloser(
@@ -1411,11 +1424,26 @@ function sentenceEnd(
 
   if (
     !followsClosingDelimiter(input, end, caseNeutral, suffix, terminalEllipsis) ||
-    (threeDotEllipsis && closesQuotation && asideMatches.isInline(end, caseNeutral))
+    (threeDotEllipsis &&
+      closesQuotation &&
+      isQuotedEllipsisContinuation(input, end, caseNeutral, flags, asideMatches))
   ) {
     return -1;
   }
   return end;
+}
+
+function isQuotedEllipsisContinuation(
+  input: string,
+  end: number,
+  caseNeutral: boolean,
+  flags: Uint8Array,
+  asideMatches: InlineAsideMatches,
+): boolean {
+  return (
+    (caseNeutral && isElidedEllipsisContinuation(input, end, flags)) ||
+    asideMatches.isInline(end, caseNeutral)
+  );
 }
 
 function followsClosingDelimiter(

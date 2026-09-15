@@ -2717,6 +2717,87 @@ describe('Utility Functions', () => {
         expect(segmentCaseNeutrally(input)).toEqual([input]);
       });
 
+      test.each(['\t', '\u00a0', '\u2003', ' \t  '])(
+        'trims the horizontal separator %j after a terminal ellipsis',
+        (gap) => {
+          for (const dots of ['...', '....']) {
+            for (const next of ['“Beta.”', '‘Beta.’', '"Beta."', 'Beta.']) {
+              const first = `Alpha${dots}`;
+              expect(ss(`${first}${gap}${next}`)).toEqual([first, next]);
+              expect(segmentCaseNeutrally(`${first}${gap}${next}`)).toEqual([first, next]);
+            }
+          }
+        },
+      );
+
+      test('preserves horizontal whitespace within ellipsis continuations and quotations', () => {
+        for (const input of [
+          'He paused...\t(Perhaps) before leaving.',
+          'He paused...\tbefore leaving.',
+        ]) {
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+        }
+        const next = '“Beta\t Gamma.”';
+        expect(ss(`Alpha...\t${next}`)).toEqual(['Alpha...', next]);
+        expect(segmentCaseNeutrally(`Alpha...\t${next}`)).toEqual(['Alpha...', next]);
+      });
+
+      test('preserves the existing ordinary-period and initial-fragment whitespace rules', () => {
+        for (const segment of [ss, segmentCaseNeutrally]) {
+          expect(segment('Alpha.\t“Beta.”')).toEqual(['Alpha.', '\t“Beta.”']);
+          expect(segment('\t“Beta.”')).toEqual(['\t“Beta.”']);
+        }
+      });
+
+      test.each(["'", '‘', '’'])(
+        'retains confirmed %s elided subordinators after a neutral ellipsis',
+        (apostrophe) => {
+          for (const word of ['cause', 'Cause', 'til', 'Til', 'till', 'Till']) {
+            const input = `We waited... ${apostrophe}${word} it rained.`;
+            expect(segmentCaseNeutrally(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+          }
+        },
+      );
+
+      test.each([
+        "'cause and effect mattered.'",
+        '‘cause and effect mattered.’',
+        "'til is a word.'",
+        'Cause and effect mattered.',
+        'Til is a name.',
+      ])('retains an independent quoted or bare sentence %s', (next) => {
+        expect(segmentCaseNeutrally(`We waited... ${next}`)).toEqual(['We waited...', next]);
+      });
+
+      test('retains four-dot priority before an elided subordinator', () => {
+        const next = "'cause it rained.";
+        expect(segmentCaseNeutrally(`We waited.... ${next}`)).toEqual(['We waited....', next]);
+      });
+
+      test.each([
+        ['"', '"'],
+        ["'", "'"],
+        ['``', "''"],
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('retains elided continuations after completed %s%s quotations', (opening, closing) => {
+        for (const apostrophe of ["'", '‘', '’']) {
+          for (const word of ['cause', 'til', 'till']) {
+            const next = `${apostrophe}${word} it rained.`;
+            const first = `He said ${opening}Enough...${closing}`;
+            const input = `${first} ${next}`;
+            expect(segmentCaseNeutrally(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+            const four = `He said ${opening}Enough....${closing}`;
+            expect(segmentCaseNeutrally(`${four} ${next}`)).toEqual([four, next]);
+          }
+        }
+      });
+
       test.each(['.5', '0.5'])(
         'retains the existing spaced-four-dot priority before %s quantities',
         (number) => {
