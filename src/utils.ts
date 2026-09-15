@@ -146,8 +146,17 @@ function isAbbreviationException(
       /\bv\.?s\.$/i.test(suffix) &&
       (endsDelimitedSentence ||
         /\b(?:am|is|are|was|were|be|been|being)\s+v\.?s\.$/i.test(suffix) ||
-        /^(?:this|that|these|those|it|we|they|he|she|i)\b/i.test(continuation))
+        isStandalonePronounContinuation(continuation))
     )
+  );
+}
+
+function isStandalonePronounContinuation(input: string): boolean {
+  // Retain the existing ASCII /i matching; Unicode /iu would also match long-s in ſhe.
+  const pronoun = input.match(/^(?:this|that|these|those|it|we|they|he|she|i)/i)?.[0];
+  return (
+    pronoun !== undefined &&
+    !/^[\p{ID_Continue}\p{Pd}\u200c\u200d]$/u.test(characterAt(input, pronoun.length))
   );
 }
 

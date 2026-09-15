@@ -3996,3 +3996,38 @@ describe('Paired outer quotation context for versus boundaries', () => {
     }
   });
 });
+
+describe('Standalone versus pronoun continuations', () => {
+  test.each([
+    'He-Man',
+    'She-Hulk',
+    'He‐Man',
+    'She–Hulk',
+    'Héctor',
+    'Héctor',
+    'He\u200cMan',
+    'ſhe-Hulk',
+    'ſhe',
+  ])('retains comparison opponent %s', (opponent) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const input = `Batman ${versus} ${opponent} won.`;
+      expect(rouge.sentenceSegment(input)).toEqual([input]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        input.toLowerCase(),
+      ]);
+    }
+  });
+
+  test.each(['He won.', "He'll win.", 'He’s ready.', 'They agreed.', 'This is clearer.'])(
+    'retains the genuine pronoun continuation %s',
+    (next) => {
+      for (const versus of ['vs.', 'v.s.']) {
+        const first = `Batman ${versus}`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(`${first} ${next}`, { caseNeutral })).toEqual([first, next]);
+        }
+      }
+    },
+  );
+});
