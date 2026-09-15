@@ -2425,6 +2425,39 @@ describe('Utility Functions', () => {
         expect(segmentCaseNeutrally(input)).toEqual(expected);
       });
 
+      test.each([
+        ['"', '"'],
+        ["'", "'"],
+        ['``', "''"],
+        ["''", "''"],
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('keeps quoted bracket closers %s%s from closing an outer bracket', (open, close) => {
+        for (const [left, right] of [
+          ['(', ')'],
+          ['[', ']'],
+          ['{', '}'],
+          ['<', '>'],
+        ]) {
+          for (const literal of [')', ']', '}', '>', ')]']) {
+            const quoted = `${open}Maybe...${literal}${close}`;
+            const continued = `The choices were ${left}${quoted} Next.${right}`;
+            expect(ss(continued)).toEqual([continued]);
+            expect(segmentCaseNeutrally(continued)).toEqual([continued]);
+            expect(segmentCaseNeutrally(continued.toLowerCase())).toEqual([
+              continued.toLowerCase(),
+            ]);
+            const first = `The choices were ${left}${quoted}${right}`;
+            // ASCII single quotes after an angle retain their existing continuation policy.
+            const expected = left === '<' && open === "'" ? [`${first} Next.`] : [first, 'Next.'];
+            expect(ss(`${first} Next.`)).toEqual(expected);
+            expect(segmentCaseNeutrally(`${first} Next.`)).toEqual(expected);
+          }
+        }
+      });
+
       test.each(['\n', '\r\n', '\u2028', '\u2029'])(
         'uses complete source offsets for a punctuated aside wrapped with %j',
         (wrap) => {

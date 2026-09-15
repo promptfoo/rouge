@@ -1248,11 +1248,11 @@ function isProtectedEllipsisPeriod(
   return range !== undefined && position >= range.start && position !== range.boundary;
 }
 
-/** Scan closing delimiters, updating the caller's copied ASCII quotation context. */
+/** Scan closing delimiters, updating copied quote state and the outer bracket count. */
 function closingDelimiterEnd(
   input: string,
   index: number,
-  pendingAscii: AsciiQuotationContext,
+  pendingAscii: AsciiQuotationContext & { closedBrackets: number },
   typographicQuoteClosers: TypographicQuotationStack | undefined,
   flags: Uint8Array,
 ): number {
@@ -1293,6 +1293,14 @@ function closingDelimiterEnd(
       continue;
     }
     if (closingDelimiterReg.test(input[end])) {
+      pendingAscii.closedBrackets += Number(
+        isOuterClosingBracket(
+          input[end],
+          pendingAscii,
+          remaining,
+          typographicQuoteClosers !== undefined,
+        ),
+      );
       pendingAscii.double &&= input[end] !== '"';
       pendingAscii.single &&= input[end] !== "'";
       end++;
@@ -1320,6 +1328,19 @@ function closingDelimiterEnd(
     break;
   }
   return end > index + 1 && remaining > 0 ? -1 : end;
+}
+
+function isOuterClosingBracket(
+  character: string,
+  asciiQuotes: AsciiQuotationContext,
+  typographicDepth: number,
+  protectQuotedBrackets: boolean,
+): boolean {
+  // Ordinary punctuation retains its existing lexical bracket count.
+  return (
+    closingBracketReg.test(character) &&
+    (!protectQuotedBrackets || (typographicDepth === 0 && !hasOpenAsciiQuotation(asciiQuotes)))
+  );
 }
 
 function isUnpendingAsciiQuote(
@@ -1389,7 +1410,7 @@ function sentenceEnd(
   ) {
     return index + 1;
   }
-  const pendingAscii = { ...asciiQuotes };
+  const pendingAscii = { ...asciiQuotes, closedBrackets: 0 };
   const end = closingDelimiterEnd(
     input,
     index,
@@ -1400,7 +1421,7 @@ function sentenceEnd(
   if (end === -1) {
     return -1;
   }
-  const closedBrackets = countClosingBrackets(input, index + 1, end);
+  const closedBrackets = pendingAscii.closedBrackets;
   const closedAsciiQuotation = closesAsciiQuotation(
     input,
     end,
@@ -1507,16 +1528,6 @@ function isNeutralEllipsisSentenceStart(
     isNeutralSentenceStart(input, end, next) &&
     !(/(?<!\.)\.{3}$/.test(suffix) && /^(?:what|and\s+then)\b/i.test(input.slice(next)))
   );
-}
-
-function countClosingBrackets(input: string, start: number, end: number): number {
-  let count = 0;
-  for (let index = start; index < end; index++) {
-    if (closingBracketReg.test(input[index])) {
-      count++;
-    }
-  }
-  return count;
 }
 
 /** Treat a supported Treebank opener as one token, preserving ordinary punctuation rules. */
