@@ -12,6 +12,7 @@ import {
 export * from './utils';
 
 const whitespaceOnlyReg = /^[\s\u0085]*$/;
+const maxLcsSentencePairs = 100_000;
 
 /** Options for ROUGE-N evaluation */
 export interface RougeNOptions {
@@ -354,6 +355,10 @@ export function s(cand: string, ref: string, opts?: RougeSOptions): number {
 /**
  * Computes the ROUGE-L score for a candidate summary
  *
+ * With built-in segmentation and LCS, nonempty tokenized summaries are limited to
+ * 100,000 candidate/reference sentence pairs; larger comparisons throw RangeError.
+ * Custom tokenizers retain this limit. Custom segmenters or LCS callbacks manage their own work.
+ *
  * Configuration object schema and defaults:
  * ```
  * {
@@ -411,6 +416,15 @@ export function l(cand: string, ref: string, opts?: RougeLOptions): number {
 
   if (candLength === 0 || refLength === 0) {
     return 0;
+  }
+
+  if (
+    segmenter === utils.sentenceSegment &&
+    getLcs === utils.lcs &&
+    getLcsIndices === undefined &&
+    candidate.sentences.length > maxLcsSentencePairs / reference.sentences.length
+  ) {
+    throw new RangeError('ROUGE-L sentence comparison exceeds the work limit');
   }
 
   const matches = countSummaryLcsMatches(
