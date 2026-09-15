@@ -6,7 +6,7 @@ export default {
   testEnvironment: 'node',
 
   // The glob patterns Jest uses to detect test files
-  testMatch: ['**/test/**/*.ts', '**/?(*.)+(spec|test).ts'],
+  testMatch: ['**/?(*.)+(spec|test).ts'],
 
   // An array of file extensions your modules use
   moduleFileExtensions: ['js', 'json', 'jsx', 'ts', 'tsx', 'node'],
