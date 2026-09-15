@@ -2158,6 +2158,7 @@ function sentenceChunks(
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
   const hasUrlPrefix = urlPrefixChecker(input);
+  const hasFollowingAt = followingAtChecker(input);
   let lastEnd = 0;
   let start = -1;
   const quotations: QuotationState = {
@@ -2262,6 +2263,7 @@ function sentenceChunks(
         questionTerminal,
         hasUrlPrefix,
         pairs,
+        hasFollowingAt,
         unspacedDelimitedBoundary,
         citationState,
       );
@@ -2305,6 +2307,7 @@ function ordinarySentenceEnd(
   questionTerminal: (start: number, boundaryEnd: number) => boolean,
   hasUrlPrefix: (index: number) => boolean,
   pairs: Int32Array,
+  hasFollowingAt: (next: number) => boolean,
   unspacedDelimitedBoundary: boolean,
   citationState: CitationScanState,
 ): number {
@@ -2319,6 +2322,7 @@ function ordinarySentenceEnd(
         questionTerminal,
         hasUrlPrefix,
         pairs,
+        hasFollowingAt,
       );
   return end === -1 ||
     (closingQuotes.length > 1 && remainsInsideQuotation(input, index, end, closingQuotes, pairs)) ||
@@ -3697,6 +3701,7 @@ function sentenceEnd(
   questionTerminal: (start: number, boundaryEnd: number) => boolean,
   hasUrlPrefix: (end: number) => boolean,
   pairs: Int32Array,
+  hasFollowingAt: (next: number) => boolean,
 ): number {
   const insideQuotes = closingQuotes.length > 0;
   const end = closingDelimiterEnd(input, index, closingQuotes, pairs, brackets);
@@ -3721,6 +3726,7 @@ function sentenceEnd(
       end,
       caseNeutral,
       hasUrlPrefix(end),
+      hasFollowingAt,
       endsDelimitedSentence,
       closingQuotes,
       pairs,
@@ -4035,6 +4041,7 @@ function questionTerminalChecker(
   const questionCitations = citationQuestionChecker(input, caseNeutral, citationState);
   const nextTerminal = unquotedTerminalScanner(input, pairs, caseNeutral);
   const hasUrlPrefix = urlPrefixChecker(input);
+  const hasFollowingAt = followingAtChecker(input);
   const ellipsisCursor = { index: 0 };
   let through = -1;
   let question = false;
@@ -4079,6 +4086,7 @@ function questionTerminalChecker(
             terminal.index + 1,
             caseNeutral,
             insideUrl,
+            hasFollowingAt,
           ))
       ) {
         terminal = nextTerminal(terminal.index + terminal[0].length, argumentStart);
@@ -4198,6 +4206,25 @@ function urlPrefixChecker(input: string): (end: number) => boolean {
   };
 }
 
+/** Cache the last @ in each whitespace-delimited token for one monotone consumer. */
+function followingAtChecker(input: string): (next: number) => boolean {
+  let end = 0;
+  let lastAt = -1;
+  return (next) => {
+    if (next >= end) {
+      end = next;
+      lastAt = -1;
+      while (end < input.length && !/\s/.test(input[end])) {
+        if (input[end] === '@') {
+          lastAt = end;
+        }
+        end++;
+      }
+    }
+    return lastAt >= next;
+  };
+}
+
 function precedingIdentifierToken(input: string, index: number): string {
   let tokenStart = index;
   while (tokenStart > 0) {
@@ -4282,6 +4309,7 @@ function isUnspacedSentenceBoundary(
   next: number,
   caseNeutral: boolean,
   insideUrl: boolean,
+  hasFollowingAt: (next: number) => boolean,
   endsDelimitedSentence = false,
   closingQuotes = '',
   pairs?: Int32Array,
@@ -4333,7 +4361,7 @@ function isUnspacedSentenceBoundary(
     (trailingInitial && nextInitial.test(following)) ||
     insideAddress ||
     insideHostname ||
-    /^[^\s]*@/.test(following)
+    hasFollowingAt(next)
   );
 }
 
