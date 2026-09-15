@@ -83,7 +83,7 @@ jobs:
 
   validate-release:
     needs: release-please
-    if: ${{ needs.release-please.outputs.publish == 'true' }}
+    if: ${{ !cancelled() && needs.release-please.result == 'success' && needs.release-please.outputs.publish == 'true' }}
     uses: ./.github/workflows/validate-commit.yml
     permissions:
       checks: read
@@ -92,7 +92,7 @@ jobs:
 
   build:
     needs: [release-please, validate-release]
-    if: ${{ needs.release-please.outputs.publish == 'true' }}
+    if: ${{ !cancelled() && needs.release-please.result == 'success' && needs.validate-release.result == 'success' && needs.release-please.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -153,7 +153,7 @@ jobs:
 
   publish-npm:
     needs: [build, release-please]
-    if: ${{ needs.release-please.outputs.publish == 'true' }}
+    if: ${{ !cancelled() && needs.release-please.result == 'success' && needs.build.result == 'success' && needs.release-please.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
