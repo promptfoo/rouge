@@ -166,3 +166,11 @@ To retry an npm publication, run the **Release** workflow with `release_tag` set
 existing GitHub release tag. The tag must point to a commit in `main` history. The workflow
 validates and checks out that commit even when `main` has advanced. Release runs are
 serialized to avoid competing publications.
+
+The release workflow builds one tarball with `npm pack`, validates its installed runtime,
+types, and contents, then publishes that same tarball. Package builds run through `prepack`.
+The release workflow owns package verification; `npm publish` from a directory builds but
+does not run the consumer smoke tests.
+
+Run `npm run test:package` for a clean build and consumer smoke test. To validate an existing
+artifact without rebuilding it, run `npm run test:package -- /path/to/js-rouge-VERSION.tgz`.
