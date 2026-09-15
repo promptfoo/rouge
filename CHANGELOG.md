@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.2.3](https://github.com/promptfoo/js-rouge/compare/js-rouge-v3.2.2...js-rouge-v3.2.3) (2026-09-15)
+
+
+### Bug Fixes
+
+* preserve authenticated npm provenance identity ([#185](https://github.com/promptfoo/js-rouge/issues/185)) ([ef28c08](https://github.com/promptfoo/js-rouge/commit/ef28c08a59ade17354d29b683ff0e42cb02673ae))
+* publish the validated archive as a local file ([#182](https://github.com/promptfoo/js-rouge/issues/182)) ([4e69ab7](https://github.com/promptfoo/js-rouge/commit/4e69ab7cf2d5f403341d3b73f4ac60cdfdaad144))
+* run release retries after skipped initial validation ([#184](https://github.com/promptfoo/js-rouge/issues/184)) ([884d9ae](https://github.com/promptfoo/js-rouge/commit/884d9ae40afd9af58d62a67788fbbf5a3f0208a7))
+
 ## [3.2.2](https://github.com/promptfoo/js-rouge/compare/js-rouge-v3.2.1...js-rouge-v3.2.2) (2026-09-15)
 
 ### Bug Fixes
