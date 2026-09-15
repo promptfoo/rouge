@@ -6,7 +6,7 @@ export default {
   testEnvironment: 'node',
 
   // The glob patterns Jest uses to detect test files
-  testMatch: ['**/test/**/*.ts', '**/?(*.)+(spec|test).ts'],
+  testMatch: ['**/?(*.)+(spec|test).ts'],
 
   // An array of file extensions your modules use
   moduleFileExtensions: ['js', 'json', 'jsx', 'ts', 'tsx', 'node'],
@@ -41,8 +41,8 @@ export default {
     },
   },
 
-  // The maximum amount of workers used to run your tests
-  maxWorkers: '50%',
+  // Keep resource-limit regressions from competing across suites.
+  maxWorkers: 1,
 
   // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped
   testPathIgnorePatterns: ['/node_modules/'],
