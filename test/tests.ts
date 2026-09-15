@@ -3919,3 +3919,80 @@ describe('literal backticks and normalized versus context', () => {
     ]);
   }, 3000);
 });
+
+describe('Paired outer quotation context for versus boundaries', () => {
+  test.each(['vs.', 'v.s.'])('retains escaped literal brackets around %s', (versus) => {
+    for (const slashCount of [1, 3]) {
+      const input = `He noted ("literal ${'\\'.repeat(slashCount)}" ) sign" and "${versus}" Examples followed) today.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    }
+  });
+
+  test.each(['vs.', 'v.s.'])(
+    'preserves the pending ASCII/Treebank outer quote for %s',
+    (versus) => {
+      const inputs = [
+        `He said "The abbreviation is \`\`${versus} '' Examples" today.`,
+        `He said \`\`The abbreviation is "${versus}" Examples'' today.`,
+      ];
+      for (const input of inputs) {
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        }
+      }
+    },
+  );
+
+  test.each(['vs.', 'v.s.'])(
+    'keeps real copular terminal %s inside a multi-sentence quotation',
+    (versus) => {
+      for (const closing of ['"', '']) {
+        const first = `He said "The abbreviation is ${versus}`;
+        const next = `Alice replied.${closing}`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(`${first} ${next}`, { caseNeutral })).toEqual([first, next]);
+        }
+      }
+    },
+  );
+
+  test.each([
+    ['"', '"'],
+    ["'", "'"],
+    ['``', "''"],
+    ['‘', '’'],
+    ['“', '”'],
+    ['«', '»'],
+  ])('preserves a paragraph inside paired %s%s versus text', (opening, closing) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const input = `He said ${opening}Linux ${versus}\n\nWindows${closing} today.`;
+      const expected = input.replace(/\s+/g, ' ');
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([expected]);
+      }
+    }
+  });
+
+  test('preserves an unquoted paragraph after versus', () => {
+    const first = 'He said Linux vs.';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first}\n\nWindows today.`, { caseNeutral })).toEqual([
+        first,
+        'Windows today.',
+      ]);
+    }
+  });
+
+  test('keeps quote endpoint metadata aligned across many candidate boundaries', () => {
+    const first = 'He said “Linux vs. Windows” today.';
+    const input = `${'He said “Linux vs.\n\nWindows” today. '.repeat(5000)}Next.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+        ...new Array(5000).fill(first),
+        'Next.',
+      ]);
+    }
+  });
+});

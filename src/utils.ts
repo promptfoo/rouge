@@ -335,7 +335,7 @@ export function sentenceSegment(
   }
 
   // Scan terminals before applying abbreviation and line-wrap rules.
-  const chunks = sentenceChunks(input.replace(/\u0085/g, ' '), caseNeutral);
+  const { chunks, quotedEnds } = sentenceChunks(input.replace(/\u0085/g, ' '), caseNeutral);
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -416,7 +416,10 @@ export function sentenceSegment(
           : nextChunk;
         const paragraphBreak = /\n[^\S\n]*\n/.test(nextChunk.replace(/\r\n?/g, '\n'));
         if (
-          (paragraphBreak && /\bv\.?s\.$/i.test(gateSuffix) && !chunk.hasOpenDelimiter) ||
+          (paragraphBreak &&
+            /\bv\.?s\.$/i.test(gateSuffix) &&
+            !chunk.hasOpenDelimiter &&
+            !quotedEnds.has(idx)) ||
           ((caseNeutral
             ? startsWithCasedCharacter(nextSentence) &&
               (!sentenceContinuationReg.test(nextSentence) ||
@@ -723,8 +726,8 @@ function pairedBracketQuoteEnd(
 ): number {
   if (
     index <= currentEnd ||
-    !/['‘“«]/.test(input[index]) ||
-    input.startsWith("''", index) ||
+    !/["'`‘“«]/.test(input[index]) ||
+    (input[index] === '`' && !input.startsWith('``', index)) ||
     input[index - 1] === "'"
   ) {
     return currentEnd;
@@ -767,8 +770,12 @@ function updateBracketContext(
 }
 
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
-function sentenceChunks(input: string, caseNeutral: boolean): string[] {
+function sentenceChunks(
+  input: string,
+  caseNeutral: boolean,
+): { chunks: string[]; quotedEnds: Set<number> } {
   const chunks: string[] = [];
+  const quotedEnds = new Set<number>();
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
   let lastEnd = 0;
@@ -785,17 +792,15 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
+    brackets.bracketQuoteEnd = pairedBracketQuoteEnd(
+      input,
+      index,
+      brackets.bracketQuoteEnd,
+      bracketQuotePositions,
+    );
     insideQuotes = quotationState(input, index, insideQuotes);
-    if (!insideQuotes) {
-      brackets.bracketQuoteEnd = pairedBracketQuoteEnd(
-        input,
-        index,
-        brackets.bracketQuoteEnd,
-        bracketQuotePositions,
-      );
-      if (index >= brackets.bracketQuoteEnd) {
-        updateBracketContext(input, index, !sentenceStarted, brackets);
-      }
+    if (!insideQuotes && index >= brackets.bracketQuoteEnd) {
+      updateBracketContext(input, index, !sentenceStarted, brackets);
     }
     if (index < lastEnd || char === '\r' || char === '\n') {
       // Only closing-delimiter lookahead can cross CR/LF; other wraps reset the prefix.
@@ -810,11 +815,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       // A terminal must follow the initial character, even if it is punctuation.
       continue;
     }
-    if (
-      (char === '.' && !isProtectedEllipsisPeriod(index, protectedPeriods, ellipsisCursor)) ||
-      char === '?' ||
-      char === '!'
-    ) {
+    if (isUnprotectedTerminal(char, index, protectedPeriods, ellipsisCursor)) {
       const unspacedDelimitedBoundary = isUnspacedDelimitedSentenceStart(
         input,
         index,
@@ -830,6 +831,12 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       }
       // Captured line wraps can only occur between the terminal and closing delimiters.
       chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
+      if (
+        end <= brackets.bracketQuoteEnd &&
+        /\bv\.?s\.$/i.test(input.slice(Math.max(0, index - 4), index + 1))
+      ) {
+        quotedEnds.add(chunks.length - 1);
+      }
       lastEnd = end;
       start = -1;
       sentenceStarted =
@@ -838,7 +845,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   }
 
   chunks.push(input.slice(lastEnd));
-  return chunks;
+  return { chunks, quotedEnds };
 }
 
 function keepsAbbreviationContext(
@@ -923,6 +930,19 @@ function isUnmatchedAngleCloser(
   );
 }
 
+function isUnprotectedTerminal(
+  character: string,
+  index: number,
+  ranges: SpacedEllipsisRange[],
+  cursor: { index: number },
+): boolean {
+  return (
+    (character === '.' && !isProtectedEllipsisPeriod(index, ranges, cursor)) ||
+    character === '?' ||
+    character === '!'
+  );
+}
+
 /** Scan closing delimiters, including whitespace before a pending closing quote. */
 function closingDelimiterEnd(
   input: string,
@@ -980,6 +1000,9 @@ function sentenceEnd(
   const { closedBrackets, containsBracket, endsDelimitedSentence, endsDelimitedVersus } =
     closingDelimiterContext(input, index + 1, end, insideQuotes, suffix, brackets);
   const closesQuotation = insideQuotes && /(?:"|'')$/.test(input.slice(end - 2, end));
+  if (end > index + 1 && end <= brackets.bracketQuoteEnd && /\bv\.?s\.$/i.test(suffix)) {
+    return -1;
+  }
   if (endsDelimitedVersus && closedBrackets < brackets.depth) {
     return -1;
   }
