@@ -1,9 +1,9 @@
 /** Return LCS lengths for every prefix of b using linear auxiliary memory. */
 function prefixLengths(
-  a: string[],
+  a: readonly string[],
   aStart: number,
   aEnd: number,
-  b: string[],
+  b: readonly string[],
   bStart: number,
   bEnd: number,
 ): Uint32Array {
@@ -27,11 +27,11 @@ function prefixLengths(
  * matrix, so duplicate-token tie choices remain observable-identical.
  */
 function findSplit(
-  a: string[],
+  a: readonly string[],
   aStart: number,
   aMiddle: number,
   aEnd: number,
-  b: string[],
+  b: readonly string[],
   bStart: number,
   bEnd: number,
 ): number {
@@ -68,10 +68,10 @@ function findSplit(
  * full-matrix backtracking and linear auxiliary memory.
  */
 function collectLcsIndices(
-  a: string[],
+  a: readonly string[],
   aStart: number,
   aEnd: number,
-  b: string[],
+  b: readonly string[],
   bStart: number,
   bEnd: number,
   indices: number[],
@@ -96,7 +96,7 @@ function collectLcsIndices(
 }
 
 /** Returns the positions in b matched by a longest common subsequence of a and b. */
-export function lcsIndices(a: string[], b: string[]): number[] {
+export function lcsIndices(a: readonly string[], b: readonly string[]): number[] {
   const indices: number[] = [];
   collectLcsIndices(a, 0, a.length, b, 0, b.length, indices);
   return indices;

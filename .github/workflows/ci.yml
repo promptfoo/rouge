@@ -46,6 +46,8 @@ jobs:
       - run: npm run type-check
       - name: Biome CI check
         run: npx biome ci . --error-on-warnings
+      - name: Check Markdown formatting
+        run: npx prettier --check "**/*.md"
       - run: npm pack --pack-destination "$RUNNER_TEMP"
       - name: Verify build artifacts
         run: |
@@ -60,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [dependency-review, build]
     if: always()
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       checks: read
       statuses: read
@@ -69,4 +71,4 @@ jobs:
         uses: promptfoo/.github/.github/actions/ci-success@10fb60ee3167be1ffffaff46b0ad23ea66ab0d33 # main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          timeout-seconds: 300
+          timeout-seconds: 900
