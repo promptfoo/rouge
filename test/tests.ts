@@ -2750,6 +2750,53 @@ describe('Utility Functions', () => {
         }
       });
 
+      test.each([
+        'He said “Enough...”',
+        "He said 'Enough...'",
+        'He said "Enough..."',
+        "He said ``Enough...''",
+        '(Enough...)',
+        '[Enough...]',
+        '{Enough...}',
+        'He said “Enough....”',
+      ])('trims horizontal separators after the closed ellipsis %s', (first) => {
+        for (const gap of ['\t', '\u00a0', '\u2003', ' \t  ', '\n', '\r\n']) {
+          for (const next of ['“Beta.”', 'Beta.']) {
+            expect(ss(first + gap + next)).toEqual([first, next]);
+            expect(segmentCaseNeutrally(first + gap + next)).toEqual([first, next]);
+          }
+        }
+      });
+
+      test('preserves whitespace within continued closed ellipses and following quotes', () => {
+        for (const input of [
+          'He said “Enough...”\tbefore leaving.',
+          'He said “Enough...”\t(Perhaps) before leaving.',
+          'He said “Enough.”\t“Beta.”',
+          'He said “Enough . . . .”\t“Beta.”',
+        ]) {
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+        }
+        const first = 'He said “Enough...”';
+        const next = '“Beta\t Gamma.”';
+        expect(ss(`${first}\t${next}`)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(`${first}\t${next}`)).toEqual([first, next]);
+      });
+
+      test.each(['\t', '\u00a0', '\u2003', ' \t  '])(
+        'trims %j before quotations at a spaced-four-dot boundary',
+        (gap) => {
+          const first = 'Omitted words . . . .';
+          const next = '“Beta\t Gamma.”';
+          expect(ss(first + gap + next)).toEqual([first, next]);
+          expect(segmentCaseNeutrally(first + gap + next)).toEqual([first, next]);
+          const continuation = `Omitted words . . .${gap}${next}`;
+          expect(ss(continuation)).toEqual([continuation]);
+          expect(segmentCaseNeutrally(continuation)).toEqual([continuation]);
+        },
+      );
+
       test.each(["'", '‘', '’'])(
         'retains confirmed %s elided subordinators after a neutral ellipsis',
         (apostrophe) => {
@@ -2769,6 +2816,41 @@ describe('Utility Functions', () => {
         'Til is a name.',
       ])('retains an independent quoted or bare sentence %s', (next) => {
         expect(segmentCaseNeutrally(`We waited... ${next}`)).toEqual(['We waited...', next]);
+      });
+
+      test.each(['‘', '’'])('retains adjacent %s elided subordinators after three dots', (mark) => {
+        for (const word of ['cause', 'Cause', 'til', 'Til', 'till', 'Till']) {
+          const input = `We waited...${mark}${word} it rained.`;
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+        }
+      });
+
+      test('preserves pending curly closers before adjacent sentence starters', () => {
+        const first = 'She said ‘Enough...’';
+        for (const word of ['Cause', 'Til', 'Tis']) {
+          const next = `${word} was useful.`;
+          expect(ss(first + next)).toEqual([first, next]);
+          expect(segmentCaseNeutrally(first + next)).toEqual([first, next]);
+        }
+      });
+
+      test('preserves confirmed adjacent quotations and later independent quotes', () => {
+        const next = '‘cause and effect mattered.’';
+        expect(segmentCaseNeutrally(`We waited...${next}`)).toEqual(['We waited...', next]);
+        const first = 'We waited...‘cause it rained.';
+        const later = 'She said ‘Later.’ Next.';
+        expect(segmentCaseNeutrally(`${first} ${later}`)).toEqual([first, later]);
+      });
+
+      test('preserves ASCII adjacent elisions and four-dot boundary priority', () => {
+        const ascii = "'cause it rained.";
+        expect(segmentCaseNeutrally(`We waited...${ascii}`)).toEqual(['We waited...', ascii]);
+        expect(ss(`We waited...${ascii}`)).toEqual([`We waited...${ascii}`]);
+        for (const mark of ['‘', '’']) {
+          const next = `${mark}cause it rained.`;
+          expect(segmentCaseNeutrally(`We waited....${next}`)).toEqual(['We waited....', next]);
+        }
       });
 
       test('retains four-dot priority before an elided subordinator', () => {

@@ -273,9 +273,14 @@ class StraightApostropheCandidates {
   }
 }
 
-function isLeadingElision(input: string, index: number): boolean {
+function isLeadingElision(input: string, index: number, allowRightAfterEllipsis = false): boolean {
+  // Adjacent elisions may follow three dots, but a pending right quote keeps closing priority.
   return (
-    !/[.!?]/.test(input[index - 1] ?? '') &&
+    (!/[.!?]/.test(input[index - 1] ?? '') ||
+      ((input[index] === '‘' || allowRightAfterEllipsis) &&
+        /(?<!\.)\.{3}[‘’](?:cause|till?)\b/i.test(
+          input.slice(Math.max(0, index - 4), index + 8),
+        ))) &&
     /^['‘’](?:[0-9]{2}s\b|(?:tis|twas|em|cause|till?)\b)/i.test(input.slice(index, index + 8))
   );
 }
@@ -343,7 +348,7 @@ function quotationFlags(input: string): Uint8Array {
     const straight = quote[0] === "'";
     const previous = input.slice(Math.max(0, index - 2), index);
     const following = characterAt(input, index + 1);
-    const elision = isLeadingElision(input, index);
+    const elision = isLeadingElision(input, index, quote[0] === '’' && curlyCandidates.depth === 0);
     if (isWordInternalApostrophe(input, index)) {
       flags[index] |= straight ? 2 : 1;
       continue;
@@ -1156,6 +1161,9 @@ function sentenceChunks(
       char === '?' ||
       char === '!'
     ) {
+      const spacedEllipsis = protectedPeriods[ellipsisCursor.index]?.boundary === index;
+      const terminalEllipsis =
+        spacedEllipsis || /\.{3,4}$/.test(input.slice(Math.max(0, index - 3), index + 1));
       const end = sentenceEnd(
         input,
         index,
@@ -1164,7 +1172,7 @@ function sentenceChunks(
         caseNeutral,
         typographicQuoteClosers,
         flags,
-        protectedPeriods[ellipsisCursor.index]?.boundary === index,
+        terminalEllipsis,
         asideMatches,
       );
       if (end === -1) {
@@ -1174,7 +1182,10 @@ function sentenceChunks(
       starts.push(lastEnd);
       starts.push(start);
       chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
-      lastEnd = end;
+      lastEnd =
+        spacedEllipsis || (terminalEllipsis && end > index + 1)
+          ? skipWhitespace(input, end, false)
+          : end;
       start = -1;
     }
   }
@@ -1326,9 +1337,13 @@ function isPendingDoubleCloser(input: string, index: number, pending: boolean): 
   return pending && (input[index] === '"' || input.startsWith("''", index));
 }
 
-function skipWhitespace(input: string, index: number): number {
+function skipWhitespace(input: string, index: number, allowLineBreaks = true): number {
   let end = index;
-  while (end < input.length && /\s/.test(input[end])) {
+  while (
+    end < input.length &&
+    /\s/.test(input[end]) &&
+    (allowLineBreaks || !/[\r\n]/.test(input[end]))
+  ) {
     end++;
   }
   return end;
@@ -1355,13 +1370,12 @@ function sentenceEnd(
   caseNeutral: boolean,
   typographicQuoteClosers: TypographicQuotationStack,
   flags: Uint8Array,
-  spacedEllipsis: boolean,
+  terminalEllipsis: boolean,
   asideMatches: InlineAsideMatches,
 ): number {
   const insideQuotes = asciiQuotes.double;
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const threeDotEllipsis = /(?<!\.)\.{3}$/.test(suffix);
-  const terminalEllipsis = spacedEllipsis || /\.{3,4}$/.test(suffix);
   if (
     !insideQuotes &&
     brackets.depth === 0 &&
