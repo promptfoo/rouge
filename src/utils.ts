@@ -566,7 +566,13 @@ interface BracketContext {
   angles?: Uint8Array;
 }
 
-const angleQuoteClosers: Record<string, string> = { '“': '”', '‘': '’', '«': '»' };
+const angleQuoteClosers: Record<string, string> = {
+  '“': '”',
+  '‘': '’',
+  '«': '»',
+  '„': '“',
+  '‚': '‘',
+};
 
 function isAngleApostrophe(input: string, index: number): boolean {
   return (
@@ -583,7 +589,7 @@ function isSingleBacktick(input: string, index: number): boolean {
 function angleQuoteCloser(input: string, index: number): string | undefined {
   const character = input[index];
   if (
-    !/["'`“‘«]/.test(character) ||
+    !/["'`“‘«„‚]/.test(character) ||
     isEscapedAngleQuote(input, index) ||
     isAngleApostrophe(input, index)
   ) {
@@ -673,12 +679,35 @@ function angleQuotationEnd(
       )
     ) {
       positions[closer] = found;
+      const innerEnd = germanAngleInnerQuoteEnd(input, start, found, closer, positions);
+      if (innerEnd !== -1) {
+        index = innerEnd;
+        continue;
+      }
       return hasLaterAngleElisionOpening(input, start, found) ? -1 : found + closer.length;
     }
     index = found + 1;
   }
   positions[closer] = input.length;
   return -1;
+}
+
+/** A complete English pair before the next shared mark can nest inside a German quotation. */
+function germanAngleInnerQuoteEnd(
+  input: string,
+  start: number,
+  shared: number,
+  closer: string,
+  positions: Record<string, number>,
+): number {
+  if (input[start] !== '„' && input[start] !== '‚') {
+    return -1;
+  }
+  const englishCloser = closer === '“' ? '”' : '’';
+  // These searches start at a high quote, so they cannot recurse into this low-quote branch.
+  const englishEnd = angleQuotationEnd(input, shared, englishCloser, positions);
+  const germanEnd = angleQuotationEnd(input, shared, closer, positions);
+  return englishEnd !== -1 && germanEnd > englishEnd ? englishEnd : -1;
 }
 
 /** Pair unquoted angles with a byte mask and scalar depths; unmatched comparisons stay prose. */
@@ -699,6 +728,9 @@ function matchedAngleDelimiters(input: string): Uint8Array | undefined {
         continue;
       }
     }
+    if (/[<>]/.test(input[index]) && isEscapedAngleQuote(input, index)) {
+      continue;
+    }
     if (input[index] === '<') {
       if (matched.length === 0) {
         matched = new Uint8Array(input.length);
@@ -714,8 +746,13 @@ function matchedAngleDelimiters(input: string): Uint8Array | undefined {
   if (pairs === 0) {
     return undefined;
   }
-  depth = 0;
-  for (let index = input.length - 1; index >= 0; index--) {
+  retainMatchedAngleOpeners(matched);
+  return matched;
+}
+
+function retainMatchedAngleOpeners(matched: Uint8Array): void {
+  let depth = 0;
+  for (let index = matched.length - 1; index >= 0; index--) {
     if (matched[index] === 1) {
       depth++;
     } else if (matched[index] === 2) {
@@ -723,7 +760,6 @@ function matchedAngleDelimiters(input: string): Uint8Array | undefined {
       depth = Math.max(0, depth - 1);
     }
   }
-  return matched;
 }
 
 /** Reuse paired-quote recognition only for the surrounding bracket context. */
@@ -733,7 +769,7 @@ function pairedBracketQuoteEnd(
   currentEnd: number,
   positions: Record<string, number>,
 ): number {
-  if (index <= currentEnd || !/["'`‘“«]/.test(input[index]) || input[index - 1] === "'") {
+  if (index <= currentEnd || !/["'`‘“«„‚]/.test(input[index]) || input[index - 1] === "'") {
     return currentEnd;
   }
   const closer = angleQuoteCloser(input, index);
@@ -760,7 +796,11 @@ function updateBracketContext(
   brackets: BracketContext,
 ): void {
   const character = input[index];
-  if (/[<>]/.test(character) && brackets.angles?.[index] !== 1) {
+  if (
+    !/[()[\]{}<>]/.test(character) ||
+    (/[<>]/.test(character) && brackets.angles?.[index] !== 1) ||
+    isEscapedAngleQuote(input, index)
+  ) {
     return;
   }
   if (openingBracketReg.test(character)) {

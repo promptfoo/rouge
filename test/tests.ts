@@ -4072,3 +4072,70 @@ describe('Paired single-backtick literals inside versus brackets', () => {
     }
   });
 });
+
+describe('Escaped bracket context before versus boundaries', () => {
+  test.each([
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+  ])('preserves odd/even escape parity for %s%s', (opening, closing) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      for (const caseNeutral of [false, true]) {
+        const odd = `He noted ${opening}literal \\${closing} and "${versus}" Examples followed${closing} today.`;
+        expect(rouge.sentenceSegment(odd, { caseNeutral })).toEqual([odd]);
+        const first = `He noted ${opening}literal \\\\${closing} and "${versus}"`;
+        expect(
+          rouge.sentenceSegment(`${first} Examples followed${closing} today.`, { caseNeutral }),
+        ).toEqual([first, `Examples followed${closing} today.`]);
+      }
+    }
+  });
+
+  test('bounds escape scans to actual bracket marks', () => {
+    const input = `He noted (literal ${'\\'.repeat(40_001)}) and "v.s." Examples followed) today.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+});
+
+describe('German quotation pairs in versus bracket context', () => {
+  test.each([
+    '„literal )“',
+    '‚literal )‘',
+    '„“literal )” remains“',
+    '‚‘literal )’ remains‘',
+    '„“inner” literal )“',
+    '‚‘inner’ literal )‘',
+    '“„literal )“ and more”',
+    '‘‚literal )‘ and more’',
+  ])('preserves the surrounding bracket around %s', (quoted) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const input = `He noted (${quoted} and "${versus}" Examples followed) today.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    }
+  });
+
+  test.each(['„literal )“', '‚literal )‘'])(
+    'releases completed brackets after %s without borrowing later independent quotes',
+    (quoted) => {
+      const first = `He noted (${quoted} and "v.s.")`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`${first} He said “Done.”`, { caseNeutral })).toEqual([
+          first,
+          'He said “Done.”',
+        ]);
+      }
+    },
+  );
+
+  test('uses the same quote endpoints in the paired-angle prepass', () => {
+    for (const caseNeutral of [false, true]) {
+      const input = 'He noted <„“inner” literal >“ and "v.s." Examples followed> today.';
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+});
