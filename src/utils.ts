@@ -1829,6 +1829,7 @@ const angleQuoteClosers: Record<string, string> = {
   '“': '”',
   '‘': '’',
   '«': '»',
+  '‹': '›',
   '„': '“',
   '‚': '‘',
 };
@@ -1848,7 +1849,7 @@ function isSingleBacktick(input: string, index: number): boolean {
 function angleQuoteCloser(input: string, index: number): string | undefined {
   const character = input[index];
   if (
-    !/["'`“‘«„‚]/.test(character) ||
+    !/["'`“‘«‹„‚]/.test(character) ||
     isEscapedAngleQuote(input, index) ||
     isAngleApostrophe(input, index)
   ) {
@@ -2028,7 +2029,7 @@ function pairedBracketQuoteEnd(
   currentEnd: number,
   positions: Record<string, number>,
 ): number {
-  if (index <= currentEnd || !/["'`‘“«„‚]/.test(input[index]) || input[index - 1] === "'") {
+  if (index <= currentEnd || !/["'`‘“«‹„‚]/.test(input[index]) || input[index - 1] === "'") {
     return currentEnd;
   }
   const closer = angleQuoteCloser(input, index);

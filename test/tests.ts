@@ -6977,6 +6977,60 @@ describe('Paired single-backtick literals inside versus brackets', () => {
   });
 });
 
+describe('Single guillemets inside versus brackets', () => {
+  test.each([
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+  ])('keeps quoted %s%s marks separate from the surrounding enclosure', (opening, closing) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      for (const caseNeutral of [false, true]) {
+        for (const literal of [opening, closing]) {
+          const input = `He noted ${opening}‹literal ${literal}› and "${versus}" Examples followed${closing} today.`;
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        }
+        const first = `He noted ${opening}‹literal ${closing}› and "${versus}"${closing}`;
+        expect(rouge.sentenceSegment(`${first} Examples followed.`, { caseNeutral })).toEqual([
+          first,
+          'Examples followed.',
+        ]);
+      }
+    }
+  });
+
+  test('keeps unmatched guillemets under the existing delimiter rules', () => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const first = `He noted (‹literal ) and "${versus}"`;
+      for (const caseNeutral of [false, true]) {
+        expect(
+          rouge.sentenceSegment(`${first} Examples followed) today.`, { caseNeutral }),
+        ).toEqual([first, 'Examples followed) today.']);
+      }
+    }
+  });
+
+  test.each([0, 1, 2, 3, 4])(
+    'retains paired guillemet openers and closer escape parity with %i backslashes',
+    (count) => {
+      for (const versus of ['vs.', 'v.s.']) {
+        const escaped = '\\'.repeat(count);
+        const opening = `He noted (${escaped}‹literal )› and "${versus}"`;
+        const closing = `He noted (‹literal ${escaped}› ) remains› and "${versus}"`;
+        const tail = 'Examples followed) today.';
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(`${opening} ${tail}`, { caseNeutral })).toEqual([
+            `${opening} ${tail}`,
+          ]);
+          expect(rouge.sentenceSegment(`${closing} ${tail}`, { caseNeutral })).toEqual(
+            count % 2 === 0 ? [closing, tail] : [`${closing} ${tail}`],
+          );
+        }
+      }
+    },
+  );
+});
+
 describe('Escaped bracket context before versus boundaries', () => {
   test.each([
     ['(', ')'],
