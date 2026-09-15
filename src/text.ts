@@ -1,38 +1,46 @@
 function opensDoubleQuote(input: string, index: number, insideQuotes: boolean): boolean {
-  return !insideQuotes && (index === 0 || /[\s([{<]/.test(input[index - 1]));
+  return !insideQuotes && quoteOpeningContext(input, index);
 }
 
-export function quotationState(
-  input: string,
-  index: number,
-  insideQuotes: boolean,
-  treebankTokenization = false,
-): boolean {
-  if (input[index] === '"') {
-    return opensDoubleQuote(input, index, insideQuotes);
-  }
-  if (input.startsWith('``', index)) {
-    return true;
-  }
-  if (!input.startsWith("''", index)) {
-    return insideQuotes;
-  }
+function quoteOpeningContext(input: string, index: number): boolean {
   return (
-    !insideQuotes &&
-    opensDoubleQuote(input, index, false) &&
-    /^[\p{Letter}\p{Number}\p{Sc}\p{Ps}]$/u.test(characterAt(input, index + 2)) &&
-    (treebankTokenization
-      ? index > 0 && input.slice(index + 2).match(/``|''|"/)?.[0] === "''"
-      : input.slice(index + 2).includes("''"))
+    index === 0 ||
+    /[\s\p{Punctuation}<]/u.test(input[index - 1]) ||
+    input.slice(index - 2, index) === '``' ||
+    followsQuotedModifier(input, index)
   );
 }
-
 const casedCharacterReg = /^\p{Cased}$/u;
 const upperOrTitleCaseLetterReg = /^[\p{Lu}\p{Lt}]$/u;
 const upperCaseReg = /^\p{Uppercase}$/u;
-export const closingDelimiterReg = /[\])}>"']/;
-export const openingBracketReg = /[([{<]/;
-export const closingBracketReg = /[\])}>]/;
+const closingDelimiterReg = /[\])}>"'”»›]/;
+const openingBracketReg = /[([{<]/;
+const closingBracketReg = /[\])}>]/;
+
+/** A compatibility modifier after a closed terminal is a marker, not a word prefix. */
+function followsQuotedModifier(input: string, index: number): boolean {
+  const modifier = input.slice(Math.max(0, index - 2), index).match(/\p{Lm}$/u)?.[0];
+  if (modifier === undefined || !isAlphabeticFootnote(input, index - modifier.length - 1)) {
+    return false;
+  }
+  let start = index - modifier.length;
+  while (start > 0) {
+    const number = input.slice(Math.max(0, start - 2), start).match(/\p{Number}$/u)?.[0];
+    if (number === undefined) {
+      break;
+    }
+    start -= number.length;
+  }
+  return /[.!?]["'”’]$/.test(input.slice(Math.max(0, start - 2), start));
+}
+
+function isAlphabeticFootnote(input: string, index: number): boolean {
+  const following = characterAt(input, index + 1);
+  return (
+    following !== following.normalize('NFKC') &&
+    /^\p{Lm}(?:[\s.,;:!?"'“‘”’\])}>]|$)/u.test(input.slice(index + 1, index + 5))
+  );
+}
 
 /**
  * Checks if a string is titlecase
@@ -64,15 +72,28 @@ export function charIsUpperCase(input: string): boolean {
   );
 }
 
-export function characterAt(input: string, index: number): string {
+function characterAt(input: string, index: number): string {
   const codePoint = input.codePointAt(index);
   return codePoint === undefined ? '' : String.fromCodePoint(codePoint);
 }
 
-export function isCasedCharacter(input: string): boolean {
+function isCasedCharacter(input: string): boolean {
   return casedCharacterReg.test(input);
 }
 
-export function startsWithCasedCharacter(input: string): boolean {
+function startsWithCasedCharacter(input: string): boolean {
   return isCasedCharacter(characterAt(input.trim(), 0));
 }
+
+export {
+  characterAt,
+  closingBracketReg,
+  closingDelimiterReg,
+  followsQuotedModifier,
+  isAlphabeticFootnote,
+  isCasedCharacter,
+  openingBracketReg,
+  opensDoubleQuote,
+  quoteOpeningContext,
+  startsWithCasedCharacter,
+};

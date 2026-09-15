@@ -1,5 +1,5 @@
 import { TREEBANK_CONTRACTIONS } from './constants';
-import { quotationState } from './text';
+import { characterAt, opensDoubleQuote } from './text';
 
 /**
  * Splits a sentence into an array of word tokens
@@ -27,8 +27,18 @@ export function treeBankTokenize(input: string): string[] {
 
   // Classify paired quotes before inserting spaces around punctuation.
   let insideQuotes = false;
-  let parse = text.replace(/``|''|"/g, (_quote: string, index: number): string => {
-    insideQuotes = quotationState(text, index, insideQuotes, true);
+  let parse = text.replace(/``|''|"/g, (quote: string, index: number): string => {
+    insideQuotes =
+      quote === '``' ||
+      ((index + quote.length < text.length ||
+        index === 0 ||
+        /[\s\p{Ps}<]/u.test(text[index - 1])) &&
+        opensDoubleQuote(text, index, insideQuotes) &&
+        !/[.!?]/.test(text[index - 1] ?? '') &&
+        (quote === '"' ||
+          (index > 0 &&
+            /^[\p{Letter}\p{Number}\p{Sc}\p{Ps}]$/u.test(characterAt(text, index + 2)) &&
+            text.slice(index + 2).match(/``|''|"/)?.[0] === "''")));
     return insideQuotes ? ' `` ' : " '' ";
   });
 
