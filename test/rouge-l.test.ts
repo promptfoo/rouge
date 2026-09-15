@@ -43,11 +43,11 @@ describe('Core Functions', () => {
     });
 
     test('should throw RangeError for empty candidate', () => {
-      expect(() => l('', ref, undefined as any)).toThrow(RangeError);
+      expect(() => l('', ref)).toThrow(RangeError);
     });
 
     test('should throw RangeError for empty ref', () => {
-      expect(() => l(cands[0], '', undefined as any)).toThrow(RangeError);
+      expect(() => l(cands[0], '')).toThrow(RangeError);
     });
 
     test('should accept newline-separated sentences', () => {
