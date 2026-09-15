@@ -329,10 +329,10 @@ function questionStartChecker(
   };
 }
 
-function questionContentStart(input: string, start: number): number {
+function questionContentStart(input: string, start: number, allowWhitespace = true): number {
   let offset = start;
   while (offset < input.length) {
-    if (/[\s"'“‘’([{<]/.test(input[offset])) {
+    if (/["'“‘’([{<]/.test(input[offset]) || (allowWhitespace && /\s/.test(input[offset]))) {
       offset++;
     } else if (input.startsWith('``', offset)) {
       offset += 2;
@@ -1160,7 +1160,8 @@ function isProtectedEllipsisPeriod(
 /** Scan closing delimiters, including whitespace before a pending closing quote. */
 function closingDelimiterEnd(input: string, index: number, quotes: QuoteState): number {
   let end = index + 1;
-  let doublePending = quotes.double;
+  // Recover an immediate unmatched closer without consuming a later opening quote.
+  let doublePending = quotes.double || /^[.!?]"\s/.test(input.slice(index, index + 3));
   let smartDoublePending = quotes.smartDouble;
   let singlePending = quotes.single;
   while (end < input.length) {
@@ -1339,10 +1340,7 @@ function sentenceEndAfterDelimiter(
   closedBrackets: number,
   caseNeutral: boolean,
 ): number {
-  let next = end;
-  while (next < input.length && /[\s"'“‘’([{<]/.test(input[next])) {
-    next++;
-  }
+  const next = questionContentStart(input, end);
   if (next === input.length) {
     return end;
   }
@@ -1384,10 +1382,16 @@ function isUnspacedDelimitedSentenceStart(
 ): boolean {
   let next = index + 1;
   if (
-    !/["'“‘’([{<]/.test(input[next] ?? '') ||
+    !(/["'“‘’([{<]/.test(input[next] ?? '') || input.startsWith('``', next)) ||
     smartContractionReg.test(input.slice(next, next + 4))
   ) {
     return false;
+  }
+  if (input.startsWith('``', next)) {
+    const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+    if (abbrvReg.test(caseNeutral ? suffix.toLowerCase() : suffix)) {
+      return false;
+    }
   }
   if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {
     return false;
@@ -1400,9 +1404,7 @@ function isUnspacedDelimitedSentenceStart(
   ) {
     return false;
   }
-  while (next < input.length && /["'“‘’([{<]/.test(input[next])) {
-    next++;
-  }
+  next = questionContentStart(input, next, false);
   const character = characterAt(input, next);
   return (
     character.length > 0 &&

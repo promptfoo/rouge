@@ -2860,6 +2860,79 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['.', '?', '!'])(
+      'recovers an unmatched immediate ASCII closer after %s before whitespace',
+      (terminal) => {
+        const first = `He left${terminal}"`;
+        for (const separator of [' ', '\t', '\n', '\r\n']) {
+          const input = `${first}${separator}Next.`;
+          expect(ss(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+        }
+      },
+    );
+
+    test('retains casing and EOF policy when recovering an unmatched ASCII closer', () => {
+      expect(ss('He left." next.')).toEqual(['He left." next.']);
+      expect(ss('He left."')).toEqual(['He left."']);
+      expect(segmentCaseNeutrally('He left."')).toEqual(['He left."']);
+      const input = 'He left." Next Co.\nHe stayed.';
+      const expected = ['He left."', 'Next Co.', 'He stayed.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      ['He left."Next."', ['He left.', '"Next."']],
+      ['He left. "Next."', ['He left.', '"Next."']],
+      ['He said "Stop." Next.', ['He said "Stop."', 'Next.']],
+      ['He said “Stop.”" Next."', ['He said “Stop.”" Next."']],
+      ['He said "Stop?"²" Next."', ['He said "Stop?"²" Next."']],
+      ['He said "Stop?"²"2 people agreed."', ['He said "Stop?"²', '"2 people agreed."']],
+    ])('preserves pending closers and subsequent openers in %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((part) => part.toLowerCase()),
+      );
+    });
+
+    test.each(['First.', '“First.”', '‘First.’', '"First."'])(
+      'recognizes an adjacent Treebank opener after %s',
+      (first) => {
+        const second = "``Next.''";
+        expect(ss(first + second)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(first + second)).toEqual([first, second]);
+        expect(segmentCaseNeutrally((first + second).toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      },
+    );
+
+    test.each(["`Next.'", "```Next.'''"])(
+      'does not treat the unsupported backtick run %s as a paired opener',
+      (tail) => {
+        const input = `First.${tail}`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
+
+    test('preserves casing and numeric policy after an adjacent Treebank opener', () => {
+      expect(ss("First.``next.''")).toEqual(["First.``next.''"]);
+      expect(ss("First.``2 people agreed.''")).toEqual(['First.', "``2 people agreed.''"]);
+      expect(segmentCaseNeutrally("First.``2 people agreed.''")).toEqual([
+        'First.',
+        "``2 people agreed.''",
+      ]);
+      const company = "We use Acme Co.``International Holdings.''";
+      expect(ss(company)).toEqual([company]);
+      expect(segmentCaseNeutrally(company)).toEqual([company]);
+      expect(segmentCaseNeutrally(company.toLowerCase())).toEqual([company.toLowerCase()]);
+    });
+
     test('requires an open ASCII single quotation before attaching an inner citation', () => {
       const input = "‘He said Stop?'2 people agreed.’";
       expect(ss(input)).toEqual(["‘He said Stop?'", '2 people agreed.’']);
