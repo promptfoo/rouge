@@ -111,7 +111,7 @@ rougeN("Hello World", "hello world", { caseSensitive: false }); // => 1.0
 
 ### Text Preprocessing
 
-By default, all three metrics segment the original text before case folding and per-sentence Penn Treebank tokenization. With `caseSensitive: false`, built-in segmentation gives summaries equivalent under JavaScript's `toLowerCase()` the same boundaries; it does not provide locale-specific or full Unicode folding (`ß` and `SS` are not equivalent). Custom segmenters still receive the original text. Pass `{ caseNeutral: true }` to use the same neutral heuristics with `sentenceSegment()` directly. ROUGE-N/S flatten sentence tokens, so grams can cross boundaries. Custom tokenizers receive each whole summary once in `n()`/`s()` and individual sentences in `l()`.
+By default, all three metrics segment the original text before case folding and per-sentence Penn Treebank tokenization. Case folding retains the context of the whole summary, including Greek sigma at adjacent sentence boundaries. With `caseSensitive: false`, built-in segmentation gives summaries equivalent under JavaScript's `toLowerCase()` the same boundaries; it does not provide locale-specific or full Unicode folding (`ß` and `SS` are not equivalent). Custom segmenters still receive the original text. Pass `{ caseNeutral: true }` to use the same neutral heuristics with `sentenceSegment()` directly. ROUGE-N/S flatten sentence tokens, so grams can cross boundaries. Custom tokenizers receive each whole summary once in `n()`/`s()` and individual sentences in `l()`.
 
 The tokenizer treats spaces, tabs, line breaks, and other whitespace as word separators. It returns no tokens for whitespace-only text and expands every occurrence of supported contractions. Punctuation remains part of the token stream. Penn Treebank quote markers and repeated punctuation are preserved. Colons and commas are separated unless followed by a digit, preserving numbers such as `12,000` and times such as `12:30`. Multi-initial acronyms such as `U.S.` keep their final dot, including at sentence boundaries, so a heuristic boundary cannot change the acronym's token identity.
 
@@ -153,6 +153,8 @@ Omitted options and fields explicitly set to `undefined` use the documented defa
 `lcs` and `lcsIndices` are mutually exclusive. Specifying both throws `RangeError`.
 
 With the built-in sentence segmenter and LCS, `l()` throws `RangeError` when the candidate sentence count multiplied by the reference sentence count exceeds 100,000. This limit also applies with a custom tokenizer; comparisons with no tokens on either side return `0` first. Custom `segmenter`, `lcs`, or `lcsIndices` callbacks remain responsible for bounding their own work.
+
+Custom `lcs` and `lcsIndices` callbacks receive fresh mutable copies of both sentence-token arrays for each comparison. The library limits this copying to 1,000,000 token slots across the call: total candidate tokens × reference sentences + total reference tokens × candidate sentences. A larger total throws `RangeError` before any LCS callback runs, including with custom tokenizers or segmenters; comparisons with no tokens on either side still return `0` first. This copied-token budget does not limit callback invocation counts or work performed inside custom callbacks.
 
 ### ROUGE-S Options
 
