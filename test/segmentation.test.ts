@@ -111,7 +111,7 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     });
 
-    test('recognizes list markers without depending on item capitalization', () => {
+    test('recognizes case-neutral list markers and sentence-final abbreviations', () => {
       const input = '1. The first item 2. The second item';
       const expected = ['1. The first item', '2. The second item'];
       expect(segmentCaseNeutrally(input)).toEqual(expected);
