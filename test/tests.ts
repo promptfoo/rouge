@@ -9051,6 +9051,40 @@ describe('Citation attachment stays within an explicit line', () => {
 });
 
 describe('Citation state across quotation lookahead and partial closers', () => {
+  test.each(['[1]', '(1)', '[¹]'])(
+    'checks the final period of a four-dot citation %s during question lookahead',
+    (citation) => {
+      const question = `Was Alice choosing Alpha....${citation} or Beta?`;
+      for (const quotation of ['"No."', '“No.”', '‹No.›']) {
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(`${quotation} ${question}`, { caseNeutral })).toEqual([
+            quotation,
+            question,
+          ]);
+          expect(
+            rouge.sentenceSegment(
+              `${quotation} Was Alice choosing Alpha....${citation} Next question?`,
+              { caseNeutral },
+            ),
+          ).toEqual([`${quotation} Was Alice choosing Alpha....${citation}`, 'Next question?']);
+        }
+      }
+    },
+  );
+
+  test('keeps repeated four-dot citation lookaheads independent', () => {
+    const sentences = [
+      '"No."',
+      'Was Alice choosing Alpha....[1] or Beta?',
+      '"Yes."',
+      'Was Bob choosing Gamma....(2) or Delta?',
+    ];
+    const expected = Array.from({ length: 16 }, () => sentences).flat();
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(expected.join(' '), { caseNeutral })).toEqual(expected);
+    }
+  });
+
   test.each(['"No."', '“No.”', '‹No.›'])(
     'keeps the question after %s separate across a retained citation',
     (quotation) => {

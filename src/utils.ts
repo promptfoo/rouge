@@ -4065,7 +4065,7 @@ function questionTerminalChecker(
         terminal = nextTerminal(terminal.index + terminal[0].length, argumentStart);
         continue;
       }
-      const citationBoundary = citationEndAt(terminal.index);
+      const citationBoundary = citationEndAt(terminal.index + terminal[0].length - 1);
       if (citationBoundary === -1) {
         terminal = nextTerminal(terminal.index + terminal[0].length, argumentStart);
         continue;
