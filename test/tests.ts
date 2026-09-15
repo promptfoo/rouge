@@ -1357,6 +1357,25 @@ describe('Utility Functions', () => {
       }
     });
 
+    test.each(['.5', '.٥', '.𝟓', '.Ⅳ', '.05', '1e3', '.5e3', '1E3', '١e٣', '1e-3', '1e+3'])(
+      'retains the numeric left operand %s before a cited comparison terminal',
+      (operand) => {
+        for (const first of [`Result ${operand} < 1.[1]`, `Result (${operand} < 1).[1]`]) {
+          const input = `${first} Next.`;
+          // The existing ordinary scanner separates the earlier period before a Roman numeral.
+          const expected =
+            operand === '.Ⅳ'
+              ? [first.slice(0, first.indexOf('Ⅳ')), first.slice(first.indexOf('Ⅳ')), 'Next.']
+              : [first, 'Next.'];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+            expected.map((sentence) => sentence.toLowerCase()),
+          );
+        }
+      },
+    );
+
     test.each([
       '0.foo',
       '0.05abc',
@@ -1528,6 +1547,109 @@ describe('Utility Functions', () => {
         const expected = [`He said 'Alpha.'${citation}`, 'Next.', 'Gamma.[2]', 'Delta.'];
         expect(ss(input)).toEqual(expected);
         expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each([
+      ['"', '"', '``', "''"],
+      ['``', "''", '"', '"'],
+      ['``', "''", '``', "''"],
+      ['“', '”', '``', "''"],
+      ['``', "''", '‘', '’'],
+      ['"', '"', '「', '」'],
+    ])(
+      'retains nested %s%s and %s%s citation quotation levels',
+      (outer, closeOuter, inner, closeInner) => {
+        for (const gap of ['', ' ']) {
+          for (const suffix of [
+            `${closeInner}${gap}${closeOuter}[1]`,
+            `[1]${closeInner}${gap}${closeOuter}`,
+            `${closeInner}[1]${gap}${closeOuter}`,
+          ]) {
+            const first = `He said ${outer}She said ${inner}Alpha.${suffix}`;
+            for (const next of ['Next.', '"Next."', '“Next.”']) {
+              const expected = [first, next];
+              expect(ss(`${first} ${next}`)).toEqual(expected);
+              expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual(expected);
+            }
+          }
+        }
+        for (const suffix of [
+          `${closeInner}[1] Next.${closeOuter}`,
+          `[1] Next.${closeInner}${closeOuter}`,
+        ]) {
+          const input = `He said ${outer}She said ${inner}Alpha.${suffix}`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+        }
+      },
+    );
+
+    test.each([
+      ['"', "''"],
+      ['``', '"'],
+      ['"', '"'],
+      ['``', "''"],
+    ])('retains interchangeable double quotation closers %s%s', (opening, closing) => {
+      for (const gap of ['', ' ']) {
+        const first = `He said ${opening}Alpha.${gap}${closing}[1]`;
+        const expected = [first, 'Next.[2]', 'Last.'];
+        expect(ss(`${first} Next.[2] Last.`)).toEqual(expected);
+        expect(segmentCaseNeutrally(`${first} Next.[2] Last.`)).toEqual(expected);
+      }
+    });
+
+    test.each([
+      'He said ``She said "Alpha." "[1]',
+      'He said ``She said "Alpha.""[1]',
+      'He said ``She said "Alpha.[1]" "',
+      'He said "She said ``Alpha.\'\' "[1]',
+      'He said ``She said "Alpha." \'\'[1]',
+    ])('exhausts completed nested quotation levels before the next citation: %s', (first) => {
+      const expected = [first, 'Next.[2]', 'Last.'];
+      expect(ss(`${first} Next.[2] Last.`)).toEqual(expected);
+      expect(segmentCaseNeutrally(`${first} Next.[2] Last.`)).toEqual(expected);
+      for (const next of ['"Next."', '“Next.”']) {
+        expect(ss(`${first} ${next}`)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual([first, next]);
+      }
+    });
+
+    test.each([63, 64, 65, 66])(
+      'bounds combined double-family quotation nesting at depth %s',
+      (depth) => {
+        const pairs = Array.from({ length: depth }, (_, index) =>
+          index % 2 ? ['``', "''"] : ['"', '"'],
+        );
+        const first =
+          pairs.map(([opening]) => `${opening}part `).join('') +
+          'Alpha.[1]' +
+          pairs
+            .reverse()
+            .map(([, closing]) => closing)
+            .join('');
+        const input = `${first} Next.`;
+        const expected = depth <= 64 ? [first, 'Next.'] : [input];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['.5', '.٥', '1e3', '.5e-3'])(
+      'combines numeric left operand %s with nested citation quotation context',
+      (operand) => {
+        for (const [outer, closeOuter, inner, closeInner] of [
+          ['"', '"', '``', "''"],
+          ['``', "''", '"', '"'],
+        ]) {
+          const first = `He said ${outer}Result ${inner}${operand} < 1.${closeInner}${closeOuter}[1]`;
+          expect(ss(`${first} Next.[2] Last.`)).toEqual([first, 'Next.[2]', 'Last.']);
+          expect(segmentCaseNeutrally(`${first} Next.[2] Last.`)).toEqual([
+            first,
+            'Next.[2]',
+            'Last.',
+          ]);
+        }
       },
     );
 
