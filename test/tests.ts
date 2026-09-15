@@ -4048,3 +4048,64 @@ describe('Bare citation context after supported bracket closers', () => {
     },
   );
 });
+
+describe('Right-double citation quotation roles', () => {
+  test.each(['Han sa ”Alpha.[1] Beta.” högt.', 'Han sa ”Alpha.[1] Beta.'])(
+    'retains the pending surrounding quotation in %s',
+    (input) => {
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    },
+  );
+
+  test.each([
+    'Han sa ”Alpha.[1]”',
+    'Han sa ”Alpha.”[1]',
+    'Han sa ”Alpha.[1] ”',
+    'Han sa ”“Alpha.[1] Beta.” aloud.[2]”',
+    'Han sa “Alpha.[1]”',
+    'Han sa „”Alpha.[1] Beta.” aloud.[2]“',
+    'Han sa ”„Alpha.[1] Beta.“ aloud.[2]”',
+    'Han sa 「”Alpha.[1] Beta.” aloud.[2]」',
+    'Han sa "”Alpha.[1] Beta.” aloud.[2]"',
+  ])('releases only the completed surrounding quotation in %s', (first) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+    }
+  });
+
+  test('recognizes a following independent right-double quoted continuation', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('Alpha.[1] ”Because he left.”', { caseNeutral })).toEqual([
+        'Alpha.[1]',
+        '”Because he left.”',
+      ]);
+    }
+  });
+
+  test('does not infer an opener before whitespace or after an ordinary terminal', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('He wrote ” Alpha.[1] Next.', { caseNeutral })).toEqual([
+        'He wrote ” Alpha.[1]',
+        'Next.',
+      ]);
+      expect(rouge.sentenceSegment('Alpha.” Next.[1] Last.', { caseNeutral })).toEqual([
+        'Alpha.” Next.[1]',
+        'Last.',
+      ]);
+    }
+  });
+});
+
+test('bounds right-double opening evidence at document and citation edges', () => {
+  for (const caseNeutral of [false, true]) {
+    expect(rouge.sentenceSegment('”Alpha.[1]” Next.', { caseNeutral })).toEqual([
+      '”Alpha.[1]”',
+      'Next.',
+    ]);
+    for (const input of ['”', 'Alpha.[1] ”', 'Alpha.[1] ” Beta.']) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  }
+});

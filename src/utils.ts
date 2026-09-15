@@ -942,6 +942,8 @@ function updateCitationQuotationState(
   if (/[”’»」』]/.test(character)) {
     if (closers.at(-1) === character) {
       closers.pop();
+    } else if (character === '”' && isRightDoubleCitationOpening(input, index)) {
+      pushCitationQuotation(quotes, character);
     }
     return;
   }
@@ -1268,9 +1270,25 @@ function citationEnd(
     : continuation;
 }
 
+/** A pending English closer takes precedence; otherwise this mark can open a quotation. */
+function isRightDoubleCitationOpening(input: string, index: number): boolean {
+  return (
+    (index === 0 || /^[\s([<{"'‘“«„‚「『]$/u.test(input[index - 1])) &&
+    /\S/.test(input[index + 1] ?? '')
+  );
+}
+
+function isCitationOpeningQuote(input: string, index: number): boolean {
+  return (
+    /["'“‘«„‚「『]/.test(input[index]) ||
+    (input[index] === '”' && isRightDoubleCitationOpening(input, index))
+  );
+}
+
 function isCitationSeparator(input: string, end: number, allowUnspaced: boolean): boolean {
   return (
-    /[\s"'“‘«„‚「『([{<]/.test(input[end]) ||
+    /[\s([{<]/.test(input[end]) ||
+    isCitationOpeningQuote(input, end) ||
     (allowUnspaced && isCasedCharacter(characterAt(input, end)))
   );
 }
@@ -1289,8 +1307,11 @@ function isCitationSentenceStart(
   }
   let next = end;
   let quotedStart = false;
-  while (next < input.length && /[\s"'“‘«„‚「『([{<]/.test(input[next])) {
-    quotedStart ||= /["'“‘«„‚「『]/.test(input[next]);
+  while (
+    next < input.length &&
+    (/[\s([{<]/.test(input[next]) || isCitationOpeningQuote(input, next))
+  ) {
+    quotedStart ||= isCitationOpeningQuote(input, next);
     next++;
   }
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
