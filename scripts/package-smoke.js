@@ -72,6 +72,19 @@ void score;
 void missingDefault;
 `,
   );
+  writeConsumerFile(
+    'types.cts',
+    `import rouge = require('js-rouge');
+const options: rouge.RougeNOptions = { n: 2, caseSensitive: false };
+const score: number = rouge.n('a b', 'A B', options);
+const tokens: string[] = rouge.treeBankTokenize('A sentence.');
+// @ts-expect-error Scores are numbers, not strings.
+const invalid: string = rouge.l('a b', 'a b');
+void score;
+void tokens;
+void invalid;
+`,
+  );
   writeConsumerJson('tsconfig.json', {
     compilerOptions: {
       module: 'NodeNext',
@@ -80,7 +93,7 @@ void missingDefault;
       strict: true,
       target: 'ES2022',
     },
-    include: ['types.ts'],
+    include: ['types.ts', 'types.cts'],
   });
 
   run(

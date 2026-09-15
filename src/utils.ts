@@ -600,11 +600,23 @@ function singleQuoteState(
   return character === '‘';
 }
 
+/** Preserve the existing Treebank alias grammar for list and angle ownership. */
+function isTreebankQuoteOpening(input: string, index: number): boolean {
+  return (
+    (index === 0 || /[\s([{<]/.test(input[index - 1])) &&
+    /^[\p{Letter}\p{Number}\p{Sc}\p{Ps}]$/u.test(characterAt(input, index + 2)) &&
+    input.slice(index + 2).includes("''")
+  );
+}
+
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const abbrvReg = new RegExp(`\\b(${GATE_SUBSTITUTIONS.map(escapeRegExp).join('|')})[.!?] ?$`, 'i');
+const abbrvReg = new RegExp(
+  `\\b(?!v\\.?s[!?] ?$)(${GATE_SUBSTITUTIONS.map(escapeRegExp).join('|')})[.!?] ?$`,
+  'i',
+);
 const acronymReg = /[ |.][A-Z].?$/i;
 // Case mappings can add combining marks (for example, `İ` lowercases to `i` + dot above).
 const caseNeutralAcronymReg = /(?:^|[ |.])\p{Cased}\p{M}*.?$/u;
@@ -623,13 +635,56 @@ const closingDelimiterReg = /[\])}>"'”»›]/;
 const openingBracketReg = /[([{<]/;
 const closingBracketReg = /[\])}>]/;
 const listMarkerReg =
-  /(?:^|\s)(?:(?:[•⁃]\s*)?\d+(?:\.\)|[.)])|\p{Cased}\.)(?=\s+["'“‘„«‹([{<]*\p{Cased})/gu;
+  /(?:^|\s)(?:(?:[•⁃][^\S\r\n]*|[-*+][^\S\r\n]+)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+\S)/gu;
+const yearListMarkerReg = /^(?:1\d{3}|20\d{2})\.$/;
+const nameWordPattern = String.raw`\p{Letter}[\p{Letter}\p{Mark}]*(?:['’\p{Pd}]\p{Letter}[\p{Letter}\p{Mark}]*)*`;
+const firstAuthorNameReg = new RegExp(
+  String.raw`^\s+${nameWordPattern}(?:\s+(?:and|or|&)|[,;])\s+\p{Cased}\p{M}*\.\s+\p{Letter}`,
+  'iu',
+);
+const laterAuthorInitialReg = new RegExp(
+  String.raw`:\s+\p{Cased}\p{M}*\.(?:\s+${nameWordPattern}(?:\s+(?:and|or|&)|[,;])\s+\p{Cased}\p{M}*\.)+$`,
+  'iu',
+);
+const nestedListDepth = Symbol('nestedListDepth');
+const skipListDetection = Symbol('skipListDetection');
+const singleQuoteElisionReg =
+  /^(?:t(?:is|was|were|will|would|il|ill)|em|cause|cos|round|bout|neath|fore|tween|gainst|cept|(?:twen|thir|for|fif|six|seven|eigh|nine)ties)\b/i;
+const maxNestedListDepth = 32;
 const geographicAcronymReg = /\bU\.S(?:\.A)?\.$/i;
-const geographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
+const geographicContinuationReg =
+  /^(?:government|army|navy|military|congress|senate|commission)\b/i;
+const unspacedGeographicContinuationReg = /^(?:government|army|navy|military|congress)\b/i;
 const sentenceContinuationReg =
   /^(?:and|or|but|nor|for|yet|so|at|in|on|of|to|from|with|by|as|then|because|while|after|before|although|though|since|unless|until|when|where|whether|if|once|whereas)\b/i;
 const independentSentenceReg =
   /^(?:in\s+(?:fact|time)\b|\p{Letter}+\s+[^,.!?]{1,120},|(?:and|but|or|yet|so|then)\s+(?:(?:i|we|he|she|they|you|it)\b|(?:(?:the|a|an|my|our|their|his|her)\s+)?(?!(?:more|later|moved)\b)[\p{Letter}\p{Mark}'’-]+\s+[\p{Letter}\p{Mark}'’-]+\b))/iu;
+
+function isAbbreviationException(
+  suffix: string,
+  following: string,
+  endsDelimitedSentence = false,
+): boolean {
+  const continuation = following.trimStart();
+  return (
+    excepReg.test(suffix) &&
+    !(
+      /\bv\.?s\.$/i.test(suffix) &&
+      (endsDelimitedSentence ||
+        /\b(?:am|is|are|was|were|be|been|being)\s+v\.?s\.$/i.test(suffix) ||
+        isStandalonePronounContinuation(continuation))
+    )
+  );
+}
+
+function isStandalonePronounContinuation(input: string): boolean {
+  // Retain the existing ASCII /i matching; Unicode /iu would also match long-s in ſhe.
+  const pronoun = input.match(/^(?:this|that|these|those|it|we|they|he|she|i)/i)?.[0];
+  return (
+    pronoun !== undefined &&
+    !/^[\p{ID_Continue}\p{Pd}\u200c\u200d]$/u.test(characterAt(input, pronoun.length))
+  );
+}
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
 class SentenceBuffer {
@@ -788,25 +843,26 @@ class SentenceBuffer {
  * @return {Array<string>}            An array of sentences
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Sentence segmentation requires complex NLP logic
-export function sentenceSegment(
-  input: string,
-  { caseNeutral = false }: SentenceSegmentOptions = {},
-): string[] {
+export function sentenceSegment(input: string, options: SentenceSegmentOptions = {}): string[] {
+  const { caseNeutral = false } = options;
+  const depth = (options as InternalSentenceSegmentOptions)[nestedListDepth] ?? 0;
   if (input.length === 0) {
     return [];
   }
 
-  const list = segmentList(input, caseNeutral);
+  const normalizedInput = input.replace(/\u0085/g, ' ');
+  const list = (options as InternalSentenceSegmentOptions)[skipListDetection]
+    ? undefined
+    : segmentList(normalizedInput, caseNeutral, depth);
   if (list !== undefined) {
     return list;
   }
 
   // Scan terminals before applying abbreviation and line-wrap rules.
-  const sourceInput = input.replace(/\u0085/g, ' ');
   const source: QuotationSource = {
-    input: sourceInput,
+    input: normalizedInput,
     index: 0,
-    pairs: quotationPairs(sourceInput, singleQuoteApostrophes(sourceInput)),
+    pairs: quotationPairs(normalizedInput, singleQuoteApostrophes(normalizedInput)),
     straightDouble: false,
     curlyDouble: false,
     germanDouble: false,
@@ -815,7 +871,14 @@ export function sentenceSegment(
     guillemetDouble: false,
     guillemetSingle: false,
   };
-  const chunks = sentenceChunks(source.input, caseNeutral, source.pairs);
+  const { chunks, quotedEnds } = sentenceChunks(
+    source.input,
+    caseNeutral,
+    source.pairs,
+    (options as InternalSentenceSegmentOptions)[skipListDetection]
+      ? nestedMarkerPeriods(normalizedInput, caseNeutral)
+      : undefined,
+  );
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -839,22 +902,36 @@ export function sentenceSegment(
         const nextChunk = chunks[idx + 1];
         const nextSentence = nextChunk?.slice(openingDelimiterEnd(nextChunk, 0));
         const abbreviation = gateSuffix.trimEnd();
+        const separator =
+          suffix.slice(suffix.trimEnd().length) + (nextChunk?.match(/^\s*/)?.[0] ?? '');
+        const continuesAbbreviation =
+          !/\n[^\S\n]*\n/.test(separator.replace(/\r\n?/g, '\n')) &&
+          ((/\bv\.?s\.$/i.test(abbreviation) &&
+            isAbbreviationException(abbreviation, nextSentence ?? '')) ||
+            (geographicAcronymReg.test(abbreviation) &&
+              geographicContinuationReg.test(nextChunk?.trimStart() ?? '')));
         if (
           nextSentence &&
           abbrvReg.test(abbreviation) &&
-          !excepReg.test(abbreviation) &&
+          !isAbbreviationException(abbreviation, nextSentence) &&
           (caseNeutral
             ? startsWithCasedCharacter(nextSentence) &&
               (!sentenceContinuationReg.test(nextSentence) ||
                 independentSentenceReg.test(nextSentence))
             : strIsTitleCase(nextSentence)) &&
-          !chunk.hasOpenDelimiter
+          !chunk.hasOpenDelimiter &&
+          !(
+            geographicAcronymReg.test(abbreviation) &&
+            geographicContinuationReg.test(nextChunk?.trimStart() ?? '') &&
+            !/[\r\n][^\S\r\n]*[\r\n]/.test(suffix.replace(/\r\n/g, '\n'))
+          )
         ) {
           chunk.normalizeWhitespace();
           acc.push(chunk.text());
         } else if (
           nextChunk &&
           (chunk.startsWithTitleCase ||
+            continuesAbbreviation ||
             (caseNeutral &&
               sentenceContinuationReg.test(nextChunk.trimStart()) &&
               /[.!?]["'”’“»›\])}>]\s*[\r\n]/.test(suffix)))
@@ -877,17 +954,25 @@ export function sentenceSegment(
         }
       } else if (chunks[idx + 1] && abbrvReg.test(gateSuffix)) {
         const nextChunk = chunks[idx + 1];
+        const nextSentence = /\bv\.?s\.$/i.test(gateSuffix)
+          ? nextChunk.replace(/^[\s"'([{<]+/, '')
+          : nextChunk;
+        const paragraphBreak = /\n[^\S\n]*\n/.test(nextChunk.replace(/\r\n?/g, '\n'));
         if (
-          (caseNeutral
-            ? startsWithCasedCharacter(nextChunk) &&
-              (!sentenceContinuationReg.test(nextChunk.trimStart()) ||
-                independentSentenceReg.test(nextChunk.trimStart()))
-            : strIsTitleCase(nextChunk)) &&
-          !excepReg.test(gateSuffix) &&
-          !(
-            geographicAcronymReg.test(gateSuffix) &&
-            geographicContinuationReg.test(nextChunk.trim())
-          )
+          (paragraphBreak &&
+            /\bv\.?s\.$/i.test(gateSuffix) &&
+            !chunk.hasOpenDelimiter &&
+            !quotedEnds.has(idx)) ||
+          ((caseNeutral
+            ? startsWithCasedCharacter(nextSentence) &&
+              (!sentenceContinuationReg.test(nextSentence) ||
+                independentSentenceReg.test(nextSentence))
+            : strIsTitleCase(nextSentence)) &&
+            !isAbbreviationException(gateSuffix, nextSentence) &&
+            !(
+              geographicAcronymReg.test(gateSuffix) &&
+              geographicContinuationReg.test(nextChunk.trimStart())
+            ))
         ) {
           // Catch abbreviations followed by a capital letter and treat as a boundary.
           acc.push(chunk.text());
@@ -954,19 +1039,497 @@ export function sentenceSegment(
   return acc.length === 0 ? [input] : acc;
 }
 
+interface ListBracketState {
+  bracketDepth: number[];
+  bracketStack: Uint8Array;
+  bracketStackLength: number;
+  angleOpeners?: Uint8Array;
+  parenthesisLabels?: Uint8Array;
+}
+
+interface ListScanState extends ListBracketState {
+  cursor: number;
+  caseNeutral: boolean;
+  referenceThrough?: number;
+  referenceBoundary?: number;
+  quote: string | undefined;
+  quoteFlags?: Uint8Array;
+  yearList?: boolean;
+}
+
+/** Paired single-backtick spans are opaque to list detection, independent of Treebank aliases. */
+function listCodeFlags(input: string): Uint8Array | undefined {
+  let flags: Uint8Array | undefined;
+  let opening = -1;
+  for (const token of input.matchAll(/`+/g)) {
+    if (token[0].length !== 1) {
+      continue;
+    }
+    if (opening >= 0) {
+      flags ??= new Uint8Array(input.length);
+      flags.fill(4, opening, token.index + 1);
+      opening = -1;
+    } else if (!isEscapedListQuote(input, token.index)) {
+      opening = token.index;
+    }
+  }
+  return flags;
+}
+
+/** Confirm numeric quote openers without treating unpaired year elisions as quotes. */
+function numericQuoteFlags(input: string): Uint8Array | undefined {
+  let openings = listCodeFlags(input);
+  let candidate: number | undefined;
+  for (const quote of input.matchAll(/'/g)) {
+    const index = quote.index;
+    if (
+      openings?.[index] === 4 ||
+      isEscapedListQuote(input, index) ||
+      isPairedNElision(input, index)
+    ) {
+      continue;
+    }
+    const previous = input[index - 1] ?? '';
+    const following = characterAt(input, index + 1);
+    const opener = index === 0 || /^[\s\p{Punctuation}<=>]$/u.test(previous);
+    if (opener && /^\p{Number}$/u.test(following)) {
+      candidate = index;
+    } else if (candidate !== undefined) {
+      const possiblePossessive = isListPossessiveCandidate(input, index);
+      if (
+        !possiblePossessive &&
+        (/[.!?]/.test(previous) ||
+          following.length === 0 ||
+          /^[\s.,!?;:)\]}>"”»\p{Pd}]$/u.test(following))
+      ) {
+        openings ??= new Uint8Array(input.length);
+        openings[candidate] = 1;
+        // Confirmed numeric spans retain their internal possessive apostrophes.
+        markListQuoteRange(input, openings, candidate + 1, index);
+        candidate = undefined;
+      } else if (
+        opener &&
+        /\S/.test(following) &&
+        !singleQuoteElisionReg.test(input.slice(index + 1, index + 32))
+      ) {
+        candidate = undefined;
+      }
+    }
+  }
+  return openings;
+}
+
+/** Confirm ambiguous possessives only within a span with a later unambiguous closer. */
+function confirmedListQuoteFlags(
+  input: string,
+  initialFlags: Uint8Array | undefined,
+): Uint8Array | undefined {
+  let flags = initialFlags;
+  const pending = {
+    "'": { opening: -1, candidate: -1 },
+    '’': { opening: -1, candidate: -1 },
+  };
+  for (const quote of input.matchAll(/['‘’]/g)) {
+    const index = quote.index;
+    const character = quote[0];
+    const closer = character === "'" ? "'" : '’';
+    const state = pending[closer];
+    markNestedNumericQuote(flags, index, state.opening >= 0);
+    if (flags?.[index] === 4 || flags?.[index] === 2 || isLiteralListQuote(input, index)) {
+      continue;
+    }
+    const opening = listQuoteCloser(input, index, flags) === closer;
+    if (character === '‘' || state.opening < 0) {
+      if (opening) {
+        state.opening = index;
+        state.candidate = -1;
+      }
+      continue;
+    }
+    if (isListPossessiveCandidate(input, index)) {
+      state.candidate = state.candidate < 0 ? index : state.candidate;
+      continue;
+    }
+    if (opening && /\S/.test(input[index + 1] ?? '') && !/[.!?]/.test(input[index - 1] ?? '')) {
+      state.opening = index;
+      state.candidate = -1;
+      continue;
+    }
+    if (state.candidate >= 0) {
+      flags ??= new Uint8Array(input.length);
+      markListQuoteRange(input, flags, state.candidate, index, closer);
+    }
+    state.opening = -1;
+    state.candidate = -1;
+  }
+  return flags;
+}
+
+/** A numeric opener inside a pending quote retains the existing outer span. */
+function markNestedNumericQuote(
+  flags: Uint8Array | undefined,
+  index: number,
+  insideQuote: boolean,
+): void {
+  if (insideQuote && flags?.[index] === 1) {
+    flags[index] = 2;
+  }
+}
+
+function isListPossessiveCandidate(input: string, index: number): boolean {
+  return (
+    /s/iu.test(input[index - 1] ?? '') &&
+    // Stop at quote or sentence punctuation: each modifier scan ends before another candidate.
+    /^\s(?:(?![.!?,;:"'`‘’“”«»‹›])[\s\p{Punctuation}\p{Symbol}])*[\p{Letter}\p{Mark}\p{Number}]/u.test(
+      input.slice(index + 1),
+    )
+  );
+}
+
+function markListQuoteRange(
+  input: string,
+  flags: Uint8Array,
+  start: number,
+  end: number,
+  closer?: string,
+): void {
+  // Confirmed ranges are disjoint within each quote family and the numeric pass.
+  for (let index = start; index < end; index++) {
+    if (flags[index] !== 4 && (closer === undefined || input[index] === closer)) {
+      flags[index] = 2;
+    }
+  }
+}
+
+function listQuoteCloser(
+  input: string,
+  index: number,
+  quoteFlags: Uint8Array | undefined,
+): string | undefined {
+  const character = input[index];
+  if (isEscapedListQuote(input, index) || isPairedNElision(input, index)) {
+    return undefined;
+  }
+  if (
+    input.startsWith('``', index) ||
+    (input.startsWith("''", index) && isTreebankQuoteOpening(input, index))
+  ) {
+    return "''";
+  }
+  if (character === '"') {
+    return index === 0 || /^[\s\p{Punctuation}<=>]$/u.test(input[index - 1]) ? '"' : undefined;
+  }
+  if (
+    character === "'" &&
+    (index === 0 || /^[\s\p{Punctuation}<=>]$/u.test(input[index - 1])) &&
+    (quoteFlags?.[index] === 1 || !/^\p{Number}$/u.test(characterAt(input, index + 1))) &&
+    !singleQuoteElisionReg.test(input.slice(index + 1, index + 32))
+  ) {
+    return "'";
+  }
+  if (character === '“') {
+    return '”';
+  }
+  if (character === '«') {
+    return '»';
+  }
+  if (character === '‹') {
+    return '›';
+  }
+  return character === '‘' ? '’' : undefined;
+}
+
+/** Backslash runs preceding distinct quote tokens are disjoint. */
+function isEscapedListQuote(input: string, index: number): boolean {
+  if (!/["'`“”‘’«»‹›]/.test(input[index])) {
+    return false;
+  }
+  let preceding = index - 1;
+  while (preceding >= 0 && input[preceding] === '\\') {
+    preceding--;
+  }
+  return (index - preceding - 1) % 2 === 1;
+}
+
+function isLiteralListQuote(input: string, index: number, quoteFlags?: Uint8Array): boolean {
+  if (isEscapedListQuote(input, index) || isPairedNElision(input, index)) {
+    return true;
+  }
+  if (!/['’]/.test(input[index])) {
+    return false;
+  }
+  return (
+    quoteFlags?.[index] === 2 ||
+    (/[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+      /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1))) ||
+    (!/[.!?]/.test(input[index - 1] ?? '') &&
+      singleQuoteElisionReg.test(input.slice(index + 1, index + 32)))
+  );
+}
+
+/** Only paired, unquoted angle marks form delimiters; unmatched comparisons stay prose. */
+function matchedAngleOpeners(
+  input: string,
+  quoteFlags: Uint8Array | undefined,
+): Uint8Array | undefined {
+  let pending = new Uint32Array(32);
+  let depth = 0;
+  let matched: Uint8Array | undefined;
+  let quote: string | undefined;
+  for (let index = 0; index < input.length; index++) {
+    if (quoteFlags?.[index] === 4) {
+      continue;
+    }
+    if (quote !== undefined) {
+      if (input.startsWith(quote, index) && !isLiteralListQuote(input, index, quoteFlags)) {
+        index += quote.length - 1;
+        quote = undefined;
+      }
+      continue;
+    }
+    quote = listQuoteCloser(input, index, quoteFlags);
+    if (quote !== undefined) {
+      index += quote.length - 1;
+    } else if (input[index] === '<') {
+      if (depth === pending.length) {
+        const grown = new Uint32Array(pending.length * 2);
+        grown.set(pending);
+        pending = grown;
+      }
+      pending[depth++] = index;
+    } else if (input[index] === '>' && depth > 0) {
+      matched ??= new Uint8Array(input.length);
+      matched[pending[--depth]] = 1;
+    }
+  }
+  return matched;
+}
+
+function* unquotedListParentheses(
+  input: string,
+  quoteFlags: Uint8Array | undefined,
+  angleOpeners: Uint8Array | undefined,
+): Generator<number> {
+  const brackets: ListBracketState = {
+    bracketDepth: [0, 0, 0, 0],
+    bracketStack: new Uint8Array(32),
+    bracketStackLength: 0,
+    angleOpeners,
+  };
+  let quote: string | undefined;
+  let skipThrough = -1;
+  for (const token of input.matchAll(/[()[\]{}<>"'`“”‘’«»‹›]/g)) {
+    const index = token.index;
+    if (index <= skipThrough || quoteFlags?.[index] === 4) {
+      continue;
+    }
+    if (quote !== undefined) {
+      if (input.startsWith(quote, index) && !isLiteralListQuote(input, index, quoteFlags)) {
+        skipThrough = index + quote.length - 1;
+        quote = undefined;
+      }
+      continue;
+    }
+    quote = listQuoteCloser(input, index, quoteFlags);
+    if (quote !== undefined) {
+      skipThrough = index + quote.length - 1;
+      continue;
+    }
+    if (
+      /[()]/.test(token[0]) &&
+      brackets.bracketDepth[1] + brackets.bracketDepth[2] + brackets.bracketDepth[3] === 0
+    ) {
+      yield index;
+    }
+    trackListBrackets(input, index, brackets);
+  }
+}
+
+/** A final structural closer can confirm that earlier label-shaped closers were literal. */
+function parenthesisLabelFlags(
+  input: string,
+  quoteFlags: Uint8Array | undefined,
+  angleOpeners: Uint8Array | undefined,
+): Uint8Array | undefined {
+  const markers = input.matchAll(new RegExp(listMarkerReg));
+  let marker = markers.next().value;
+  let depth = 0;
+  let candidate = -1;
+  let flags: Uint8Array | undefined;
+  for (const index of unquotedListParentheses(input, quoteFlags, angleOpeners)) {
+    if (input[index] === '(') {
+      depth++;
+      candidate = -1;
+    } else if (input[index] === ')') {
+      while (marker !== undefined && marker.index + marker[0].length - 1 < index) {
+        marker = markers.next().value;
+      }
+      const label = marker !== undefined && marker.index + marker[0].length - 1 === index;
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && label) {
+          candidate = index;
+        }
+      } else if (!label && candidate >= 0) {
+        flags ??= new Uint8Array(input.length);
+        flags.fill(1, candidate, index);
+        candidate = -1;
+      }
+    }
+  }
+  return flags;
+}
+
+function listScanState(input: string, caseNeutral: boolean): ListScanState {
+  const quoteFlags = confirmedListQuoteFlags(input, numericQuoteFlags(input));
+  const angleOpeners = matchedAngleOpeners(input, quoteFlags);
+  return {
+    cursor: 0,
+    caseNeutral,
+    bracketDepth: [0, 0, 0, 0],
+    bracketStack: new Uint8Array(32),
+    bracketStackLength: 0,
+    quote: undefined,
+    quoteFlags,
+    angleOpeners,
+    parenthesisLabels: parenthesisLabelFlags(input, quoteFlags, angleOpeners),
+  };
+}
+
+function advanceListScan(input: string, end: number, state: ListScanState): void {
+  while (state.cursor < end) {
+    const index = state.cursor++;
+    if (state.quoteFlags?.[index] === 4) {
+      continue;
+    }
+    if (state.quote !== undefined) {
+      const apostrophe = isLiteralListQuote(input, index, state.quoteFlags);
+      if (input.startsWith(state.quote, index) && !apostrophe) {
+        state.cursor += state.quote.length - 1;
+        state.quote = undefined;
+      }
+      continue;
+    }
+    const quote = listQuoteCloser(input, index, state.quoteFlags);
+    if (quote !== undefined) {
+      state.quote = quote;
+      state.cursor += quote.length - 1;
+      continue;
+    }
+    trackListBrackets(input, index, state);
+    if (
+      state.referenceThrough !== undefined &&
+      state.bracketStackLength === 0 &&
+      isListReferenceBoundary(input, index, state.caseNeutral)
+    ) {
+      state.referenceBoundary = index;
+    }
+  }
+}
+
+/** Match the current literal's closer; crossing or unmatched closers stay literal. */
+function trackListBrackets(input: string, index: number, state: ListBracketState): void {
+  const character = input[index];
+  const opening = '([{<'.indexOf(character);
+  if (opening !== -1 && (character !== '<' || state.angleOpeners?.[index] === 1)) {
+    if (state.bracketStackLength === state.bracketStack.length) {
+      const grown = new Uint8Array(Math.max(32, state.bracketStack.length * 2));
+      grown.set(state.bracketStack);
+      state.bracketStack = grown;
+    }
+    state.bracketStack[state.bracketStackLength++] = opening;
+    state.bracketDepth[opening]++;
+    return;
+  }
+  const closing = ')]}>'.indexOf(character);
+  if (
+    closing === -1 ||
+    state.bracketDepth[closing] === 0 ||
+    (character === ')' && state.parenthesisLabels?.[index] === 1)
+  ) {
+    return;
+  }
+  if (state.bracketStack[state.bracketStackLength - 1] === closing) {
+    state.bracketStackLength--;
+    state.bracketDepth[closing]--;
+  }
+}
+
+function listMarkerPrefix(
+  input: string,
+  marker: RegExpExecArray,
+  quoteFlags?: Uint8Array,
+): {
+  empty: boolean;
+  boundary: boolean;
+  joinedNameInitial: boolean;
+} {
+  let index = marker.index - 1;
+  let lineBreak = /[\r\n]/.test(marker[0]);
+  while (
+    index >= 0 &&
+    (/[\s"'”’»›\])}>]/.test(input[index]) || (input[index] === '`' && quoteFlags?.[index] === 4))
+  ) {
+    lineBreak ||= /[\r\n]/.test(input[index]);
+    index--;
+  }
+  const joinedNameInitial =
+    /^\p{Cased}\p{M}*\.$/u.test(marker[0].trim()) &&
+    /(?:\b(?:and|or)|[,;&])\s*$/i.test(input.slice(Math.max(0, marker.index - 8), marker.index));
+  return {
+    empty: index < 0,
+    boundary: lineBreak || /[.!?:\p{Pd}]/u.test(input[index] ?? ''),
+    joinedNameInitial,
+  };
+}
+
 function nextListMarker(
   input: string,
   expression: RegExp,
+  state: ListScanState,
   family?: RegExp,
+  previous?: RegExpExecArray,
 ): RegExpExecArray | null {
+  let bodyStart = previous ? previous.index + previous[0].length : 0;
+  let hasBody = previous === undefined;
   let marker = expression.exec(input);
   while (marker !== null) {
+    advanceListScan(input, marker.index, state);
+    if (family === undefined || family.test(marker[0])) {
+      hasBody ||= input.slice(bodyStart, marker.index).trim().length > 0;
+      bodyStart = marker.index + marker[0].length;
+    }
+    const enclosedMarker =
+      state.bracketDepth.some((depth) => depth > 0) ||
+      state.quote !== undefined ||
+      state.quoteFlags?.[marker.index] === 4;
+    const prefix = listMarkerPrefix(input, marker, state.quoteFlags);
+    const crossReference = isListCrossReference(input, marker, state, enclosedMarker);
+    const authorInitial =
+      previous !== undefined &&
+      /^\p{Cased}\p{M}*\.$/u.test(marker[0].trim()) &&
+      (prefix.joinedNameInitial ||
+        colonIntroducedNameBoundary(
+          input,
+          marker.index + marker[0].length - 1,
+          state.caseNeutral,
+        ) === -1);
+    const yearInProse =
+      yearListMarkerReg.test(marker[0].trim()) &&
+      !(state.yearList || prefix.empty || prefix.boundary);
+    const countInProse =
+      /^\d+\.$/.test(marker[0].trim()) &&
+      /\b(?:am|is|are|was|were|be|been|being|has|have|had|reached|numbered|total(?:ed)?|hit|equals?|equaled|became|remained|scored|costs?|in|of|at|by|to|from|about|around|roughly|approximately)$/i.test(
+        input.slice(Math.max(0, marker.index - 24), marker.index).trimEnd(),
+      );
     if (
       (family === undefined || family.test(marker[0])) &&
-      (marker.index === 0 ||
-        !/\b(?:section|chapter|page|figure|table|paragraph|article|clause)$/i.test(
-          input.slice(Math.max(0, marker.index - 24), marker.index).trimEnd(),
-        ))
+      hasBody &&
+      !enclosedMarker &&
+      !yearInProse &&
+      !countInProse &&
+      !crossReference &&
+      !authorInitial
     ) {
       return marker;
     }
@@ -975,29 +1538,276 @@ function nextListMarker(
   return null;
 }
 
-function segmentList(input: string, caseNeutral: boolean): string[] | undefined {
-  const expression = new RegExp(listMarkerReg);
-  let current = nextListMarker(input, expression);
-  if (current === null || input.slice(0, current.index).trim().length > 0) {
+/** Test only unquoted, unbracketed reference punctuation from the shared source cursor. */
+function isListReferenceBoundary(input: string, index: number, caseNeutral: boolean): boolean {
+  const terminal = input[index];
+  if (!/[.!?:;\r\n]/.test(terminal)) {
+    return false;
+  }
+  if (terminal !== '.') {
+    return true;
+  }
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  return !(
+    (abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix)) ||
+    acronymReg.test(gateSuffix) ||
+    (/\d/.test(input[index - 1] ?? '') && /\d/.test(input[index + 1] ?? ''))
+  );
+}
+
+/** Reference labels continue through one prose run; strong punctuation starts a new context. */
+function isListCrossReference(
+  input: string,
+  marker: RegExpExecArray,
+  state: ListScanState,
+  enclosed: boolean,
+): boolean {
+  if (
+    state.referenceThrough !== undefined &&
+    (state.referenceBoundary ?? -1) >= state.referenceThrough
+  ) {
+    state.referenceThrough = undefined;
+  }
+  if (
+    !enclosed &&
+    /\b(?:section|chapter|page|figure|table|paragraph|article|clause)s?$/i.test(
+      input.slice(Math.max(0, marker.index - 24), marker.index).trimEnd(),
+    )
+  ) {
+    state.referenceThrough = marker.index;
+  }
+  if (state.referenceThrough === undefined) {
+    return false;
+  }
+  // Consecutive ranges are disjoint, including across nextListMarker calls.
+  state.referenceThrough = marker.index + marker[0].length;
+  return true;
+}
+
+interface ListCandidate {
+  current: RegExpExecArray;
+  next: RegExpExecArray;
+  family: RegExp;
+  prefix: string;
+}
+
+function listMarkerFamily(marker: string, caseNeutral: boolean): RegExp {
+  let start: string;
+  if (/\d/.test(marker)) {
+    start = '^\\s*(?:[•⁃][^\\S\\r\\n]*|[-*+][^\\S\\r\\n]+)?\\d';
+  } else if (caseNeutral) {
+    start = '^\\s*\\p{Cased}';
+  } else {
+    start = /^[\p{Uppercase}\p{Lt}]/u.test(marker)
+      ? '^\\s*[\\p{Uppercase}\\p{Lt}]'
+      : '^\\s*\\p{Lowercase}';
+  }
+  const ending = marker.endsWith(')') ? '\\)' : '\\.';
+  return new RegExp(`${start}[^\\r\\n]*${ending}$`, 'u');
+}
+
+function numericMarkerValue(marker: string): string | undefined {
+  return marker.match(/^(?:[•⁃][^\S\r\n]*|[-*+][^\S\r\n]+)?(\d+)/)?.[1].replace(/^0+(?=\d)/, '');
+}
+
+function isDistantNumericMarker(
+  first: string | undefined,
+  marker: string,
+  atBoundary: boolean,
+): boolean {
+  const current = numericMarkerValue(marker);
+  if (atBoundary || first === undefined || current === undefined) {
+    return false;
+  }
+  if (Math.abs(first.length - current.length) > 1) {
+    return true;
+  }
+  // Equal-length/adjacent-length labels require at most the current label's digits plus one.
+  // Keep only a bounded signed difference; no arbitrary-precision integer is constructed.
+  let difference = 0;
+  const length = Math.max(first.length, current.length);
+  for (let index = 0; index < length; index++) {
+    const firstDigit = Number(first[index - (length - first.length)] ?? '0');
+    const currentDigit = Number(current[index - (length - current.length)] ?? '0');
+    difference = difference * 10 + firstDigit - currentDigit;
+    if (Math.abs(difference) > 10) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function findListCandidate(
+  input: string,
+  caseNeutral: boolean,
+  expression: RegExp,
+  state: ListScanState,
+  familyFilter?: RegExp,
+): ListCandidate | undefined {
+  const firstByFamily = new Map<
+    string,
+    {
+      marker: RegExpExecArray;
+      emptyPrefix: boolean;
+      prefix?: string;
+      identity: string;
+      number: string | undefined;
+      bodyStart: number;
+      hasBody: boolean;
+    }
+  >();
+  // At most six fixed marker families can remain deferred.
+  const deferredByFamily = new Map<
+    string,
+    { candidate: ListCandidate; expressionIndex: number; state: ListScanState }
+  >();
+  let current = nextListMarker(input, expression, state, familyFilter);
+  let proseInitialEnd: number | undefined;
+  while (current !== null) {
+    const marker = current[0].trim();
+    const context = listMarkerPrefix(input, current, state.quoteFlags);
+    const ambiguousMarker = /^\d+\.$/.test(marker) || /^\p{Cased}\p{M}*\.$/u.test(marker);
+
+    const family = listMarkerFamily(marker, caseNeutral);
+    const first = firstByFamily.get(family.source);
+    proseInitialEnd = markProseInitial(
+      input,
+      current,
+      first === undefined,
+      context,
+      proseInitialEnd,
+    );
+    const identity = caseNeutral ? marker.toLowerCase() : marker;
+    if (context.joinedNameInitial) {
+      firstByFamily.delete(family.source);
+      deferredByFamily.delete(family.source);
+      current = nextListMarker(input, expression, state, familyFilter);
+      continue;
+    }
+    if (first !== undefined) {
+      first.hasBody ||= input.slice(first.bodyStart, current.index).trim().length > 0;
+      first.bodyStart = current.index + current[0].length;
+    }
+    const distinctMarker = first?.identity !== identity;
+    if (first?.hasBody && (first.emptyPrefix || distinctMarker)) {
+      first.prefix ??= input.slice(0, first.marker.index).trim();
+      const candidate: ListCandidate = {
+        current: first.marker,
+        next: current,
+        family,
+        prefix: first.prefix,
+      };
+      const hasEarlierFamily = [...firstByFamily.values()].some(
+        (entry) => entry.marker.index < first.marker.index,
+      );
+      const distantNumber = isDistantNumericMarker(first.number, marker, context.boundary);
+      if (!(hasEarlierFamily || distantNumber)) {
+        return candidate;
+      }
+      if (!deferredByFamily.has(family.source)) {
+        deferredByFamily.set(family.source, {
+          candidate,
+          expressionIndex: expression.lastIndex,
+          state: {
+            ...state,
+            bracketDepth: [...state.bracketDepth],
+            bracketStack: state.bracketStack.slice(0, state.bracketStackLength),
+          },
+        });
+      }
+    }
+
+    if (first === undefined && (context.empty || !ambiguousMarker || context.boundary)) {
+      state.yearList ||= yearListMarkerReg.test(marker);
+      firstByFamily.set(family.source, {
+        marker: current,
+        emptyPrefix: context.empty,
+        identity,
+        number: numericMarkerValue(marker),
+        bodyStart: current.index + current[0].length,
+        hasBody: false,
+      });
+    }
+
+    current = nextListMarker(input, expression, state, familyFilter);
+  }
+  const deferred = [...deferredByFamily.values()].sort(
+    (first, second) => first.candidate.current.index - second.candidate.current.index,
+  )[0];
+  if (deferred !== undefined) {
+    expression.lastIndex = deferred.expressionIndex;
+    Object.assign(state, deferred.state);
+  }
+  return deferred?.candidate;
+}
+
+function markProseInitial(
+  input: string,
+  marker: RegExpExecArray,
+  firstMarker: boolean,
+  context: { empty: boolean; boundary: boolean },
+  previousEnd: number | undefined,
+): number | undefined {
+  if (
+    firstMarker &&
+    /^\p{Cased}\p{M}*\.$/u.test(marker[0].trim()) &&
+    (!(context.empty || context.boundary) ||
+      (previousEnd !== undefined && input.slice(previousEnd, marker.index).trim().length === 0))
+  ) {
+    context.boundary = false;
+    return marker.index + marker[0].length;
+  }
+  return undefined;
+}
+
+function segmentNestedSentence(
+  input: string,
+  caseNeutral: boolean,
+  depth: number,
+  detectLists = true,
+): string[] {
+  const options: InternalSentenceSegmentOptions = {
+    caseNeutral,
+    [nestedListDepth]: depth + 1,
+    [skipListDetection]: !detectLists,
+  };
+  return sentenceSegment(input, options);
+}
+
+function segmentList(input: string, caseNeutral: boolean, depth: number): string[] | undefined {
+  if (depth >= maxNestedListDepth) {
     return undefined;
   }
-  const firstMarker = current[0];
-  const family = [/\d/, /^\s*\p{Lu}/u, /^\s*\p{Ll}/u].find((pattern) => pattern.test(firstMarker));
-  let next = nextListMarker(input, expression, family);
-  if (next === null) {
+  const expression = new RegExp(listMarkerReg);
+  const state = listScanState(input, caseNeutral);
+  const candidate = findListCandidate(input, caseNeutral, expression, state);
+  if (candidate === undefined) {
     return undefined;
   }
 
-  const segments: string[] = [];
+  let current: RegExpExecArray | null = candidate.current;
+  let next: RegExpExecArray | null = candidate.next;
+  const { family, prefix } = candidate;
+  const segments = prefix.length === 0 ? [] : segmentNestedSentence(prefix, caseNeutral, depth);
   do {
     const body = input.slice(current.index + current[0].length, next?.index ?? input.length).trim();
-    const sentences = /[.!?\r\n]/.test(body) ? sentenceSegment(body, { caseNeutral }) : [body];
-    if (sentences.length > 1 && /^\p{Cased}\.$/u.test(sentences[0])) {
-      sentences.splice(0, 2, `${sentences[0]} ${sentences[1]}`);
+    const sentences = /[.!?\r\n]/.test(body)
+      ? segmentNestedSentence(body, caseNeutral, depth, false)
+      : [body];
+    let firstSentenceEnd = 1;
+    while (
+      firstSentenceEnd < sentences.length &&
+      /^\p{Cased}\p{M}*\.$/u.test(sentences[firstSentenceEnd - 1])
+    ) {
+      firstSentenceEnd++;
     }
-    segments.push(`${current[0].trim()} ${sentences[0]}`, ...sentences.slice(1));
+    segments.push(`${current[0].trim()} ${sentences.slice(0, firstSentenceEnd).join(' ')}`);
+    for (let index = firstSentenceEnd; index < sentences.length; index++) {
+      segments.push(sentences[index]);
+    }
     current = next;
-    next = nextListMarker(input, expression, family);
+    next = current && nextListMarker(input, expression, state, family, current);
   } while (current !== null);
   return segments;
 }
@@ -1008,12 +1818,332 @@ export interface SentenceSegmentOptions {
   caseNeutral?: boolean;
 }
 
+interface BracketContext {
+  depth: number;
+  standalone: boolean;
+  bracketQuoteEnd: number;
+  angles?: Uint8Array;
+}
+
+const angleQuoteClosers: Record<string, string> = {
+  '“': '”',
+  '‘': '’',
+  '«': '»',
+  '„': '“',
+  '‚': '‘',
+};
+
+function isAngleApostrophe(input: string, index: number): boolean {
+  return (
+    /['‘’]/.test(input[index]) &&
+    /[\p{Letter}\p{Mark}]$/u.test(input.slice(Math.max(0, index - 2), index)) &&
+    /^[\p{Letter}\p{Mark}]$/u.test(characterAt(input, index + 1))
+  );
+}
+
+function isSingleBacktick(input: string, index: number): boolean {
+  return input[index] === '`' && input[index - 1] !== '`' && input[index + 1] !== '`';
+}
+
+function angleQuoteCloser(input: string, index: number): string | undefined {
+  const character = input[index];
+  if (
+    !/["'`“‘«„‚]/.test(character) ||
+    isEscapedAngleQuote(input, index) ||
+    isAngleApostrophe(input, index)
+  ) {
+    return undefined;
+  }
+  if (
+    input.startsWith('``', index) ||
+    (input.startsWith("''", index) && isTreebankQuoteOpening(input, index))
+  ) {
+    return "''";
+  }
+  if (character === '`') {
+    return isSingleBacktick(input, index) ? '`' : undefined;
+  }
+  if (angleQuoteClosers[character] !== undefined) {
+    return angleQuoteClosers[character];
+  }
+  if (
+    /["']/.test(character) &&
+    (index === 0 || /^[\s\p{Punctuation}<]$/u.test(input[index - 1])) &&
+    /\S/.test(input[index + 1] ?? '')
+  ) {
+    return character;
+  }
+  return undefined;
+}
+
+function isEscapedAngleQuote(input: string, index: number): boolean {
+  let escaped = false;
+  for (let previous = index - 1; previous >= 0 && input[previous] === '\\'; previous--) {
+    escaped = !escaped;
+  }
+  return escaped;
+}
+
+/** Leading elisions cannot borrow a closer across a later independent quotation. */
+function hasLaterAngleElisionOpening(input: string, start: number, end: number): boolean {
+  const opener = input[start];
+  if (
+    !(
+      /['‘]/.test(opener) &&
+      /^(?:(?:t(?:is|was)|em|cause|till?)(?![\p{ID_Continue}\u200c\u200d])|\p{Number})/iu.test(
+        input.slice(start + 1, start + 16),
+      )
+    )
+  ) {
+    return false;
+  }
+  let next = input.indexOf(opener, start + 1);
+  while (next !== -1 && next <= end) {
+    let previous = next - 1;
+    while (input[previous] === '\\') {
+      previous--;
+    }
+    if (
+      angleQuoteCloser(input, next) !== undefined &&
+      (opener === '‘' || /^[\s([{<]$/.test(input[previous])) &&
+      /\S/.test(input[next + 1] ?? '')
+    ) {
+      return true;
+    }
+    next = input.indexOf(opener, next + 1);
+  }
+  return false;
+}
+
+/** Search each fixed closer kind monotonically, including when no closer remains. */
+function angleQuotationEnd(
+  input: string,
+  start: number,
+  closer: string,
+  positions: Record<string, number>,
+): number {
+  const cached = positions[closer];
+  let index = Math.max(start + closer.length, cached ?? 0);
+  while (index < input.length) {
+    const found = input.indexOf(closer, index);
+    if (found === -1) {
+      break;
+    }
+    if (
+      found === cached ||
+      !(
+        isEscapedAngleQuote(input, found) ||
+        isAngleApostrophe(input, found) ||
+        (closer === '`' && !isSingleBacktick(input, found))
+      )
+    ) {
+      positions[closer] = found;
+      const innerEnd = germanAngleInnerQuoteEnd(input, start, found, closer, positions);
+      if (innerEnd !== -1) {
+        index = innerEnd;
+        continue;
+      }
+      return hasLaterAngleElisionOpening(input, start, found) ? -1 : found + closer.length;
+    }
+    index = found + 1;
+  }
+  positions[closer] = input.length;
+  return -1;
+}
+
+/** A complete English pair before the next shared mark can nest inside a German quotation. */
+function germanAngleInnerQuoteEnd(
+  input: string,
+  start: number,
+  shared: number,
+  closer: string,
+  positions: Record<string, number>,
+): number {
+  if (input[start] !== '„' && input[start] !== '‚') {
+    return -1;
+  }
+  const englishCloser = closer === '“' ? '”' : '’';
+  // These searches start at a high quote, so they cannot recurse into this low-quote branch.
+  const englishEnd = angleQuotationEnd(input, shared, englishCloser, positions);
+  const germanEnd = angleQuotationEnd(input, shared, closer, positions);
+  return englishEnd !== -1 && germanEnd > englishEnd ? englishEnd : -1;
+}
+
+/** Pair unquoted angles with a byte mask and scalar depths; unmatched comparisons stay prose. */
+function matchedAngleDelimiters(input: string): Uint8Array | undefined {
+  if (!(input.includes('<') && input.includes('>'))) {
+    return undefined;
+  }
+  let depth = 0;
+  let pairs = 0;
+  let matched = new Uint8Array(0);
+  const closerPositions: Record<string, number> = {};
+  for (let index = 0; index < input.length; index++) {
+    const quote = angleQuoteCloser(input, index);
+    if (quote !== undefined) {
+      const end = angleQuotationEnd(input, index, quote, closerPositions);
+      if (end !== -1) {
+        index = end - 1;
+        continue;
+      }
+    }
+    if (/[<>]/.test(input[index]) && isEscapedAngleQuote(input, index)) {
+      continue;
+    }
+    if (input[index] === '<') {
+      if (matched.length === 0) {
+        matched = new Uint8Array(input.length);
+      }
+      matched[index] = 2;
+      depth++;
+    } else if (input[index] === '>' && depth > 0) {
+      matched[index] = 1;
+      depth--;
+      pairs++;
+    }
+  }
+  if (pairs === 0) {
+    return undefined;
+  }
+  retainMatchedAngleOpeners(matched);
+  return matched;
+}
+
+function retainMatchedAngleOpeners(matched: Uint8Array): void {
+  let depth = 0;
+  for (let index = matched.length - 1; index >= 0; index--) {
+    if (matched[index] === 1) {
+      depth++;
+    } else if (matched[index] === 2) {
+      matched[index] = depth > 0 ? 1 : 0;
+      depth = Math.max(0, depth - 1);
+    }
+  }
+}
+
+/** Reuse paired-quote recognition only for the surrounding bracket context. */
+function pairedBracketQuoteEnd(
+  input: string,
+  index: number,
+  currentEnd: number,
+  positions: Record<string, number>,
+): number {
+  if (index <= currentEnd || !/["'`‘“«„‚]/.test(input[index]) || input[index - 1] === "'") {
+    return currentEnd;
+  }
+  const closer = angleQuoteCloser(input, index);
+  return closer === undefined ? currentEnd : angleQuotationEnd(input, index, closer, positions) - 1;
+}
+
+function followsParagraph(input: string, index: number): boolean {
+  let breaks = 0;
+  for (let previous = index - 1; previous >= 0 && /\s/.test(input[previous]); previous--) {
+    if (input[previous] === '\n' || (input[previous] === '\r' && input[previous + 1] !== '\n')) {
+      breaks++;
+      if (breaks === 2) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function updateBracketContext(
+  input: string,
+  index: number,
+  standalone: boolean,
+  brackets: BracketContext,
+  insideQuotes: boolean,
+): void {
+  if (insideQuotes || index < brackets.bracketQuoteEnd) {
+    return;
+  }
+  const character = input[index];
+  if (
+    !/[()[\]{}<>]/.test(character) ||
+    (/[<>]/.test(character) && brackets.angles?.[index] !== 1) ||
+    isEscapedAngleQuote(input, index)
+  ) {
+    return;
+  }
+  if (openingBracketReg.test(character)) {
+    if (brackets.depth === 0) {
+      brackets.standalone = standalone || followsParagraph(input, index);
+    }
+    brackets.depth++;
+  } else if (closingBracketReg.test(character)) {
+    brackets.depth = Math.max(0, brackets.depth - 1);
+  }
+}
+
+interface InternalSentenceSegmentOptions extends SentenceSegmentOptions {
+  [skipListDetection]?: boolean;
+  [nestedListDepth]?: number;
+}
+
+/** Preserve confirmed nested marker periods while still splitting ordinary item-body sentences. */
+function nestedMarkerPeriods(input: string, caseNeutral: boolean): Uint8Array | undefined {
+  const families = new Map<string, RegExp>();
+  for (const marker of input.matchAll(new RegExp(listMarkerReg))) {
+    if (marker[0].includes('.')) {
+      const family = listMarkerFamily(marker[0].trim(), caseNeutral);
+      families.set(family.source, family);
+    }
+  }
+  if (families.size === 0) {
+    return undefined;
+  }
+  const context = listScanState(input, caseNeutral);
+  let periods: Uint8Array | undefined;
+  // The configured marker grammar has at most six families, independent of input size.
+  for (const family of families.values()) {
+    const expression = new RegExp(listMarkerReg);
+    const state = {
+      ...context,
+      bracketDepth: [0, 0, 0, 0],
+      bracketStack: new Uint8Array(32),
+      bracketStackLength: 0,
+    };
+    const candidate = findListCandidate(input, caseNeutral, expression, state, family);
+    if (candidate === undefined) {
+      continue;
+    }
+    periods ??= new Uint8Array(input.length);
+    markListPeriod(periods, candidate.current);
+    let marker: RegExpExecArray | null = candidate.next;
+    while (marker !== null) {
+      markListPeriod(periods, marker);
+      marker = nextListMarker(input, expression, state, family, marker);
+    }
+  }
+  return periods;
+}
+
+function markListPeriod(periods: Uint8Array, marker: RegExpExecArray): void {
+  const offset = marker[0].indexOf('.');
+  if (offset >= 0) {
+    periods[marker.index + offset] = 1;
+  }
+}
+
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
-function sentenceChunks(input: string, caseNeutral: boolean, pairs: Int32Array): string[] {
+function sentenceChunks(
+  input: string,
+  caseNeutral: boolean,
+  pairs: Int32Array,
+  markerPeriods?: Uint8Array,
+): { chunks: string[]; quotedEnds: Set<number> } {
   const chunks: string[] = [];
+  const quotedEnds = new Set<number>();
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
-  const questionTerminal = questionTerminalChecker(input, protectedPeriods, caseNeutral, pairs);
+  const questionTerminal = questionTerminalChecker(
+    input,
+    protectedPeriods,
+    caseNeutral,
+    pairs,
+    markerPeriods,
+  );
   const hasUrlPrefix = urlPrefixChecker(input);
   let lastEnd = 0;
   let start = -1;
@@ -1026,24 +2156,36 @@ function sentenceChunks(input: string, caseNeutral: boolean, pairs: Int32Array):
     guillemetDouble: false,
     guillemetSingle: false,
   };
-  const brackets = { depth: 0, standalone: false };
+  let sentenceStarted = false;
+  let closingQuotes = '';
+  const bracketQuotePositions: Record<string, number> = {};
+  const brackets: BracketContext = {
+    depth: 0,
+    standalone: false,
+    bracketQuoteEnd: -1,
+    angles: matchedAngleDelimiters(input),
+  };
 
   for (let index = 0; index < input.length; index++) {
     const char = input[index];
-    trackQuotations(input, index, quotations, pairs);
-    if (openingBracketReg.test(char)) {
-      if (brackets.depth === 0) {
-        brackets.standalone = start === -1;
-      }
-      brackets.depth++;
-    } else if (closingBracketReg.test(char)) {
-      brackets.depth = Math.max(0, brackets.depth - 1);
+    if (pairs[index] !== 0) {
+      trackQuotations(input, index, quotations, pairs);
+      closingQuotes = closingQuotationMarks(quotations);
     }
+    const insideQuotes = closingQuotes.length > 0;
+    brackets.bracketQuoteEnd = pairedBracketQuoteEnd(
+      input,
+      index,
+      brackets.bracketQuoteEnd,
+      bracketQuotePositions,
+    );
+    updateBracketContext(input, index, !sentenceStarted, brackets, insideQuotes);
     if (index < lastEnd || char === '\r' || char === '\n') {
       // Only closing-delimiter lookahead can cross CR/LF; other wraps reset the prefix.
       start = -1;
       continue;
     }
+    sentenceStarted ||= /\S/.test(char);
     if (start === -1) {
       if (/\S/.test(char)) {
         start = index;
@@ -1052,37 +2194,68 @@ function sentenceChunks(input: string, caseNeutral: boolean, pairs: Int32Array):
       continue;
     }
     if (
-      (char === '.' && !isProtectedEllipsisPeriod(index, protectedPeriods, ellipsisCursor)) ||
-      char === '?' ||
-      char === '!'
+      markerPeriods?.[index] === 1 ||
+      !isUnprotectedTerminal(char, index, protectedPeriods, ellipsisCursor)
     ) {
-      const closingQuotes = closingQuotationMarks(quotations);
-      const end = sentenceEnd(
-        input,
-        index,
-        closingQuotes,
-        brackets,
-        caseNeutral,
-        questionTerminal,
-        hasUrlPrefix,
-        pairs,
-      );
-      if (
-        end === -1 ||
-        (closingQuotes.length > 1 &&
-          remainsInsideQuotation(input, index, end, closingQuotes, pairs))
-      ) {
-        continue;
-      }
-      // Captured line wraps can only occur between the terminal and closing delimiters.
-      chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
-      lastEnd = end;
-      start = -1;
+      continue;
     }
+    const unspacedDelimitedBoundary =
+      !insideQuotes &&
+      index >= brackets.bracketQuoteEnd &&
+      brackets.depth === 0 &&
+      isUnspacedDelimitedSentenceStart(input, index, caseNeutral);
+    const end = unspacedDelimitedBoundary
+      ? index + 1
+      : sentenceEnd(
+          input,
+          index,
+          closingQuotes,
+          brackets,
+          caseNeutral,
+          questionTerminal,
+          hasUrlPrefix,
+          pairs,
+        );
+    if (
+      end === -1 ||
+      (closingQuotes.length > 1 && remainsInsideQuotation(input, index, end, closingQuotes, pairs))
+    ) {
+      continue;
+    }
+    // Captured line wraps can only occur between the terminal and closing delimiters.
+    chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
+    if (
+      end <= brackets.bracketQuoteEnd &&
+      /\bv\.?s\.$/i.test(input.slice(Math.max(0, index - 4), index + 1))
+    ) {
+      quotedEnds.add(chunks.length - 1);
+    }
+    lastEnd = end;
+    start = -1;
+    sentenceStarted =
+      !unspacedDelimitedBoundary && keepsAbbreviationContext(input, index, end, caseNeutral);
   }
 
   chunks.push(input.slice(lastEnd));
-  return chunks;
+  return { chunks, quotedEnds };
+}
+
+function keepsAbbreviationContext(
+  input: string,
+  index: number,
+  end: number,
+  caseNeutral: boolean,
+): boolean {
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  return (
+    end === index + 1 &&
+    abbrvReg.test(gateSuffix) &&
+    !(
+      /\bv\.?s\.$/i.test(gateSuffix) &&
+      !isAbbreviationException(gateSuffix, input.slice(end).replace(/^[\s"'([{<]+/, ''))
+    )
+  );
 }
 
 interface SpacedEllipsisRange {
@@ -1131,12 +2304,41 @@ function isProtectedEllipsisPeriod(
   return range !== undefined && position >= range.start && position !== range.boundary;
 }
 
+/** Quoted literal marks stay consumable until their real enclosing closer. */
+function isUnmatchedAngleCloser(
+  input: string,
+  index: number,
+  quotePending: boolean,
+  brackets: BracketContext,
+): boolean {
+  return (
+    input[index] === '>' &&
+    !quotePending &&
+    index >= brackets.bracketQuoteEnd &&
+    brackets.angles?.[index] !== 1
+  );
+}
+
+function isUnprotectedTerminal(
+  character: string,
+  index: number,
+  ranges: SpacedEllipsisRange[],
+  cursor: { index: number },
+): boolean {
+  return (
+    (character === '.' && !isProtectedEllipsisPeriod(index, ranges, cursor)) ||
+    character === '?' ||
+    character === '!'
+  );
+}
+
 /** Scan closing delimiters, including whitespace before a pending closing quote. */
 function closingDelimiterEnd(
   input: string,
   index: number,
   closingQuotes: string,
   pairs: Int32Array,
+  brackets: BracketContext,
 ): number {
   let end = index + 1;
   let pendingQuotes = closingQuotes;
@@ -1156,7 +2358,10 @@ function closingDelimiterEnd(
     ) {
       break;
     }
-    if (closingDelimiterReg.test(input[end]) || pendingQuotes.includes(input[end])) {
+    if (
+      (closingDelimiterReg.test(input[end]) || pendingQuotes.includes(input[end])) &&
+      !isUnmatchedAngleCloser(input, end, pendingQuotes.length > 0, brackets)
+    ) {
       if (pendingQuotes.includes(input[end])) {
         pendingQuotes = pendingQuotes.replace(input[end], '');
       }
@@ -1172,7 +2377,8 @@ function closingDelimiterEnd(
     if (
       next > end &&
       next < input.length &&
-      (closingBracketReg.test(input[next]) ||
+      ((closingBracketReg.test(input[next]) &&
+        !isUnmatchedAngleCloser(input, next, pendingQuotes.length > 0, brackets)) ||
         pendingQuotes.includes(pairedClosingQuote(input, next, pairs) ?? '\0'))
     ) {
       end = next;
@@ -1188,21 +2394,28 @@ function sentenceEnd(
   input: string,
   index: number,
   closingQuotes: string,
-  brackets: { depth: number; standalone: boolean },
+  brackets: BracketContext,
   caseNeutral: boolean,
   questionTerminal: (start: number) => boolean,
   hasUrlPrefix: (end: number) => boolean,
   pairs: Int32Array,
 ): number {
   const insideQuotes = closingQuotes.length > 0;
-  if (
-    !insideQuotes &&
-    brackets.depth === 0 &&
-    isUnspacedDelimitedSentenceStart(input, index, caseNeutral)
-  ) {
-    return index + 1;
+  const end = closingDelimiterEnd(input, index, closingQuotes, pairs, brackets);
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const {
+    closedBrackets,
+    containsBracket,
+    endsDelimitedSentence,
+    endsDelimitedVersus,
+    closesQuotation,
+  } = closingDelimiterContext(input, index + 1, end, closingQuotes, suffix, brackets, pairs);
+  if (end > index + 1 && end <= brackets.bracketQuoteEnd && /\bv\.?s\.$/i.test(suffix)) {
+    return -1;
   }
-  const end = closingDelimiterEnd(input, index, closingQuotes, pairs);
+  if (endsDelimitedVersus && closedBrackets < brackets.depth) {
+    return -1;
+  }
   if (end < input.length && !/\s/.test(input[end])) {
     return isUnspacedSentenceBoundary(
       input,
@@ -1210,6 +2423,7 @@ function sentenceEnd(
       end,
       caseNeutral,
       hasUrlPrefix(end),
+      endsDelimitedSentence,
       closingQuotes,
       pairs,
     )
@@ -1217,15 +2431,20 @@ function sentenceEnd(
       : -1;
   }
   if (end === index + 1) {
-    return standaloneTerminalEnd(input, end, insideQuotes);
+    return standaloneTerminalEnd(input, end, insideQuotes) === -1
+      ? -1
+      : colonIntroducedNameBoundary(input, index, caseNeutral);
   }
 
-  const closedBrackets = countClosingBrackets(input, index + 1, end);
-  const closesQuotation =
-    insideQuotes && (closingQuotes.includes(input[end - 1]) || input.slice(end - 2, end) === "''");
   if (
     closedBrackets > 0 &&
-    (closedBrackets < brackets.depth || !(brackets.standalone || closesQuotation))
+    (closedBrackets < brackets.depth ||
+      !(
+        brackets.standalone ||
+        closesQuotation ||
+        endsDelimitedVersus ||
+        /^\s*$/.test(input.slice(end))
+      ))
   ) {
     return -1;
   }
@@ -1234,7 +2453,6 @@ function sentenceEnd(
   if (next === input.length) {
     return end;
   }
-  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
   const continuation = input.slice(next);
   if (
@@ -1252,16 +2470,55 @@ function sentenceEnd(
   const startsWithLetter = caseNeutral
     ? isNeutralSentenceStart(input, end, next)
     : charIsUpperCase(nextCharacter);
-  const startsWithNumber = isNumericSentenceStart(input, next, nextCharacter, gateSuffix);
+  const startsWithNumber = isNumericSentenceStart(input, next, gateSuffix, endsDelimitedSentence);
   if (!(startsWithLetter || startsWithNumber)) {
     return -1;
   }
 
   // Keep bracketed ellipses inside the surrounding sentence.
-  if (ellipseReg.test(suffix) && closedBrackets > 0) {
+  if (ellipseReg.test(suffix) && containsBracket) {
     return -1;
   }
-  return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
+  return abbrvReg.test(gateSuffix) &&
+    isAbbreviationException(gateSuffix, input.slice(next), endsDelimitedSentence)
+    ? -1
+    : end;
+}
+
+function colonIntroducedNameBoundary(input: string, index: number, caseNeutral: boolean): number {
+  if (input[index] !== '.') {
+    return index + 1;
+  }
+  let before = input.slice(Math.max(0, index - 96), index + 1);
+  let after = input.slice(index + 1, index + 96);
+  if (caseNeutral) {
+    // Lowercasing can expand a code point (İ → i + combining dot). Apply the
+    // same bounded window to that text so the lowercased input has equal context.
+    before = before.toLowerCase().slice(-97);
+    after = after.toLowerCase().slice(0, 95);
+  }
+  const firstInitial = /:\s+\p{Cased}\p{M}*\.$/iu.test(before) && firstAuthorNameReg.test(after);
+  const laterInitial = laterAuthorInitialReg.test(before);
+  const joinsName =
+    (firstInitial || laterInitial) &&
+    /^\s+\p{Cased}(?:\p{Mark}|['’\p{Pd}])*\p{Letter}/u.test(after);
+  return joinsName ? -1 : index + 1;
+}
+
+function isNumericSentenceStart(
+  input: string,
+  next: number,
+  suffix: string,
+  endsDelimitedSentence: boolean,
+): boolean {
+  const delimitedVersus = endsDelimitedSentence && /\bv\.?s\.$/i.test(suffix);
+  return (
+    /^\p{Number}$/u.test(characterAt(input, next)) &&
+    (!abbrvReg.test(suffix) || delimitedVersus) &&
+    !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
+      input.slice(next),
+    )
+  );
 }
 
 const auxiliaryPrefixReg =
@@ -1438,7 +2695,7 @@ function enclosedTerminal(
   return next === input.length ||
     (boundary &&
       ((caseNeutral ? isNeutralSentenceStart(input, end, next) : charIsUpperCase(character)) ||
-        isNumericSentenceStart(input, next, character, '?')))
+        isNumericSentenceStart(input, next, '?', false)))
     ? terminal
     : -1;
 }
@@ -1476,6 +2733,7 @@ function questionTerminalChecker(
   ellipses: SpacedEllipsisRange[],
   caseNeutral: boolean,
   pairs: Int32Array,
+  markerPeriods?: Uint8Array,
 ): (start: number) => boolean {
   const nextTerminal = unquotedTerminalScanner(input, pairs, caseNeutral);
   const hasUrlPrefix = urlPrefixChecker(input);
@@ -1494,6 +2752,7 @@ function questionTerminalChecker(
     let terminal = nextTerminal(start, argumentStart);
     while (terminal !== null) {
       if (
+        markerPeriods?.[terminal.index] === 1 ||
         (terminal[0].length > 1 && terminal[0].length !== 4) ||
         isProtectedEllipsisPeriod(terminal.index, ellipses, ellipsisCursor)
       ) {
@@ -1531,29 +2790,53 @@ function standaloneTerminalEnd(input: string, end: number, insideQuotes: boolean
   return insideQuotes && !/[\r\n]/.test(input[end] ?? '') ? -1 : end;
 }
 
-function isNumericSentenceStart(
+function closingDelimiterContext(
   input: string,
-  index: number,
-  character: string,
+  start: number,
+  end: number,
+  closingQuotes: string,
   suffix: string,
-): boolean {
-  return (
-    /^\p{Number}$/u.test(character) &&
-    !abbrvReg.test(suffix) &&
-    !/^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu.test(
-      input.slice(index),
-    )
-  );
-}
-
-function countClosingBrackets(input: string, start: number, end: number): number {
-  let count = 0;
+  brackets: BracketContext,
+  pairs: Int32Array,
+): {
+  closedBrackets: number;
+  containsBracket: boolean;
+  endsDelimitedSentence: boolean;
+  endsDelimitedVersus: boolean;
+  closesQuotation: boolean;
+} {
+  let closedBrackets = 0;
+  let containsBracket = false;
+  let closesQuote = false;
+  let pendingQuotes = closingQuotes;
   for (let index = start; index < end; index++) {
-    if (closingBracketReg.test(input[index])) {
-      count++;
+    const closing = pairedClosingQuote(input, index, pairs);
+    if (closing !== undefined) {
+      pendingQuotes = pendingQuotes.replace(closing, '');
     }
+    if (
+      closingBracketReg.test(input[index]) &&
+      (input[index] !== '>' || brackets.angles?.[index] === 1)
+    ) {
+      containsBracket = true;
+      closedBrackets += Number(pendingQuotes.length === 0 && index >= brackets.bracketQuoteEnd);
+    }
+    closesQuote ||=
+      pendingQuotes.length === 0 &&
+      index >= brackets.bracketQuoteEnd &&
+      (input[index] === "'" || (closingQuotes.length > 0 && closing !== undefined));
   }
-  return count;
+  const endsDelimitedSentence =
+    closesQuote || (brackets.standalone && closedBrackets > 0 && closedBrackets >= brackets.depth);
+  return {
+    closedBrackets,
+    containsBracket,
+    endsDelimitedSentence,
+    endsDelimitedVersus: endsDelimitedSentence && /\bv\.?s\.$/i.test(suffix),
+    closesQuotation:
+      closingQuotes.length > 0 &&
+      (closingQuotes.includes(input[end - 1]) || input.slice(end - 2, end) === "''"),
+  };
 }
 
 /** Skip opening delimiters, treating the Treebank opener as one two-character token. */
@@ -1606,12 +2889,91 @@ function urlPrefixChecker(input: string): (end: number) => boolean {
   };
 }
 
+function precedingIdentifierToken(input: string, index: number): string {
+  let tokenStart = index;
+  while (tokenStart > 0) {
+    const previousUnit = input.charCodeAt(tokenStart - 1);
+    const width = previousUnit >= 0xdc_00 && previousUnit <= 0xdf_ff ? 2 : 1;
+    const character = input.slice(tokenStart - width, tokenStart);
+    if (!/^[\p{Letter}\p{Mark}\p{Number}_-]$/u.test(character)) {
+      break;
+    }
+    tokenStart -= width;
+  }
+  return input.slice(tokenStart, index);
+}
+
+function hasCaseNeutralTrailingInitial(input: string, index: number, tokenLength: number): boolean {
+  let start = index - tokenLength;
+  // A cased symbol can precede the token's marks; include its predecessor too.
+  for (let context = 0; context < 2 && start > 0; context++) {
+    const previous = input.codePointAt(start - 2);
+    start -= previous !== undefined && previous > 0xff_ff ? 2 : 1;
+  }
+  return /(?:^|[^\p{Letter}\p{Mark}\p{Number}_-])(?!\p{Mark})\p{Cased}\p{M}*$/u.test(
+    input.slice(start, index),
+  );
+}
+
+function caseNeutralIdentifierContext(token: string): boolean {
+  if (!/\p{Cased}/u.test(token)) {
+    return false;
+  }
+  return (
+    hasStableAsciiIdentifierEvidence(token) ||
+    (/\p{Script=Latin}/u.test(token) && /(?:\p{Script=Greek}|(?=\p{Mark})\p{Cased})/u.test(token))
+  );
+}
+
+function isDottedIdentifierContinuation(input: string): boolean {
+  let cursor = 0;
+  for (let atoms = 0; atoms < 2; atoms++) {
+    const base = characterAt(input, cursor);
+    if (!/^[\p{Cased}\p{Number}_-]$/u.test(base)) {
+      return false;
+    }
+    cursor += base.length;
+    let next = characterAt(input, cursor);
+    if (base === 'İ' || next === '\u0307') {
+      // A marked atom accepts the entire mark run; splitting it into another atom
+      // cannot extend that run and needlessly introduces backtracking.
+      while (/^\p{Mark}$/u.test(next)) {
+        cursor += next.length;
+        next = characterAt(input, cursor);
+      }
+    }
+    if (next === '' || /^[\s/.]$/u.test(next)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasStableAsciiIdentifierEvidence(token: string): boolean {
+  for (let cursor = 0; cursor < token.length; cursor++) {
+    const code = token.charCodeAt(cursor);
+    if ((code >= 48 && code <= 57) || code === 95) {
+      return true;
+    }
+    const lowerCode = code === 0x21_2a ? 107 : code | 32;
+    if (lowerCode < 97 || lowerCode > 122) {
+      continue;
+    }
+    if (/^\p{Mark}$/u.test(characterAt(token, cursor + 1))) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 function isUnspacedSentenceBoundary(
   input: string,
   index: number,
   next: number,
   caseNeutral: boolean,
   insideUrl: boolean,
+  endsDelimitedSentence = false,
   closingQuotes = '',
   pairs?: Int32Array,
 ): boolean {
@@ -1634,39 +2996,52 @@ function isUnspacedSentenceBoundary(
   }
 
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const token = caseNeutral ? precedingIdentifierToken(input, index) : '';
   const following = input.slice(next);
   const insideAddress =
     precedingToken.includes('@') && !/@[^\s.]+(?:\.[^\s.]+)+\.$/u.test(precedingToken);
+  const insideHostname = isHostnameContinuation(following, caseNeutral, insideUrl);
+  const dottedIdentifier = caseNeutral
+    ? caseNeutralIdentifierContext(token) && isDottedIdentifierContinuation(following)
+    : /\b\p{Lu}[\p{Letter}\p{Number}_-]*\.$/u.test(suffix) &&
+      /^[\p{Lu}\p{Number}_-]+(?=\s|[/.]|$)/u.test(following);
+  const initial = caseNeutral ? /^\p{Cased}\p{M}*\./u : /^\p{Lu}\./u;
+  const trailingInitial = caseNeutral
+    ? hasCaseNeutralTrailingInitial(input, index, token.length)
+    : /\b\p{Lu}\.$/u.test(suffix);
+  const nextInitial = caseNeutral
+    ? /^(?![ai](?:\s|$))\p{Cased}\p{M}*(?=\s|$)/iu
+    : /^\p{Lu}(?=\s|$)/u;
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  const contextChangingGreekInitial = /^[Σσς]\p{M}+\.\p{Case_Ignorable}*\p{Cased}/u.test(following);
+  const continuesAbbreviation =
+    abbrvReg.test(gateSuffix) &&
+    (isAbbreviationException(gateSuffix, following, endsDelimitedSentence) ||
+      (geographicAcronymReg.test(gateSuffix) && unspacedGeographicContinuationReg.test(following)));
+  return !(
+    continuesAbbreviation ||
+    ((initial.test(following) || dottedIdentifier) && !contextChangingGreekInitial) ||
+    (trailingInitial && nextInitial.test(following)) ||
+    insideAddress ||
+    insideHostname ||
+    /^[^\s]*@/.test(following)
+  );
+}
+
+function isHostnameContinuation(
+  following: string,
+  caseNeutral: boolean,
+  insideUrl: boolean,
+): boolean {
   const hostnameLabel = following.match(
     /^(com|org|net|edu|gov|mil|io|dev|app|co|uk|us|ca|ai|info|biz|me|tv)(?=[/.\s]|$)/i,
   )?.[0];
-  const insideHostname =
+  return (
     insideUrl ||
     (hostnameLabel !== undefined &&
       (caseNeutral ||
         hostnameLabel === hostnameLabel.toLowerCase() ||
-        hostnameLabel === hostnameLabel.toUpperCase()));
-  const dottedIdentifier = caseNeutral
-    ? /\b\p{Cased}[\p{Letter}\p{Number}_-]*\.$/u.test(suffix) &&
-      /^[\p{Cased}\p{Number}_-]{1,2}(?=\s|[/.]|$)/u.test(following)
-    : /\b\p{Lu}[\p{Letter}\p{Number}_-]*\.$/u.test(suffix) &&
-      /^[\p{Lu}\p{Number}_-]+(?=\s|[/.]|$)/u.test(following);
-  const initial = caseNeutral ? /^\p{Cased}\./u : /^\p{Lu}\./u;
-  const trailingInitial = caseNeutral ? /\b\p{Cased}\.$/u : /\b\p{Lu}\.$/u;
-  const nextInitial = caseNeutral ? /^\p{Cased}(?=\s|$)/u : /^\p{Lu}(?=\s|$)/u;
-  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
-  const continuesAbbreviation =
-    abbrvReg.test(gateSuffix) &&
-    (excepReg.test(gateSuffix) ||
-      (geographicAcronymReg.test(gateSuffix) && geographicContinuationReg.test(following)));
-  return !(
-    continuesAbbreviation ||
-    initial.test(following) ||
-    (trailingInitial.test(suffix) && nextInitial.test(following)) ||
-    insideAddress ||
-    insideHostname ||
-    dottedIdentifier ||
-    /^[^\s]*@/.test(following)
+        hostnameLabel === hostnameLabel.toUpperCase()))
   );
 }
 
@@ -1889,7 +3264,36 @@ export function arithmeticMean(input: number[]): number {
   if (input.length === 0) {
     throw new RangeError('Input array must have at least 1 element');
   }
-  return input.reduce((x, y) => x + y) / input.length;
+  const sum = input.reduce((x, y) => x + y);
+  if (Number.isFinite(sum) || !input.every(Number.isFinite)) {
+    return sum / input.length;
+  }
+
+  // Sum exact multiples of 2^-1074 only when ordinary addition overflows.
+  const view = new DataView(new ArrayBuffer(8));
+  const implicitBit = 1n << 52n;
+  const total = input.reduce((acc, value) => {
+    view.setFloat64(0, value);
+    const bits = view.getBigUint64(0);
+    const exponent = Number((bits >> 52n) & 0x7ffn);
+    const fraction = bits & (implicitBit - 1n);
+    const significand = exponent === 0 ? fraction : fraction + implicitBit;
+    const units = significand << BigInt(Math.max(0, exponent - 1));
+    return acc + (value < 0 ? -units : units);
+  }, 0n);
+
+  const negative = total < 0n;
+  const magnitude = negative ? -total : total;
+  const count = BigInt(input.length);
+  const shift = Math.max(0, (magnitude / count).toString(2).length - 53);
+  const denominator = count << BigInt(shift);
+  let significand = magnitude / denominator;
+  const remainder = magnitude % denominator;
+  // Round once to the nearest double, breaking exact ties toward an even significand.
+  if (2n * remainder > denominator || (2n * remainder === denominator && significand % 2n === 1n)) {
+    significand++;
+  }
+  return (negative ? -1 : 1) * Number(significand) * 2 ** (shift - 1074);
 }
 
 /**
