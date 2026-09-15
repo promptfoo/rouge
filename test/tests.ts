@@ -2606,6 +2606,127 @@ describe('Utility Functions', () => {
         expect(segmentCaseNeutrally(input)).toEqual(expected);
       }, 5000);
 
+      test.each([
+        ['"', '"'],
+        ['``', "''"],
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('retains the outer ASCII single after only inner %s%s closers', (open, close) => {
+        const first = `She said 'Alpha...${open}Beta...${close} tail.'`;
+        const complete = `She said 'Alpha...${open}Beta...${close}'`;
+        for (const segment of [ss, segmentCaseNeutrally]) {
+          expect(segment(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segment(`${complete} Next.`)).toEqual([complete, 'Next.']);
+        }
+        expect(segmentCaseNeutrally(`${first} Next.`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          'next.',
+        ]);
+      });
+
+      test.each([
+        ['"', '"'],
+        ["'", "'"],
+        ['``', "''"],
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('keeps inline asides after completed %s%s ellipsis quotations', (open, close) => {
+        for (const dots of ['...', '....']) {
+          const first = `He said ${open}Enough${dots}${close}`;
+          for (const aside of ['(Perhaps)', '[Perhaps]', '“Perhaps,”', "``Perhaps,''"]) {
+            const sentence = `${first} ${aside} before leaving.`;
+            const expected =
+              dots === '...' ? [sentence, 'Next.'] : [first, `${aside} before leaving.`, 'Next.'];
+            expect(ss(`${sentence} Next.`)).toEqual(expected);
+            expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual(expected);
+          }
+          const reply = '“A reply.” Alice replied.';
+          expect(ss(`${first} ${reply}`)).toEqual([first, reply]);
+          expect(segmentCaseNeutrally(`${first} ${reply}`)).toEqual([first, reply]);
+          const unmatched = '(Perhaps before leaving.';
+          expect(ss(`${first} ${unmatched}`)).toEqual([first, unmatched]);
+          expect(segmentCaseNeutrally(`${first} ${unmatched}`)).toEqual([first, unmatched]);
+        }
+      });
+
+      test('retains the existing neutral ambiguity after a bracketed aside', () => {
+        const first = 'He said “Enough...”';
+        const next = '(Perhaps) Alice replied.';
+        expect(ss(`${first} ${next}`)).toEqual([first, next]);
+        // The existing neutral bracket-aside rule cannot use Alice's capitalization.
+        expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual([`${first} ${next}`]);
+      });
+
+      test('shares aside endpoints across source and merged quotation boundaries', () => {
+        const first = 'He said “Enough...” (Perhaps e.g. very deliberately) before leaving.';
+        const second = 'He paused... “Perhaps,” before answering.';
+        const input = `${first} ${second} `.repeat(1000);
+        const expected = Array.from({ length: 1000 }, () => [first, second]).flat();
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      }, 5000);
+
+      test.each(['.5', '+.5', '-.5', '−.𝟝', '-$.5', '€+.5'])(
+        'recognizes the leading decimal %s after terminal ellipses',
+        (number) => {
+          const next = `${number} was enough.`;
+          for (const first of ['Alpha...', 'Alpha....', 'Alpha . . . .']) {
+            expect(ss(`${first} ${next}`)).toEqual([first, next]);
+            expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual([first, next]);
+          }
+          for (const first of ['Alpha...', 'Alpha....']) {
+            for (const unit of ['years.', '%.']) {
+              const quantity = `${first} ${number}${unit.startsWith('%') ? '' : ' '}${unit}`;
+              expect(ss(quantity)).toEqual([quantity]);
+              expect(segmentCaseNeutrally(quantity)).toEqual([quantity]);
+            }
+            const quoted = `“${next}”`;
+            expect(ss(`${first} ${quoted}`)).toEqual([first, quoted]);
+            expect(segmentCaseNeutrally(`${first} ${quoted}`)).toEqual([first, quoted]);
+          }
+          const percentage = `${number}% of voters agreed.`;
+          expect(ss(`Alpha... ${percentage}`)).toEqual(['Alpha...', percentage]);
+          expect(segmentCaseNeutrally(`Alpha... ${percentage}`)).toEqual(['Alpha...', percentage]);
+        },
+      );
+
+      test.each([
+        'Alpha . . . .5 was enough.',
+        'Alpha... ..5 was enough.',
+        'Alpha....5 was enough.',
+        'Alpha.....5 was enough.',
+      ])('preserves existing ambiguous or unsupported dot spacing in %s', (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      });
+
+      test('retains an ordinary boundary after a separated sign and period', () => {
+        const input = 'Alpha... +. 5 was enough.';
+        const expected = ['Alpha... +.', '5 was enough.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      });
+
+      test('preserves existing quoted spaced-four-dot handling before an aside', () => {
+        const input = 'He said “Enough . . . .” (Perhaps) before leaving.';
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      });
+
+      test.each(['.5', '0.5'])(
+        'retains the existing spaced-four-dot priority before %s quantities',
+        (number) => {
+          const first = 'Alpha . . . .';
+          const next = `${number} years.`;
+          expect(ss(`${first} ${next}`)).toEqual([first, next]);
+          expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual([first, next]);
+        },
+      );
+
       test('scores reference sentences ending in a three-dot ellipsis correctly', () => {
         expect(rouge.l('Beta Alpha...', 'Alpha... Beta.')).toBeCloseTo(6 / 7);
       });

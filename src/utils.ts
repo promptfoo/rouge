@@ -112,7 +112,7 @@ const upperCaseReg = /^\p{Uppercase}$/u;
 // Recognize unambiguous page-reference forms: p. 10, p. (10), and p. #10.
 const pageNumberContinuationReg =
   /^\s*(?:\(\s*\p{Number}+\s*\)|#\s*\p{Number}+|\p{Number}+)(?=\s|[.,;:!?)]|$)/u;
-const numericSentenceStartReg = /^(?:[+−-]?\p{Sc}?|\p{Sc}[+−-]?)\p{Number}/u;
+const numericSentenceStartReg = /^(?:[+−-]?\p{Sc}?|\p{Sc}[+−-]?)\.?\p{Number}/u;
 const numericSentenceContinuationReg =
   /^\S+(?:\s*%|\s+(?:time|year)s?\b|\s+(?:month|week|day|hour|minute|second|star|point|percent)s?(?=\s*[.!?](?:\s|$)|\s*$))/iu;
 const ellipsisQuantityContinuationReg =
@@ -651,8 +651,14 @@ export function sentenceSegment(
     flags: quotationFlags(sourceInput),
   };
   const chunkStarts = new SourcePositions();
-  const chunks = sentenceChunks(sourceInput, caseNeutral, quotationSource.flags, chunkStarts);
   const asideMatches = new InlineAsideMatches(sourceInput, quotationSource.flags);
+  const chunks = sentenceChunks(
+    sourceInput,
+    caseNeutral,
+    quotationSource.flags,
+    chunkStarts,
+    asideMatches,
+  );
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -851,7 +857,11 @@ function hasOpenQuotation(
   ascii: AsciiQuotationContext,
   typography: TypographicQuotationStack,
 ): boolean {
-  return ascii.double || ascii.single || typography.length > 0;
+  return hasOpenAsciiQuotation(ascii) || typography.length > 0;
+}
+
+function hasOpenAsciiQuotation(ascii: AsciiQuotationContext): boolean {
+  return ascii.double || ascii.single;
 }
 
 /** Index matches once so an unmatched outer aside does not hide later paired replies. */
@@ -1087,6 +1097,7 @@ function sentenceChunks(
   caseNeutral: boolean,
   flags: Uint8Array,
   starts: SourcePositions,
+  asideMatches: InlineAsideMatches,
 ): string[] {
   const chunks: string[] = [];
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
@@ -1141,6 +1152,7 @@ function sentenceChunks(
         typographicQuoteClosers,
         flags,
         protectedPeriods[ellipsisCursor.index]?.boundary === index,
+        asideMatches,
       );
       if (end === -1) {
         continue;
@@ -1175,7 +1187,14 @@ function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllips
       }
     }
 
-    const next = openingDelimiterEnd(input, match.index + match[0].length, true);
+    let end = match.index + match[0].length;
+    // Preserve a leading decimal point when at least four preceding spaced dots remain.
+    // Shorter ambiguous runs retain their existing four-dot interpretation.
+    if (periods >= 5 && /^\p{Number}$/u.test(characterAt(input, end))) {
+      end--;
+      periods--;
+    }
+    const next = openingDelimiterEnd(input, end, true);
     const following = characterAt(input, next);
     const sentenceStart =
       numericSentenceStartReg.test(input.slice(next, next + 6)) ||
@@ -1186,9 +1205,9 @@ function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllips
     if (periods >= 4 && sentenceStart) {
       boundary = /\S/.test(input[match.index - 1] ?? '')
         ? match.index
-        : match.index + match[0].lastIndexOf('.');
+        : input.lastIndexOf('.', end - 1);
     }
-    ranges.push({ start: match.index, end: match.index + match[0].length, boundary });
+    ranges.push({ start: match.index, end, boundary });
   }
   return ranges;
 }
@@ -1205,16 +1224,15 @@ function isProtectedEllipsisPeriod(
   return range !== undefined && position >= range.start && position !== range.boundary;
 }
 
-/** Scan closing delimiters, including whitespace before a pending closing quote. */
+/** Scan closing delimiters, updating the caller's copied ASCII quotation context. */
 function closingDelimiterEnd(
   input: string,
   index: number,
-  asciiQuotes: AsciiQuotationContext,
+  pendingAscii: AsciiQuotationContext,
   typographicQuoteClosers: TypographicQuotationStack | undefined,
   flags: Uint8Array,
 ): number {
   let end = index + 1;
-  const pendingAscii = { ...asciiQuotes };
   let remaining = typographicQuoteClosers?.length ?? 0;
   let englishDepth = typographicQuoteClosers?.englishDepth ?? 0;
   while (end < input.length) {
@@ -1305,18 +1323,14 @@ function skipWhitespace(input: string, index: number): number {
 
 function closesAsciiQuotation(
   input: string,
-  index: number,
   end: number,
-  quotes: AsciiQuotationContext,
+  before: AsciiQuotationContext,
+  after: AsciiQuotationContext,
   terminalEllipsis: boolean,
 ): boolean {
-  return (
-    (quotes.double &&
-      (terminalEllipsis
-        ? /"|''/.test(input.slice(index + 1, end))
-        : /(?:"|'')$/.test(input.slice(end - 2, end)))) ||
-    (terminalEllipsis && quotes.single && /'/.test(input.slice(index + 1, end)))
-  );
+  return terminalEllipsis
+    ? hasOpenAsciiQuotation(before) && !hasOpenAsciiQuotation(after)
+    : before.double && /(?:"|'')$/.test(input.slice(end - 2, end));
 }
 
 /** Include closing delimiters, or return -1 when the sentence continues. */
@@ -1329,9 +1343,11 @@ function sentenceEnd(
   typographicQuoteClosers: TypographicQuotationStack,
   flags: Uint8Array,
   spacedEllipsis: boolean,
+  asideMatches: InlineAsideMatches,
 ): number {
   const insideQuotes = asciiQuotes.double;
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const threeDotEllipsis = /(?<!\.)\.{3}$/.test(suffix);
   const terminalEllipsis = spacedEllipsis || /\.{3,4}$/.test(suffix);
   if (
     !insideQuotes &&
@@ -1346,10 +1362,11 @@ function sentenceEnd(
   ) {
     return index + 1;
   }
+  const pendingAscii = { ...asciiQuotes };
   const end = closingDelimiterEnd(
     input,
     index,
-    asciiQuotes,
+    pendingAscii,
     terminalEllipsis ? typographicQuoteClosers : undefined,
     flags,
   );
@@ -1359,15 +1376,15 @@ function sentenceEnd(
   const closedBrackets = countClosingBrackets(input, index + 1, end);
   const closedAsciiQuotation = closesAsciiQuotation(
     input,
-    index,
     end,
     asciiQuotes,
+    pendingAscii,
     terminalEllipsis,
   );
   if (
     end > index + 1 &&
-    /(?<!\.)\.{3}$/.test(suffix) &&
-    (closedBrackets < brackets.depth || (insideQuotes && !closedAsciiQuotation))
+    threeDotEllipsis &&
+    (closedBrackets < brackets.depth || hasOpenAsciiQuotation(pendingAscii))
   ) {
     return -1;
   }
@@ -1392,7 +1409,13 @@ function sentenceEnd(
     return -1;
   }
 
-  return followsClosingDelimiter(input, end, caseNeutral, suffix, terminalEllipsis) ? end : -1;
+  if (
+    !followsClosingDelimiter(input, end, caseNeutral, suffix, terminalEllipsis) ||
+    (threeDotEllipsis && closesQuotation && asideMatches.isInline(end, caseNeutral))
+  ) {
+    return -1;
+  }
+  return end;
 }
 
 function followsClosingDelimiter(
