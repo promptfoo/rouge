@@ -3881,3 +3881,90 @@ describe('German citation quotations and structural continuation evidence', () =
     expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
   }, 3000);
 });
+
+describe('German single citation quotes and explicit quoted continuations', () => {
+  const ss = rouge.sentenceSegment;
+  const segmentCaseNeutrally = (input: string) =>
+    rouge.sentenceSegment(input, { caseNeutral: true });
+  test.each([
+    'He said ‚Alpha.[1] Beta.‘ aloud.',
+    'He said ‚‘Alpha.[1] Beta.’ aloud.‘ Next.',
+    'He said ‘‚Alpha.[1] Beta.‘ aloud.’ Next.',
+  ])('retains a pending low-single quotation in %s', (input) => {
+    expect(ss(input)).toEqual([input]);
+    expect(segmentCaseNeutrally(input)).toEqual([input]);
+  });
+
+  test.each([
+    'He said ‚Alpha.[1]‘',
+    'He said ‚Alpha.[1] ‘',
+    'He said‚Alpha.[1] Beta.[2]‘',
+    'He said ‚‘Authors’ notes Alpha.[1] Beta.’ aloud.[2]‘',
+    'He said ‚Authors’ notes Alpha.[1] Beta.[2]‘',
+    'He said ‚‘Tis Alpha.[1] Beta.’ aloud.[2]‘',
+    'He said ‚It was ‘n roll Alpha.[1] Beta.[2]‘',
+    'He said ‚It was ‘tis Alpha.[1] Beta.[2]‘',
+    'He said ‚“Alpha.[1] Beta.” aloud.[2]‘',
+    'He said “‚Alpha.[1] Beta.‘ aloud.[2]”',
+    'He said "‚Alpha.[1] Beta.‘ aloud.[2]"',
+    'He said ‘‚Alpha.[1] Beta.‘ Authors’ notes.[2]’',
+  ])('consumes only the completed surrounding quotation in %s', (first) => {
+    expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+    expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+  });
+
+  test.each([
+    ['"', '"'],
+    ["'", "'"],
+    ['“', '”'],
+    ['‘', '’'],
+    ['«', '»'],
+    ['„', '“'],
+    ['‚', '‘'],
+  ])('recognizes the explicit next quote %s%s in neutral mode', (opening, closing) => {
+    const next = `${opening}Because he left.${closing}`;
+    expect(ss(`Alpha.[1] ${next}`)).toEqual(['Alpha.[1]', next]);
+    expect(segmentCaseNeutrally(`Alpha.[1] ${next}`)).toEqual(['Alpha.[1]', next]);
+    expect(segmentCaseNeutrally(`alpha.[1] ${next.toLowerCase()}`)).toEqual([
+      'alpha.[1]',
+      next.toLowerCase(),
+    ]);
+  });
+
+  test.each(['Alpha.[1] because he left.', 'Alpha.[1] (because he left).'])(
+    'retains unquoted continuation %s',
+    (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    },
+  );
+
+  test.each(["'", '‘', '’'])('treats unpaired %sn as the existing elision class', (mark) => {
+    const first = `Rock ${mark}n roll ended.`;
+    expect(ss(`${first} Alpha.[1] Next.`)).toEqual([first, 'Alpha.[1]', 'Next.']);
+    expect(segmentCaseNeutrally(`${first} Alpha.[1] Next.`)).toEqual([first, 'Alpha.[1]', 'Next.']);
+  });
+
+  test.each([
+    ["'", "'"],
+    ['‘', '’'],
+  ])('confirms a real %sn citation quotation with its %s closer', (opening, closing) => {
+    const first = `He said ${opening}n choices were Alpha.[1] Beta.[2]${closing}`;
+    expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+    expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+  });
+
+  test('does not borrow a later independent quotation for an unpaired n elision', () => {
+    const input = "Rock 'n roll ended. He said 'No.' Alpha.[1] Next.";
+    const expected = ["Rock 'n roll ended.", "He said 'No.'", 'Alpha.[1]', 'Next.'];
+    expect(ss(input)).toEqual(expected);
+    expect(segmentCaseNeutrally(input)).toEqual(expected);
+  });
+
+  test('keeps shared single-quote cursors monotone across many independent pairs', () => {
+    const first = 'He said ‚‘Alpha.[1] Beta.’ aloud.[2]‘';
+    const input = `${`${first} `.repeat(5000)}Next.`;
+    expect(ss(input)).toEqual([...new Array(5000).fill(first), 'Next.']);
+    expect(segmentCaseNeutrally(input)).toEqual([...new Array(5000).fill(first), 'Next.']);
+  });
+});

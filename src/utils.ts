@@ -609,7 +609,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
 
 const singleQuoteClosingContextReg = /^[\s.,!?;:)\]}”’»\p{Pd}]$/u;
 const citationElisionReg =
-  /^(?:\d{2}s|t(?:is|was|were|will|would|il|ill)|em|cause|cos|round|bout|neath|fore|tween|gainst|cept|(?:twen|thir|for|fif|six|seven|eigh|nine)ties)\b/i;
+  /^(?:\d{2}s|t(?:is|was|were|will|would|il|ill)|n|em|cause|cos|round|bout|neath|fore|tween|gainst|cept|(?:twen|thir|for|fif|six|seven|eigh|nine)ties)\b/i;
 
 function isCitationElision(input: string, index: number): boolean {
   return citationElisionReg.test(input.slice(index + 1, index + 32));
@@ -628,12 +628,13 @@ class CurlyCitationElisions {
   #entries = new Uint32Array(32);
   #length = 0;
 
-  constructor(input: string) {
+  constructor(input: string, flags: Uint8Array) {
     let available = 0;
     for (let index = input.length - 1; index >= 0; index--) {
       const character = input[index];
       if (
         !/[‘’]/.test(character) ||
+        (flags[index] & 16) !== 0 ||
         isWordInternalApostrophe(input, index) ||
         isRightCitationElision(input, index)
       ) {
@@ -683,8 +684,10 @@ interface CurlyCitationCandidates {
 /** A later unambiguous closer confirms candidates at the same tentative depth. */
 function citationApostrophes(input: string): { apostrophes: Uint8Array; overflowed: boolean } {
   const apostrophes = new Uint8Array(input.length);
-  markEnglishCitationOpenings(input, apostrophes);
-  const elisions = new CurlyCitationElisions(input);
+  markEnglishCitationOpenings(input, apostrophes, '“', '”', 4);
+  markEnglishCitationOpenings(input, apostrophes, '‘', '’', 8);
+  const germanOverflowed = markGermanSingleCitationClosers(input, apostrophes);
+  const elisions = new CurlyCitationElisions(input, apostrophes);
   const curly: CurlyCitationCandidates = {
     positions: new Uint32Array(64),
     openers: new Uint32Array(64),
@@ -695,6 +698,9 @@ function citationApostrophes(input: string): { apostrophes: Uint8Array; overflow
   for (const quote of input.matchAll(/['‘’]/g)) {
     const index = quote.index;
     const family = quote[0] === "'" ? 1 : 0;
+    if ((apostrophes[index] & 16) !== 0) {
+      continue;
+    }
     if (isWordInternalApostrophe(input, index) || isRightCitationElision(input, index)) {
       apostrophes[index] |= 1 << family;
     } else if (family === 0) {
@@ -703,7 +709,7 @@ function citationApostrophes(input: string): { apostrophes: Uint8Array; overflow
       updateStraightCitationCandidates(input, index, straight, apostrophes);
     }
   }
-  return { apostrophes, overflowed: curly.overflowed };
+  return { apostrophes, overflowed: curly.overflowed || germanOverflowed };
 }
 
 function updateStraightCitationCandidates(
@@ -794,7 +800,7 @@ function confirmCurlyCitationCandidates(
   let nested = 0;
   // Ranges are disjoint at each depth, with at most 64 tentative depths.
   for (let index = start; index < end; index++) {
-    if ((apostrophes[index] & 1) !== 0) {
+    if ((apostrophes[index] & 17) !== 0) {
       continue;
     }
     if (input[index] === '‘') {
@@ -810,27 +816,89 @@ function confirmCurlyCitationCandidates(
 }
 
 /** Infer an English inner pair only before a later German outer closer. */
-function markEnglishCitationOpenings(input: string, flags: Uint8Array): void {
+function markEnglishCitationOpenings(
+  input: string,
+  flags: Uint8Array,
+  opening: string,
+  closing: string,
+  flag: number,
+): void {
   let nextEnglishCloser = -1;
   let nextSharedMark = -1;
-  for (const quote of input.matchAll(/“/g)) {
-    const index = quote.index;
+  for (
+    let index = input.indexOf(opening);
+    index !== -1;
+    index = input.indexOf(opening, index + 1)
+  ) {
     if (nextEnglishCloser <= index) {
-      const next = input.indexOf('”', index + 1);
+      let next = input.indexOf(closing, index + 1);
+      while (
+        next !== -1 &&
+        closing === '’' &&
+        (isWordInternalApostrophe(input, next) || isRightCitationElision(input, next))
+      ) {
+        next = input.indexOf(closing, next + 1);
+      }
       nextEnglishCloser = next === -1 ? input.length : next;
     }
     if (nextSharedMark <= index) {
-      const next = input.indexOf('“', index + 1);
+      const next = input.indexOf(opening, index + 1);
       nextSharedMark = next === -1 ? input.length : next;
     }
     if (nextEnglishCloser < nextSharedMark && nextSharedMark < input.length) {
-      flags[index] |= 4;
+      flags[index] |= flag;
     }
   }
 }
 
-function isSharedCitationCloser(pending: readonly string[], flags: number): boolean {
-  return pending.at(-1) === '“' && (pending.includes('”') || (flags & 4) === 0);
+function isSharedCitationCloser(
+  character: string,
+  pending: readonly string[],
+  flags: number,
+): boolean {
+  const single = character === '‘';
+  return (
+    pending.at(-1) === character &&
+    (pending.includes(single ? '’' : '”') || (flags & (single ? 8 : 4)) === 0)
+  );
+}
+
+/** Exclude actual German low-single closers from English apostrophe reservation. */
+function markGermanSingleCitationClosers(input: string, flags: Uint8Array): boolean {
+  const pending: string[] = [];
+  for (const quote of input.matchAll(/[‚‘’]/g)) {
+    const index = quote.index;
+    const character = quote[0];
+    if (
+      character !== '‚' &&
+      (isWordInternalApostrophe(input, index) || isRightCitationElision(input, index))
+    ) {
+      continue;
+    }
+    if (character === '’') {
+      if (pending.at(-1) === character) {
+        pending.pop();
+      }
+      continue;
+    }
+    if (
+      character === '‘' &&
+      isCitationElision(input, index) &&
+      (index === 0 || /^[\s,;:([{<"'‘“«„‚\p{Pd}]$/u.test(input[index - 1])) &&
+      (flags[index] & 8) === 0
+    ) {
+      continue;
+    }
+    if (character === '‘' && isSharedCitationCloser(character, pending, flags[index])) {
+      flags[index] |= 16;
+      pending.pop();
+    } else if (pending.length < 64) {
+      pending.push(character === '‚' ? '‘' : '’');
+    } else {
+      return true;
+    }
+  }
+  return false;
 }
 
 interface CitationQuotationState {
@@ -862,13 +930,13 @@ function updateCitationQuotationState(
   if (/['‘’]/.test(character) && (apostrophes[index] & apostropheFlag) !== 0) {
     return;
   }
-  if (character === '“' && isSharedCitationCloser(closers, apostrophes[index])) {
+  if (/[“‘]/.test(character) && isSharedCitationCloser(character, closers, apostrophes[index])) {
     closers.pop();
     return;
   }
-  const opening = '“‘«„'.indexOf(character);
+  const opening = '“‘«„‚'.indexOf(character);
   if (opening !== -1) {
-    pushCitationQuotation(quotes, '”’»“'[opening]);
+    pushCitationQuotation(quotes, '”’»“‘'[opening]);
     return;
   }
   if (character === '”' || character === '’' || character === '»') {
@@ -914,8 +982,8 @@ function updateCitationDoubleQuote(
     return true;
   }
   if (input[index] === '"') {
-    const outerOpening = "'‘“«„".indexOf(input[index - 1] ?? '');
-    const afterOuterOpening = outerOpening >= 0 && "'’”»“"[outerOpening] === quotes.closers.at(-1);
+    const outerOpening = "'‘“«„‚".indexOf(input[index - 1] ?? '');
+    const afterOuterOpening = outerOpening >= 0 && "'’”»“‘"[outerOpening] === quotes.closers.at(-1);
     quotes.doubleDepth =
       quotes.doubleDepth < 0 && ((!previousQuotes && insideQuotes) || afterOuterOpening)
         ? quotes.closers.length
@@ -1201,7 +1269,7 @@ function citationEnd(
 
 function isCitationSeparator(input: string, end: number, allowUnspaced: boolean): boolean {
   return (
-    /[\s"'“‘«„([{<]/.test(input[end]) ||
+    /[\s"'“‘«„‚([{<]/.test(input[end]) ||
     (allowUnspaced && isCasedCharacter(characterAt(input, end)))
   );
 }
@@ -1219,7 +1287,9 @@ function isCitationSentenceStart(
     return false;
   }
   let next = end;
-  while (next < input.length && /[\s"'“‘«„([{<]/.test(input[next])) {
+  let quotedStart = false;
+  while (next < input.length && /[\s"'“‘«„‚([{<]/.test(input[next])) {
+    quotedStart ||= /["'“‘«„‚]/.test(input[next]);
     next++;
   }
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
@@ -1248,7 +1318,7 @@ function isCitationSentenceStart(
   const startsWithLetter =
     uncasedLetter ||
     (caseNeutral
-      ? isNeutralSentenceStart(input, end, next)
+      ? isNeutralSentenceStart(input, end, next, quotedStart)
       : sentenceStart.length > 0 && charIsUpperCase(sentenceStart));
   const startsWithNumber =
     /^\p{Number}$/u.test(sentenceStart) &&
@@ -1395,7 +1465,8 @@ function citationDelimiterEnd(
     if (
       !(
         /[”’»]/.test(input[next] ?? '') ||
-        (input[next] === '“' && isSharedCitationCloser(pending, flags[next])) ||
+        (/[“‘]/.test(input[next] ?? '') &&
+          isSharedCitationCloser(input[next], pending, flags[next])) ||
         (input[next] === "'" && pending.at(-1) === "'")
       )
     ) {
@@ -1476,7 +1547,7 @@ function closesCitationQuotations(
     } else if (doublePending && character === "'" && closing[index + 1] === "'") {
       doublePending = false;
       index++;
-    } else if (/["'“”’»]/.test(character)) {
+    } else if (/["'“‘”’»]/.test(character)) {
       // An extra quote can open the next sentence; its number is not a citation.
       return false;
     }
@@ -1500,7 +1571,7 @@ function pathOrAddressTokenChecker(input: string): (index: number) => boolean {
     while (end < input.length && !/\s/.test(input[end])) {
       end++;
     }
-    const token = input.slice(start, end).replace(/^["'“‘«„([{<]+/, '');
+    const token = input.slice(start, end).replace(/^["'“‘«„‚([{<]+/, '');
     pathOrAddress = /[\\/]/.test(token) || token.includes('@') || /^www\./i.test(token);
     return pathOrAddress;
   };
@@ -1681,13 +1752,19 @@ function isUnspacedSentenceBoundary(
   );
 }
 
-function isNeutralSentenceStart(input: string, previousEnd: number, next: number): boolean {
+function isNeutralSentenceStart(
+  input: string,
+  previousEnd: number,
+  next: number,
+  quotedStart = false,
+): boolean {
   if (!isCasedCharacter(characterAt(input, next))) {
     return false;
   }
 
   const continuation = input.slice(next);
   return (
+    quotedStart ||
     !sentenceContinuationReg.test(continuation) ||
     independentSentenceReg.test(continuation) ||
     input.slice(previousEnd, next).includes('"')
