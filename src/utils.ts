@@ -117,11 +117,13 @@ function straightSingleQuotationState(
   index: number,
   insideQuotes: boolean,
   lastCharacter = '',
+  caseNeutral = false,
 ): boolean {
   const previous = index === 0 ? lastCharacter : input[index - 1];
   const following = input[index + 1] ?? '';
   if (insideQuotes) {
     const possessive =
+      !caseNeutral &&
       previous.toLowerCase() === 's' &&
       /\s/.test(following) &&
       /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(input.slice(index + 1).trimStart());
@@ -171,6 +173,25 @@ function isRightSmartApostrophe(input: string, index: number, leadingElision: bo
   );
 }
 
+function followsQuotedNumericCitation(
+  input: string,
+  index: number,
+  candidate: number | undefined,
+): boolean {
+  if (candidate === undefined || !/[.!?]/.test(input[candidate - 1] ?? '')) {
+    return false;
+  }
+  let start = index;
+  while (start > 0) {
+    const number = input.slice(Math.max(0, start - 2), start).match(/\p{Number}$/u)?.[0];
+    if (number === undefined) {
+      break;
+    }
+    start -= number.length;
+  }
+  return start < index && start === candidate + 1;
+}
+
 /**
  * Classify elisions and possessives once. Ambiguous s-ending quotes need a later
  * unambiguous closer; guessing the last candidate can join unrelated sentences.
@@ -189,7 +210,10 @@ function smartApostrophes(input: string): Uint8Array {
       const wordInternal = /[\p{Letter}\p{Mark}\p{Number}]‘[\p{Letter}\p{Mark}\p{Number}]/u.test(
         input.slice(Math.max(0, index - 2), index + 3),
       );
-      if (!(wordInternal || leadingElision)) {
+      if (
+        followsQuotedNumericCitation(input, index, candidateStart) ||
+        !(wordInternal || leadingElision)
+      ) {
         opening = index;
         candidateStart = undefined;
       }
@@ -261,67 +285,232 @@ const independentSentenceReg =
 
 const hostnameLabelReg =
   /^(com|org|net|edu|gov|mil|io|dev|app|co|uk|us|ca|ai|info|biz|me|tv)(?=[/.!?\s"'“”‘’()[\]{}<>]|$)/i;
+const scopedQuestionStartReg = /^(?:who|which|whose|whom)\b/i;
 
 function isIndependentSentence(input: string, question?: boolean, caseNeutral = false): boolean {
   return (
     independentSentenceReg.test(input) &&
-    (!/^(?:who|which|whose|whom)\b/i.test(input) ||
-      (question ?? questionStartChecker([input], caseNeutral)(0)))
+    (!scopedQuestionStartReg.test(input) ||
+      (question ??
+        questionStartChecker({ input, apostrophes: smartApostrophes(input) }, caseNeutral)(0)))
   );
 }
 
-/** Share the next meaningful terminal across monotone provisional-chunk lookaheads. */
+interface QuestionSource {
+  input: string;
+  apostrophes: Uint8Array;
+  questionPairs?: Int32Array;
+}
+
+/** Original source offsets let both phases share immutable quotation metadata. */
 function questionStartChecker(
-  chunks: readonly string[],
+  source: QuestionSource,
   caseNeutral: boolean,
-): (index: number, offset?: number) => boolean {
-  let through = -1;
-  let throughOffset = -1;
-  let question = false;
-  let protectedChunk = -1;
-  let protectedPeriods: SpacedEllipsisRange[] = [];
-  let hasUrlPrefix!: (index: number) => boolean;
-  const ellipsisCursor = { index: 0 };
-  return (index, offset = 0) => {
-    if (index < through || (index === through && offset <= throughOffset)) {
-      return question;
-    }
-    for (let chunkIndex = index; chunkIndex < chunks.length; chunkIndex++) {
-      if (protectedChunk !== chunkIndex) {
-        protectedPeriods = spacedEllipsisRanges(
-          chunks[chunkIndex],
-          caseNeutral,
-          questionFollowingCharacter(chunks, chunkIndex),
-        );
-        protectedChunk = chunkIndex;
-        ellipsisCursor.index = 0;
-        hasUrlPrefix = urlPrefixChecker(chunks[chunkIndex]);
-      }
-      const terminals = /[.!?]/g;
-      terminals.lastIndex = chunkIndex === index ? offset : 0;
-      for (const terminal of chunks[chunkIndex].matchAll(terminals)) {
-        if (
-          terminal[0] === '.' &&
-          (isProtectedEllipsisPeriod(terminal.index, protectedPeriods, ellipsisCursor) ||
-            isProtectedQuestionPeriod(
-              chunks,
-              chunkIndex,
-              terminal.index,
-              hasUrlPrefix(terminal.index),
-            ))
-        ) {
-          continue;
-        }
-        through = chunkIndex;
-        throughOffset = terminal.index;
-        question = terminal[0] === '?';
-        return question;
-      }
-    }
-    through = chunks.length;
-    question = false;
-    return false;
+): (offset: number) => boolean {
+  let checker: QuestionTerminalChecker | undefined;
+  return (offset) => {
+    checker ??= new QuestionTerminalChecker(source, caseNeutral);
+    return checker.questionTerminal(offset) >= 0;
   };
+}
+
+function quotedQuestionChecker(source: QuestionSource, caseNeutral: boolean) {
+  let checker: QuestionTerminalChecker | undefined;
+  let through = 0;
+  return (start: number, index: number): boolean => {
+    if (
+      index >= through &&
+      /["'‘“`]/.test(source.input[index]) &&
+      scopedQuestionStartReg.test(source.input.slice(start, start + 6))
+    ) {
+      const end = questionQuotationPairs(source, caseNeutral)[index];
+      if (end > index) {
+        checker ??= new QuestionTerminalChecker(source, caseNeutral);
+        const terminal = checker.questionTerminal(start);
+        if (terminal >= 0) {
+          through = Math.min(end, terminal);
+        }
+      }
+    }
+    return index < through;
+  };
+}
+
+interface QuestionScope {
+  opening: number;
+  through: number;
+  question: boolean;
+}
+
+class QuestionTerminalChecker {
+  readonly #source: QuestionSource;
+  readonly #pairs: Int32Array;
+  readonly #caseNeutral: boolean;
+  readonly #scopes: QuestionScope[] = Array.from({ length: 5 }, () => ({
+    opening: -1,
+    through: -1,
+    question: false,
+  }));
+  readonly #quoteTokens = /``|''|["'‘’“”]/g;
+  #nextQuote: RegExpExecArray | null;
+
+  constructor(source: QuestionSource, caseNeutral: boolean) {
+    this.#source = source;
+    this.#caseNeutral = caseNeutral;
+    this.#pairs = questionQuotationPairs(source, caseNeutral);
+    this.#nextQuote = this.#quoteTokens.exec(source.input);
+  }
+
+  questionTerminal(start: number): number {
+    const { input, apostrophes } = this.#source;
+    let offset = start;
+    while (offset < input.length && /[\s"'“‘’([{<]/.test(input[offset])) {
+      offset++;
+    }
+    const scope = this.#scope(offset);
+    if (offset <= scope.through) {
+      return scope.question ? scope.through : -1;
+    }
+    const tokens = /``|''|[.!?"'‘’“”]/g;
+    tokens.lastIndex = offset;
+    let token = tokens.exec(input);
+    while (token !== null) {
+      const endpoint = this.#pairs[token.index];
+      if (endpoint > 0) {
+        const scopeEnd = scope.opening < 0 ? input.length : this.#pairs[scope.opening];
+        const question = quotedQuestionAtScopeEnd(
+          input,
+          token.index,
+          endpoint,
+          scopeEnd,
+          scope.opening < 0,
+          this.#caseNeutral,
+        );
+        if (question >= 0) {
+          scope.through = question;
+          scope.question = true;
+          return question;
+        }
+        tokens.lastIndex = endpoint;
+      } else if (
+        !(token[0] === '.' && (apostrophes[token.index] & 2) !== 0) &&
+        (/[.!?]/.test(token[0]) || endpoint < 0 || token[0] === '”')
+      ) {
+        scope.through = token.index;
+        scope.question = token[0] === '?';
+        return scope.question ? token.index : -1;
+      }
+      token = tokens.exec(input);
+    }
+    scope.through = input.length;
+    scope.question = false;
+    return -1;
+  }
+
+  #scope(offset: number): QuestionScope {
+    const { input } = this.#source;
+    while (this.#nextQuote !== null && this.#nextQuote.index < offset) {
+      const index = this.#nextQuote.index;
+      const endpoint = this.#pairs[index];
+      if (endpoint !== 0) {
+        const opening = endpoint > 0 ? index : -endpoint - 1;
+        const scope = this.#scopes[questionQuotationKind(input, opening)];
+        scope.opening = endpoint > 0 ? opening : -1;
+        scope.through = -1;
+      }
+      this.#nextQuote = this.#quoteTokens.exec(input);
+    }
+    let current = this.#scopes[0];
+    for (const scope of this.#scopes) {
+      if (scope.opening > current.opening) {
+        current = scope;
+      }
+    }
+    return current;
+  }
+}
+
+function quotedQuestionAtScopeEnd(
+  input: string,
+  opening: number,
+  end: number,
+  scopeEnd: number,
+  allowFollowing: boolean,
+  caseNeutral: boolean,
+): number {
+  let terminal = end - 1;
+  while (terminal > opening && /[\s"'”’\])}>]/.test(input[terminal])) {
+    terminal--;
+  }
+  if (input[terminal] !== '?') {
+    return -1;
+  }
+  let next = end;
+  while (next < scopeEnd && /[\s"'”’\])}>]/.test(input[next])) {
+    next++;
+  }
+  return next >= scopeEnd ||
+    (allowFollowing && sentenceEndAfterDelimiter(input, next, '?', 0, caseNeutral) >= 0)
+    ? terminal
+    : -1;
+}
+
+function questionQuotationKind(input: string, index: number): number {
+  if (/[“”]/.test(input[index])) {
+    return 3;
+  }
+  if (/[‘’]/.test(input[index])) {
+    return 4;
+  }
+  return input[index] === "'" && !input.startsWith("''", index) ? 2 : 1;
+}
+
+/** Four fixed families retain the existing pairing policy and linear storage. */
+function questionQuotationPairs(source: QuestionSource, caseNeutral: boolean): Int32Array {
+  if (source.questionPairs !== undefined) {
+    return source.questionPairs;
+  }
+  const { input, apostrophes } = source;
+  const pairs = new Int32Array(input.length);
+  const openings = [-1, -1, -1, -1, -1];
+  for (const quote of input.matchAll(/``|''|["'‘’“”]/g)) {
+    const index = quote.index;
+    if (/[‘’]/.test(quote[0]) && apostrophes[index] === 1) {
+      continue;
+    }
+    const kind = questionQuotationKind(input, index);
+    const inside = openings[kind] >= 0;
+    let opens = /[“‘]/.test(quote[0]);
+    if (kind === 1) {
+      opens = quotationState(input, index, inside);
+    } else if (kind === 2) {
+      opens = straightSingleQuotationState(input, index, inside, '', caseNeutral);
+    }
+    if (opens) {
+      if (!(inside && kind === 2)) {
+        openings[kind] = index;
+      }
+    } else if (inside) {
+      const opening = openings[kind];
+      pairs[opening] = index + quote[0].length;
+      pairs[index] = -opening - 1;
+      openings[kind] = -1;
+    }
+  }
+  const ellipses = spacedEllipsisRanges(input, caseNeutral);
+  const ellipsisCursor = { index: 0 };
+  const hasUrlPrefix = urlPrefixChecker(input);
+  for (const period of input.matchAll(/\./g)) {
+    if (
+      isProtectedEllipsisPeriod(period.index, ellipses, ellipsisCursor) ||
+      isProtectedQuestionPeriod(input, period.index, hasUrlPrefix(period.index))
+    ) {
+      // Quote classification reads only quotation positions; periods use a separate bit.
+      apostrophes[period.index] |= 2;
+    }
+  }
+  source.questionPairs = pairs;
+  return pairs;
 }
 
 /** Scan URL prefixes and whitespace once, retaining only the current token's state. */
@@ -338,19 +527,10 @@ function urlPrefixChecker(input: string): (index: number) => boolean {
   };
 }
 
-function isProtectedQuestionPeriod(
-  chunks: readonly string[],
-  chunk: number,
-  index: number,
-  hasUrlPrefix: boolean,
-): boolean {
-  const text = chunks[chunk];
+function isProtectedQuestionPeriod(text: string, index: number, hasUrlPrefix: boolean): boolean {
   const suffix = text.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const word = suffix.match(/\S+$/)?.[0] ?? '';
-  let following = text.slice(index + 1, index + 33);
-  for (let next = chunk + 1; following.length < 32 && next < chunks.length; next++) {
-    following += chunks[next].slice(0, 32 - following.length);
-  }
+  const following = text.slice(index + 1, index + 33);
   return (
     abbrvReg.test(suffix.toLowerCase()) ||
     caseNeutralAcronymReg.test(word) ||
@@ -359,20 +539,6 @@ function isProtectedQuestionPeriod(
     (/\p{Number}$/u.test(text.slice(Math.max(0, index - 2), index)) &&
       /^\p{Number}/u.test(following))
   );
-}
-
-function questionFollowingCharacter(chunks: readonly string[], chunk: number): string {
-  for (let next = chunk + 1; next < chunks.length; next++) {
-    const text = chunks[next];
-    let offset = 0;
-    while (offset < text.length && /[\s"'“”‘’([{<]/.test(text[offset])) {
-      offset++;
-    }
-    if (offset < text.length) {
-      return characterAt(text, offset);
-    }
-  }
-  return '';
 }
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
@@ -588,8 +754,11 @@ export function sentenceSegment(
     double: false,
     single: false,
   };
-  const chunks = sentenceChunks(source, caseNeutral, quoteSource.apostrophes);
-  const startsQuestion = questionStartChecker(chunks, caseNeutral);
+  const chunkStarts: number[] = [];
+  const chunks = sentenceChunks(source, caseNeutral, quoteSource, chunkStarts);
+  const questionInSource = questionStartChecker(quoteSource, caseNeutral);
+  const startsQuestion = (index: number): boolean =>
+    questionInSource(chunkStarts[index] ?? source.length);
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -812,10 +981,16 @@ function updateBracketState(brackets: BracketState, character: string, standalon
 }
 
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
-function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8Array): string[] {
+function sentenceChunks(
+  input: string,
+  caseNeutral: boolean,
+  questionSource: QuestionSource,
+  chunkStarts: number[],
+): string[] {
   const chunks: string[] = [];
-  const questionInSource = questionStartChecker([input], caseNeutral);
-  const startsQuestion = (offset: number): boolean => questionInSource(0, offset);
+  const apostrophes = questionSource.apostrophes;
+  const startsQuestion = questionStartChecker(questionSource, caseNeutral);
+  const insideQuotedQuestion = quotedQuestionChecker(questionSource, caseNeutral);
   const hasUrlPrefix = urlPrefixChecker(input);
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
@@ -846,11 +1021,15 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
       // A terminal must follow the initial character, even if it is punctuation.
       continue;
     }
+    const protectedQuestion = insideQuotedQuestion(start, index);
     if (
       (char === '.' && !isProtectedEllipsisPeriod(index, protectedPeriods, ellipsisCursor)) ||
       char === '?' ||
       char === '!'
     ) {
+      if (protectedQuestion) {
+        continue;
+      }
       const end = sentenceEnd(
         input,
         index,
@@ -865,12 +1044,14 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
         continue;
       }
       // Captured line wraps can only occur between the terminal and closing delimiters.
+      chunkStarts.push(lastEnd, start);
       chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
       lastEnd = end;
       start = -1;
     }
   }
 
+  chunkStarts.push(lastEnd);
   chunks.push(input.slice(lastEnd));
   return chunks;
 }
@@ -881,11 +1062,7 @@ interface SpacedEllipsisRange {
   boundary: number;
 }
 
-function spacedEllipsisRanges(
-  input: string,
-  caseNeutral: boolean,
-  followingCharacter = '',
-): SpacedEllipsisRange[] {
+function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllipsisRange[] {
   const ranges: SpacedEllipsisRange[] = [];
   for (const match of input.matchAll(/(?:\.[^\S\r\n]+){2,}\./g)) {
     let periods = 0;
@@ -899,7 +1076,7 @@ function spacedEllipsisRanges(
     while (next < input.length && /[\s"'“”‘’([{<]/.test(input[next])) {
       next++;
     }
-    const following = characterAt(input, next) || followingCharacter;
+    const following = characterAt(input, next);
     const sentenceStart =
       /^\p{Number}$/u.test(following) ||
       (caseNeutral

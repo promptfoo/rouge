@@ -2229,6 +2229,131 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each([
+      ['‘', '’'],
+      ['“', '”'],
+      ['"', '"'],
+      ["'", "'"],
+      ['``', "''"],
+    ])('keeps inner %s%s terminals inside an enclosing question', (open, close) => {
+      const first = 'She asked “Acme Co.';
+      const question = `Which ${open}Stop.${close} did she quote?`;
+      const second = `${question}”`;
+      const input = `${first}\n${second}`;
+      const parenthetical = ['He joined “Acme Co.”', '(It closed.)', question];
+      for (const segment of [ss, segmentCaseNeutrally]) {
+        expect(segment(input)).toEqual([first, second]);
+        expect(segment(parenthetical.join(' '))).toEqual(parenthetical);
+      }
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+      expect(segmentCaseNeutrally(parenthetical.join(' ').toLowerCase())).toEqual(
+        parenthetical.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['whose headquarters are in the U.S.', 'whose advisor is Mr. Smith.'])(
+      'stops question lookahead at the outer closer after %s',
+      (relative) => {
+        const first = `She described “Acme Co.\n${relative}”`;
+        const expected = [first.replaceAll('\n', ' '), 'What followed?'];
+        const input = `${first} What followed?`;
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test.each(['Whose U.S.’ economy grew?', 'Which ‘twas odd’ line did she quote?'])(
+      'retains literal apostrophes while locating a question terminal: %s',
+      (question) => {
+        const first = 'She asked “Acme Co.';
+        const second = `${question}”`;
+        const input = `${first}\n${second}`;
+        expect(ss(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      },
+    );
+
+    test.each(['', ' Next.'])('retains a final quoted question before tail %s', (tail) => {
+      const sentences = ['He joined “Acme Co.”', '(It closed.)', 'Which “what?”'];
+      const expected = tail ? [...sentences, tail.trimStart()] : sentences;
+      const input = `${sentences.join(' ')}${tail}`;
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['‘Stop?’,', '‘Stop?’—'])(
+      'keeps an inner question separate from a relative-clause terminal: %s',
+      (quoted) => {
+        const first = `She described “Acme Co.\nwhose motto was ${quoted} then left.”`;
+        const input = `${first} What followed?`;
+        const expected = [first.replaceAll('\n', ' '), 'What followed?'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['Which', 'Whose', 'Whom'])(
+      'ignores possessive casing while locating a neutral %s terminal',
+      (starter) => {
+        const input = `She asked “Acme Co.\n${starter} 'Paris' Alice. 'Stop.' Who asked?”`;
+        const expected = [
+          `She asked “Acme Co. ${starter} 'Paris' Alice.`,
+          "'Stop.'",
+          'Who asked?”',
+        ];
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('advances source scopes across repeated paired questions', () => {
+      const sentences = ['She asked “Acme Co.', 'Which ‘Stop.’ did she quote?”', 'Next.'];
+      const input = `${`${sentences[0]}\n${sentences[1]} ${sentences[2]} `.repeat(3000)}`.trimEnd();
+      const expected = Array.from({ length: 3000 }, () => sentences).flat();
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test('reuses scoped lookahead across adjacent quoted questions', () => {
+      const sentence = 'Which "what?"';
+      const input = `${`${sentence} `.repeat(5000)}`.trimEnd();
+      const expected = Array.from({ length: 5000 }, () => sentence);
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test('indexes a long quoted question within a constrained JavaScript heap', () => {
+      expectBundledScriptToPass(
+        `
+          const first = 'She asked “Acme Co.';
+          const second = 'Which ‘' + 'word '.repeat(1400000) + 'Stop.’ did she quote?”';
+          const input = first + '\\n' + second;
+          const sentences = module.exports.sentenceSegment(input, { caseNeutral: true });
+          if (sentences.length !== 2 || sentences[0] !== first || sentences[1] !== second) {
+            throw new Error('Long scoped question boundaries changed');
+          }
+          process.stdout.write('ok');
+        `,
+        15_000,
+        ['--max-old-space-size=64'],
+      );
+    }, 20_000);
+
     test.each(['whose advisor is Mr. Smith.', 'whose office is on example.com.'])(
       'keeps a relative clause with protected periods joined: %s',
       (relative) => {
@@ -2411,6 +2536,37 @@ describe('Utility Functions', () => {
         expect(ss('He said ‘Stop.’ Next.', { caseNeutral })).toEqual(['He said ‘Stop.’', 'Next.']);
       }
     });
+
+    test.each(['²', '2', '𝟚', '²³', '12'])(
+      'opens the next smart quotation after a quoted acronym and numeric citation %s',
+      (citation) => {
+        const first = `‘U.S.’${citation}`;
+        for (const second of ['‘Next.’', '‘Tis true.’']) {
+          const input = first + second;
+          expect(ss(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+          ]);
+        }
+      },
+    );
+
+    test.each(['Use 2‘word’ as notation.', '‘U.S.’ ²‘Next.’', '‘U.S.’ text2‘word’ remained.'])(
+      'requires an attached citation after the actual tentative closer: %s',
+      (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
+
+    test('scans a long numeric citation once before the next smart quotation', () => {
+      const first = `‘U.S.’${'²'.repeat(20_000)}`;
+      const second = '‘Next.’';
+      expect(ss(first + second)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(first + second)).toEqual([first, second]);
+    }, 5000);
 
     test.each(['Stop.”', 'He said "Stop.”'])(
       'retains a stray closing mark with its preceding text: %s',
