@@ -13,6 +13,7 @@ export * from './utils';
 
 const whitespaceOnlyReg = /^[\s\u0085]*$/;
 const maxLcsSentencePairs = 100_000;
+const maxCustomLcsCopiedTokens = 1_000_000;
 
 /** Options for ROUGE-N evaluation */
 export interface RougeNOptions {
@@ -358,6 +359,7 @@ export function s(cand: string, ref: string, opts?: RougeSOptions): number {
  * With built-in segmentation and LCS, nonempty tokenized summaries are limited to
  * 100,000 candidate/reference sentence pairs; larger comparisons throw RangeError.
  * Custom tokenizers retain this limit. Custom segmenters or LCS callbacks manage their own work.
+ * Custom LCS callbacks receive mutable copies, limited to 1,000,000 copied token slots in total.
  *
  * Configuration object schema and defaults:
  * ```
@@ -425,6 +427,14 @@ export function l(cand: string, ref: string, opts?: RougeLOptions): number {
     candidate.sentences.length > maxLcsSentencePairs / reference.sentences.length
   ) {
     throw new RangeError('ROUGE-L sentence comparison exceeds the work limit');
+  }
+
+  if (
+    (getLcs !== utils.lcs || getLcsIndices !== undefined) &&
+    candLength * reference.sentences.length + refLength * candidate.sentences.length >
+      maxCustomLcsCopiedTokens
+  ) {
+    throw new RangeError('ROUGE-L custom LCS token copying exceeds the work limit');
   }
 
   const matches = countSummaryLcsMatches(

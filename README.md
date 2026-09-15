@@ -154,6 +154,8 @@ Omitted options and fields explicitly set to `undefined` use the documented defa
 
 With the built-in sentence segmenter and LCS, `l()` throws `RangeError` when the candidate sentence count multiplied by the reference sentence count exceeds 100,000. This limit also applies with a custom tokenizer; comparisons with no tokens on either side return `0` first. Custom `segmenter`, `lcs`, or `lcsIndices` callbacks remain responsible for bounding their own work.
 
+Custom `lcs` and `lcsIndices` callbacks receive fresh mutable copies of both sentence-token arrays for each comparison. The library limits this copying to 1,000,000 token slots across the call: total candidate tokens × reference sentences + total reference tokens × candidate sentences. A larger total throws `RangeError` before any LCS callback runs, including with custom tokenizers or segmenters; comparisons with no tokens on either side still return `0` first. This copied-token budget does not limit callback invocation counts or work performed inside custom callbacks.
+
 ### ROUGE-S Options
 
 | Option          | Type     | Default       | Description                          |
