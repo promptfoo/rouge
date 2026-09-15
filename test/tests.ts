@@ -3968,3 +3968,83 @@ describe('German single citation quotes and explicit quoted continuations', () =
     expect(segmentCaseNeutrally(input)).toEqual([...new Array(5000).fill(first), 'Next.']);
   });
 });
+
+describe('CJK paired citation quotation context', () => {
+  test.each([
+    ['「', '」'],
+    ['『', '』'],
+  ])('retains pending and completed %s%s citation quotations', (opening, closing) => {
+    const pending = `He said ${opening}Alpha.[1] Beta.${closing} aloud.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(pending, { caseNeutral })).toEqual([pending]);
+      for (const citation of [`.${closing}[1]`, `.[1]${closing}`, `.[1] ${closing}`]) {
+        const first = `He said ${opening}Alpha${citation}`;
+        expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+        const next = `${opening}Because he left.${closing}`;
+        expect(rouge.sentenceSegment(`${first} ${next}`, { caseNeutral })).toEqual([first, next]);
+      }
+      const ordinary = `He said ${opening}Alpha. Beta.${closing} aloud.`;
+      expect(rouge.sentenceSegment(ordinary, { caseNeutral })).toEqual([
+        `He said ${opening}Alpha.`,
+        `Beta.${closing} aloud.`,
+      ]);
+      const overflow = `${opening.repeat(65)}inside${closing.repeat(64)} Alpha.[1] Beta.`;
+      expect(rouge.sentenceSegment(overflow, { caseNeutral })).toEqual([overflow]);
+    }
+  });
+
+  test.each([
+    'He said 「『Alpha.[1] Beta.』 aloud.[2]」',
+    'He said 『「Alpha.[1] Beta.」 aloud.[2]』',
+    'He said “「Alpha.[1] Beta.」 aloud.[2]”',
+    'He said 「“Alpha.[1] Beta.” aloud.[2]」',
+    'He said "「Alpha.[1]」 Beta.[2]"',
+    'He said 「"Alpha.[1]" Beta.[2]」',
+    "He said 「'Alpha.[1]' Beta.[2]」",
+    'He said ‘「’tis Alpha.[1] Beta.」 aloud.[2]’',
+    'He said 「Authors’ notes Alpha.[1] Beta.[2]」',
+  ])('preserves mixed pending nesting before the last cited closer in %s', (first) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+    }
+  });
+
+  test('recognizes a German low-single closer before the citation group', () => {
+    const first = 'He said ‚Alpha.‘[1]';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+    }
+  });
+
+  test('retains Japanese surrounding text around an embedded Latin citation', () => {
+    const input = '彼は「Alpha.[1] Beta.」と言った。';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+});
+
+describe('Bare citation context after supported bracket closers', () => {
+  test.each([
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+  ])('treats a completed %s%s span consistently before a bare citation', (opening, closing) => {
+    const first = `${opening}foo${closing}.1`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+      const enclosed = `{${first} Next.}`;
+      expect(rouge.sentenceSegment(enclosed, { caseNeutral })).toEqual([enclosed]);
+    }
+  });
+
+  test.each(['package/{foo}.1 Next.', 'package/<foo>.1 Next.'])(
+    'retains the bare-path guard in %s',
+    (input) => {
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    },
+  );
+});
