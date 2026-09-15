@@ -196,4 +196,4 @@ jobs:
           RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
           RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
         # npm reads these fields for the source recorded in its provenance.
-        run: GITHUB_SHA="$RELEASE_SHA" GITHUB_REF="refs/tags/$RELEASE_TAG" npm publish release-package/*.tgz --access public --provenance
+        run: GITHUB_SHA="$RELEASE_SHA" GITHUB_REF="refs/tags/$RELEASE_TAG" npm publish ./release-package/*.tgz --access public --provenance
