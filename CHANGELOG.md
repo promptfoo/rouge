@@ -1,5 +1,45 @@
 # Changelog
 
+## [3.2.2](https://github.com/promptfoo/js-rouge/compare/js-rouge-v3.2.1...js-rouge-v3.2.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* align conditional ESM declarations with runtime exports ([#152](https://github.com/promptfoo/js-rouge/issues/152)) ([26535ce](https://github.com/promptfoo/js-rouge/commit/26535ce8e7b0f4ae9d3c6d701ff8ec6f25c53a5d))
+* align question lookahead with attached bracket boundaries ([#180](https://github.com/promptfoo/js-rouge/issues/180)) ([fe67cc9](https://github.com/promptfoo/js-rouge/commit/fe67cc9ce5576aefeda1a167db222b5ec97229f7))
+* avoid overflow when averaging finite numbers ([#163](https://github.com/promptfoo/js-rouge/issues/163)) ([b42b4f7](https://github.com/promptfoo/js-rouge/commit/b42b4f77b4dae1665765c7452b89de9a1747e725))
+* avoid repeated email lookahead during segmentation ([#166](https://github.com/promptfoo/js-rouge/issues/166)) ([613b9ac](https://github.com/promptfoo/js-rouge/commit/613b9acb104600e0f7e8ee6b1e6816bdc3281a0e))
+* bind publication to the selected release commit ([#171](https://github.com/promptfoo/js-rouge/issues/171)) ([6128639](https://github.com/promptfoo/js-rouge/commit/61286398351ac81e5a7e8c0167032e473e4d8aa1))
+* bound public skip-bigram materialization ([#147](https://github.com/promptfoo/js-rouge/issues/147)) ([117f232](https://github.com/promptfoo/js-rouge/commit/117f232e39ce3d9d86ca7f7d8f4f62902b74eab1))
+* bound raw n-gram materialization before encoding ([#143](https://github.com/promptfoo/js-rouge/issues/143)) ([a854ccc](https://github.com/promptfoo/js-rouge/commit/a854ccce60e897a9e60807925c85e527aac4312a))
+* bound unpadded n-gram materialization ([#135](https://github.com/promptfoo/js-rouge/issues/135)) ([f7ef6bc](https://github.com/promptfoo/js-rouge/commit/f7ef6bcab466297ea86b3cad44b8bd33d4b04b02))
+* build clean packages and tolerate omitted dev dependencies ([#142](https://github.com/promptfoo/js-rouge/issues/142)) ([77e0bf3](https://github.com/promptfoo/js-rouge/commit/77e0bf31d68a4795e4145fc46903271807fccf17))
+* close upstream sentence segmentation golden rule gaps ([#153](https://github.com/promptfoo/js-rouge/issues/153)) ([3b4dad4](https://github.com/promptfoo/js-rouge/commit/3b4dad42af04f35bae451c1cbd8628578a710617))
+* gate releases on exact-head CI and support retries ([#139](https://github.com/promptfoo/js-rouge/issues/139)) ([f788aac](https://github.com/promptfoo/js-rouge/commit/f788aac35900ded69e8fcf88f92f548daf1d0985))
+* isolate reusable metric callback results ([#144](https://github.com/promptfoo/js-rouge/issues/144)) ([f9a1da9](https://github.com/promptfoo/js-rouge/commit/f9a1da97f9b16c274e95212fc7eedc95a5492e62))
+* normalize next-line separators before detecting lists ([#177](https://github.com/promptfoo/js-rouge/issues/177)) ([1a49479](https://github.com/promptfoo/js-rouge/commit/1a494793334fe19da0c8b9f542c7cfa1ededb4c1))
+* preserve abbreviation boundaries across whitespace ([#148](https://github.com/promptfoo/js-rouge/issues/148)) ([665adf8](https://github.com/promptfoo/js-rouge/commit/665adf8c216b7e4faa3e351dd31d78da66e08b81))
+* preserve case context during summary preparation ([#173](https://github.com/promptfoo/js-rouge/issues/173)) ([3943edb](https://github.com/promptfoo/js-rouge/commit/3943edbc259e0cde9c2a1520749d2fb3c7fd5243))
+* preserve common abbreviation continuations ([#155](https://github.com/promptfoo/js-rouge/issues/155)) ([af16ea7](https://github.com/promptfoo/js-rouge/commit/af16ea701fc1ccac8d1a6bb6428dae074485fc4f))
+* preserve lowercase continuations in neutral segmentation ([#145](https://github.com/promptfoo/js-rouge/issues/145)) ([9888f0f](https://github.com/promptfoo/js-rouge/commit/9888f0f2864fa472f95a515c352da44f0869808c))
+* preserve quotation boundaries and dialogue continuations ([#157](https://github.com/promptfoo/js-rouge/issues/157)) ([e0909dc](https://github.com/promptfoo/js-rouge/commit/e0909dc941dec6c50b393a956a235322057b6141))
+* preserve quoted numeric and Treebank boundaries ([#150](https://github.com/promptfoo/js-rouge/issues/150)) ([807e219](https://github.com/promptfoo/js-rouge/commit/807e219d6fae1a2674752ab2493f4756647a6211))
+* preserve Treebank quote and punctuation tokens ([#136](https://github.com/promptfoo/js-rouge/issues/136)) ([0354388](https://github.com/promptfoo/js-rouge/commit/03543884d3fbe698af638c4f733647ecad264465))
+* preserve Unicode case expansion in dotted identifiers ([#154](https://github.com/promptfoo/js-rouge/issues/154)) ([63fbc81](https://github.com/promptfoo/js-rouge/commit/63fbc814237a45ee4a9a6f10a4ff983b0ee0b486))
+* recognize terminal three-dot ellipses ([#159](https://github.com/promptfoo/js-rouge/issues/159)) ([daddea0](https://github.com/promptfoo/js-rouge/commit/daddea0d8971c62b5d9dc7dbe895cc40c3ef9ff8))
+* recognize typographic quotation boundaries ([#170](https://github.com/promptfoo/js-rouge/issues/170)) ([2d2a628](https://github.com/promptfoo/js-rouge/commit/2d2a628252284656588af482023113f6c9b34221))
+* retain combining marks in dotted identifiers ([#169](https://github.com/promptfoo/js-rouge/issues/169)) ([dd575e9](https://github.com/promptfoo/js-rouge/commit/dd575e9975c1ad79d8b34387542401dc7aab2ddf))
+* retain numeric citation sentence boundaries ([#158](https://github.com/promptfoo/js-rouge/issues/158)) ([a30f2c4](https://github.com/promptfoo/js-rouge/commit/a30f2c46f00e82984031c0c6bf9595c91171684f))
+* segment embedded and parenthesized lists ([#156](https://github.com/promptfoo/js-rouge/issues/156)) ([529539f](https://github.com/promptfoo/js-rouge/commit/529539fa6acf85567cddca8c7292b47044d4a3b7))
+* split quoted sentences before numeric starts ([#137](https://github.com/promptfoo/js-rouge/issues/137)) ([cef6f8c](https://github.com/promptfoo/js-rouge/commit/cef6f8c08c4d4ad40df7916e2c40964798beebd9))
+* tokenize Unicode boundaries and decimal separators ([#146](https://github.com/promptfoo/js-rouge/issues/146)) ([d0ddc34](https://github.com/promptfoo/js-rouge/commit/d0ddc34c52c0058c8b5ae8e9a2489a002ab83303))
+
+
+### Performance
+
+* fast path equivalent and full-window ROUGE-S inputs ([#149](https://github.com/promptfoo/js-rouge/issues/149)) ([0360488](https://github.com/promptfoo/js-rouge/commit/03604883ba466f24f33e6b806f2d1d3ea58f285a))
+* stop ROUGE-L once candidate tokens are exhausted ([#151](https://github.com/promptfoo/js-rouge/issues/151)) ([bb03fd2](https://github.com/promptfoo/js-rouge/commit/bb03fd2187be3d2cb1d890c3c8601370e2b3383f))
+
 ## [3.2.1](https://github.com/promptfoo/js-rouge/compare/js-rouge-v3.2.0...js-rouge-v3.2.1) (2026-08-23)
 
 ### Bug Fixes
