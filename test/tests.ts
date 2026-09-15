@@ -123,6 +123,90 @@ describe('Utility Functions', () => {
   describe('arithmeticMean', () => {
     const am = rouge.arithmeticMean;
 
+    test.each([
+      [[1e308, 1e308], 1e308],
+      [[-1e308, -1e308], -1e308],
+      [[Number.MAX_VALUE, Number.MAX_VALUE], Number.MAX_VALUE],
+      [[1e308, 1e308, -1e308, -1e308], 0],
+      [[1e-308, 1e-308], 1e-308],
+      [[Number.MIN_VALUE, Number.MIN_VALUE], Number.MIN_VALUE],
+      [[Number.POSITIVE_INFINITY, 1], Number.POSITIVE_INFINITY],
+      [[Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY], Number.NaN],
+    ])('averages %p without introducing overflow or underflow', (values, expected) => {
+      expect(am(values)).toBe(expected);
+    });
+
+    test.each([
+      [Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE, 1],
+      [1, Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE],
+      [Number.MAX_VALUE, 1, Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE],
+    ])('preserves a residual after large cancellation: %p', (...values) => {
+      expect(am(values)).toBe(0.2);
+      expect(am(values.map((value) => -value))).toBe(-0.2);
+    });
+
+    test.each([
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          3 * Number.MIN_VALUE,
+        ],
+        Number.MIN_VALUE,
+      ],
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          3 * Number.MIN_VALUE,
+          0,
+        ],
+        0,
+      ],
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          9 * Number.MIN_VALUE,
+          0,
+        ],
+        2 * Number.MIN_VALUE,
+      ],
+      [new Array<number>(5).fill(Number.MAX_VALUE), Number.MAX_VALUE],
+      [
+        [
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          -Number.MAX_VALUE,
+          1,
+          -Number.MAX_VALUE,
+        ],
+        1 / 7,
+      ],
+    ])('rounds an overflowing finite mean once: %p', (values, expected) => {
+      expect(am(values)).toBe(expected);
+      expect(am(values.map((value) => -value))).toBe(-expected);
+    });
+
+    test('skips sparse holes consistently when a finite sum overflows', () => {
+      const values = [Number.MAX_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE];
+      values.length = 4;
+      expect(am(values)).toBe(Number.MAX_VALUE / 4);
+      expect(am(values.map((value) => -value))).toBe(-Number.MAX_VALUE / 4);
+    });
+
+    test('averages overflowing mixed-sign sums', () => {
+      expect(am([1e308, 1e308, -1e308]) / 1e308).toBeCloseTo(1 / 3, 14);
+    });
+
     test('should throw RangeError for empty array', () => {
       expect(() => am([])).toThrow(RangeError);
     });
@@ -571,6 +655,20 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
         expected.map((sentence) => sentence.toLowerCase()),
       );
+    });
+
+    test.each([
+      '1. First item 2. Second item',
+      'a. First item b. Second item',
+      '• 1. First item • 2. Second item',
+    ])('normalizes next-line whitespace before detecting list markers: %s', (input) => {
+      const wrapped = input.replaceAll(' ', '\u0085');
+      expect(ss(wrapped)).toEqual(ss(input));
+      expect(segmentCaseNeutrally(wrapped)).toEqual(segmentCaseNeutrally(input));
+      for (const score of [rouge.n, rouge.s, rouge.l]) {
+        expect(score(wrapped, input)).toBe(1);
+        expect(score(wrapped, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      }
     });
 
     test('recognizes list markers after document indentation', () => {
@@ -1687,6 +1785,121 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each([
+      'A.İ',
+      'A.İ́B',
+      'README.İ́ Beta',
+      'A.İ𝅥B',
+      'Alpha.İ',
+      'U.Sİ',
+      'é.İ.',
+      '1.İ.',
+      'İ.İ.',
+      'Sİ.𝒜',
+      'Drİ1.İ',
+      'İbBİσİU.İ',
+      '中文README.MD before continuing.',
+      'İ12345678.X more',
+      'İ́ΑΑΑΑΑΑΑΑ.X more',
+      'αİééééééé.X more',
+      'path K.AB more',
+      'path K.No more',
+      'K.No more',
+    ])('preserves case-expanded dotted identifiers: %s', (input) => {
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each([
+      'κόσμος',
+      'κόσμος',
+      '\u0301κόσμος',
+      'κόσμος-κόσμος',
+      'İş',
+      'İşğüşğüşğ',
+      'I\u0307ş',
+      'Ḱ',
+      'g\u0303',
+    ])('preserves adjacent sentences after ordinary non-ASCII word %s', (word) => {
+      const input = `${word}.No one answered.`;
+      expect(segmentCaseNeutrally(input)).toEqual([`${word}.`, 'No one answered.']);
+      expect(rouge.l(input, `${word}. No one answered.`, { caseSensitive: false })).toBe(1);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        [`${word}.`, 'No one answered.'].map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['K', 'k', 'K', 'KÁ'])(
+      'keeps case-equivalent dotted identifiers before No one: %s',
+      (word) => {
+        const input = `${word}.No one`;
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+        for (const score of [rouge.n, rouge.s, rouge.l]) {
+          expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+        }
+      },
+    );
+
+    test.each(['I agree.', 'I 100% agree.', 'A test.', 'A new day.'])(
+      'preserves an adjacent Unicode one-letter sentence before %s',
+      (continuation) => {
+        const input = `Я.${continuation}`;
+        expect(segmentCaseNeutrally(input)).toEqual(['Я.', continuation]);
+        for (const score of [rouge.n, rouge.s, rouge.l]) {
+          expect(score(input, `Я. ${continuation}`, { caseSensitive: false })).toBe(1);
+        }
+      },
+    );
+
+    test('does not mistake a decomposed two-letter sentence start for an identifier', () => {
+      const input = 'Stop.E\u0301l left.';
+      expect(segmentCaseNeutrally(input)).toEqual(['Stop.', 'E\u0301l left.']);
+      for (const score of [rouge.n, rouge.s, rouge.l]) {
+        expect(score(input, 'Stop. E\u0301l left.', { caseSensitive: false })).toBe(1);
+      }
+    });
+
+    test.each(['A.Σ́.No one answered.', "A.Σ́.'No one answered.", 'A.Σ́."No one answered.'])(
+      'preserves case-folding context around marked Greek initial in %s',
+      (input) => {
+        expect(rouge.n(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+        expect(rouge.s(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+        expect(rouge.l(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      },
+    );
+
+    test.each(['I\u0345', 'I\u0301\u0345', 'Í\u0345'])(
+      'preserves sigma context after mixed Latin and cased-mark token %s',
+      (token) => {
+        const input = `${token}.Σ/Α.`;
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+        for (const score of [rouge.n, rouge.s, rouge.l]) {
+          expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+        }
+      },
+    );
+
+    test.each(['α\u0345', 'ᾳ'])('keeps ordinary Greek tokens separate before %s', (token) => {
+      expect(segmentCaseNeutrally(`${token}.Σ/Α.`)).toEqual([`${token}.`, 'Σ/Α.']);
+    });
+
+    test('scans ambiguous cased combining marks without backtracking', () => {
+      const word = `İ${'\u0345\u0307'.repeat(20_000)}x!`;
+      const start = Date.now();
+      expect(segmentCaseNeutrally(`A.${word}`)).toEqual(['A.', word]);
+      expect(Date.now() - start).toBeLessThan(2000);
+    });
+
+    test('does not let a truncated mark qualify an unrelated later word', () => {
+      const input = 'İ?0b/]]\té.𝒜B';
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        segmentCaseNeutrally(input).map((sentence) => sentence.toLowerCase()),
+      );
+      expect(rouge.l(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+    });
+
     test('keeps bracketed references inside their sentence', () => {
       expect(ss('He wrote (see Fig.[2] for details). Next.')).toEqual([
         'He wrote (see Fig.[2] for details).',
@@ -2448,6 +2661,35 @@ describe('Utility Functions', () => {
         expect(ss(input)).toHaveLength(2);
         expect(Date.now() - started).toBeLessThan(TIMEOUT_MS);
       });
+
+      test('scans recovered combining-mark prefixes without backtracking', () => {
+        const input = `I${'\u0301'.repeat(16_000)}/aaaaaaa.X`;
+        const started = Date.now();
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(Date.now() - started).toBeLessThan(TIMEOUT_MS);
+      });
+
+      test('scans differently ordered combining marks without quadratic normalization', () => {
+        const input = `A${'\u0315\u0316'.repeat(32_000)}.X`;
+        const started = Date.now();
+        expect(segmentCaseNeutrally(input).join('')).toBe(input);
+        expect(Date.now() - started).toBeLessThan(TIMEOUT_MS);
+      });
+
+      test('streams repeated marked clusters within a constrained heap', () => {
+        expectBundledScriptToPass(
+          `
+            const summary = 'A\\u0303'.repeat(4_000_000) + '.X';
+            const sentences = module.exports.sentenceSegment(summary, { caseNeutral: true });
+            if (sentences.join('') !== summary) {
+              throw new Error('Marked-cluster content changed');
+            }
+            process.stdout.write('ok');
+          `,
+          20_000,
+          ['--max-old-space-size=80'],
+        );
+      }, 25_000);
 
       test('segments large spaced-ellipsis runs within a constrained heap', () => {
         expectBundledScriptToPass(
@@ -4056,6 +4298,16 @@ describe('Core Functions', () => {
         expect(score(mixedCase, lowerCase, { caseSensitive: false })).toBe(1);
       },
     );
+
+    test.each([
+      ['ROUGE-N', n],
+      ['ROUGE-S', s],
+      ['ROUGE-L', l],
+    ] as const)('%s preserves Unicode case expansion across dotted identifiers', (_name, score) => {
+      for (const input of ['A.İ Beta', 'İ12345678.X more']) {
+        expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      }
+    });
 
     test('ROUGE-L passes original text to custom segmenters before case folding', () => {
       const segmenter = jest.fn((input: string): string[] => [input]);
