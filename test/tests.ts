@@ -4109,3 +4109,56 @@ test('bounds right-double opening evidence at document and citation edges', () =
     }
   }
 });
+
+describe('Single-guillemet citation quotation context', () => {
+  test.each(['He said ‹Alpha.[1] Beta.› aloud.', 'He said ‹Alpha.[1] Beta.'])(
+    'retains the pending surrounding quotation in %s',
+    (input) => {
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    },
+  );
+
+  test.each([
+    'He said ‹Alpha.[1]›',
+    'He said ‹Alpha.›[1]',
+    'He said ‹Alpha.[1] ›',
+    'He said ‹“Alpha.[1] Beta.” aloud.[2]›',
+    'He said “‹Alpha.[1] Beta.› aloud.[2]”',
+    'He said ‹„Alpha.[1] Beta.“ aloud.[2]›',
+    'He said 「‹Alpha.[1] Beta.› aloud.[2]」',
+  ])('releases a completed single-guillemet quotation in %s', (first) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+      expect(rouge.sentenceSegment(first, { caseNeutral })).toEqual([first]);
+    }
+  });
+
+  test('retains quotation evidence for the next independent cited sentence', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('Alpha.[1] ‹Because he left.›', { caseNeutral })).toEqual([
+        'Alpha.[1]',
+        '‹Because he left.›',
+      ]);
+    }
+  });
+
+  test('preserves ordinary uncited and path behavior', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('He said ‹Alpha. Beta.› aloud.', { caseNeutral })).toEqual([
+        'He said ‹Alpha.',
+        'Beta.› aloud.',
+      ]);
+      const path = 'See ‹https://site/page.1› Next.';
+      expect(rouge.sentenceSegment(path, { caseNeutral })).toEqual([path]);
+    }
+  });
+
+  test('preserves the existing citation nesting bound with single guillemets', () => {
+    const input = `He said ${'‹'.repeat(65)}Alpha.[1] Beta.${'›'.repeat(65)} Next.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+});

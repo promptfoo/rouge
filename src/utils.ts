@@ -607,7 +607,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   return chunks;
 }
 
-const singleQuoteClosingContextReg = /^[\s.,!?;:)\]}”’»」』\p{Pd}]$/u;
+const singleQuoteClosingContextReg = /^[\s.,!?;:)\]}”’»›」』\p{Pd}]$/u;
 const citationElisionReg =
   /^(?:\d{2}s|t(?:is|was|were|will|would|il|ill)|n|em|cause|cos|round|bout|neath|fore|tween|gainst|cept|(?:twen|thir|for|fif|six|seven|eigh|nine)ties)\b/i;
 
@@ -618,7 +618,7 @@ function isCitationElision(input: string, index: number): boolean {
 function isRightCitationElision(input: string, index: number): boolean {
   return (
     input[index] === '’' &&
-    (index === 0 || /^[\s,;:([{<"'‘“«„「『\p{Pd}]$/u.test(input[index - 1])) &&
+    (index === 0 || /^[\s,;:([{<"'‘“«‹„「『\p{Pd}]$/u.test(input[index - 1])) &&
     isCitationElision(input, index)
   );
 }
@@ -884,7 +884,7 @@ function markGermanSingleCitationClosers(input: string, flags: Uint8Array): bool
     if (
       character === '‘' &&
       isCitationElision(input, index) &&
-      (index === 0 || /^[\s,;:([{<"'‘“«„‚「『\p{Pd}]$/u.test(input[index - 1])) &&
+      (index === 0 || /^[\s,;:([{<"'‘“«‹„‚「『\p{Pd}]$/u.test(input[index - 1])) &&
       (flags[index] & 8) === 0
     ) {
       continue;
@@ -934,12 +934,12 @@ function updateCitationQuotationState(
     closers.pop();
     return;
   }
-  const opening = '“‘«„‚「『'.indexOf(character);
+  const opening = '“‘«‹„‚「『'.indexOf(character);
   if (opening !== -1) {
-    pushCitationQuotation(quotes, '”’»“‘」』'[opening]);
+    pushCitationQuotation(quotes, '”’»›“‘」』'[opening]);
     return;
   }
-  if (/[”’»」』]/.test(character)) {
+  if (/[”’»›」』]/.test(character)) {
     if (closers.at(-1) === character) {
       closers.pop();
     } else if (character === '”' && isRightDoubleCitationOpening(input, index)) {
@@ -984,9 +984,9 @@ function updateCitationDoubleQuote(
     return true;
   }
   if (input[index] === '"') {
-    const outerOpening = "'‘“«„‚「『".indexOf(input[index - 1] ?? '');
+    const outerOpening = "'‘“«‹„‚「『".indexOf(input[index - 1] ?? '');
     const afterOuterOpening =
-      outerOpening >= 0 && "'’”»“‘」』"[outerOpening] === quotes.closers.at(-1);
+      outerOpening >= 0 && "'’”»›“‘」』"[outerOpening] === quotes.closers.at(-1);
     quotes.doubleDepth =
       quotes.doubleDepth < 0 && ((!previousQuotes && insideQuotes) || afterOuterOpening)
         ? quotes.closers.length
@@ -1178,7 +1178,7 @@ function citationEnd(
     return undefined;
   }
   const nextCharacter = characterAt(input, index + 1);
-  if (!/^[\s\p{Number}[()\]}>"'“‘”’»」』]$/u.test(nextCharacter)) {
+  if (!/^[\s\p{Number}[()\]}>"'“‘”’»›」』]$/u.test(nextCharacter)) {
     return undefined;
   }
   if (/^["'“‘]$/.test(nextCharacter) && !insideQuotes && quotationQuotes.closers.length === 0) {
@@ -1273,14 +1273,14 @@ function citationEnd(
 /** A pending English closer takes precedence; otherwise this mark can open a quotation. */
 function isRightDoubleCitationOpening(input: string, index: number): boolean {
   return (
-    (index === 0 || /^[\s([<{"'‘“«„‚「『]$/u.test(input[index - 1])) &&
+    (index === 0 || /^[\s([<{"'‘“«‹„‚「『]$/u.test(input[index - 1])) &&
     /\S/.test(input[index + 1] ?? '')
   );
 }
 
 function isCitationOpeningQuote(input: string, index: number): boolean {
   return (
-    /["'“‘«„‚「『]/.test(input[index]) ||
+    /["'“‘«‹„‚「『]/.test(input[index]) ||
     (input[index] === '”' && isRightDoubleCitationOpening(input, index))
   );
 }
@@ -1486,7 +1486,7 @@ function citationDelimiterEnd(
     }
     if (
       !(
-        /[”’»」』]/.test(input[next] ?? '') ||
+        /[”’»›」』]/.test(input[next] ?? '') ||
         (/[“‘]/.test(input[next] ?? '') &&
           isSharedCitationCloser(input[next], pending, flags[next])) ||
         (input[next] === "'" && pending.at(-1) === "'")
@@ -1569,7 +1569,7 @@ function closesCitationQuotations(
     } else if (doublePending && character === "'" && closing[index + 1] === "'") {
       doublePending = false;
       index++;
-    } else if (/["'“‘”’»」』]/.test(character)) {
+    } else if (/["'“‘”’»›」』]/.test(character)) {
       // An extra quote can open the next sentence; its number is not a citation.
       return false;
     }
@@ -1593,7 +1593,7 @@ function pathOrAddressTokenChecker(input: string): (index: number) => boolean {
     while (end < input.length && !/\s/.test(input[end])) {
       end++;
     }
-    const token = input.slice(start, end).replace(/^["'“‘«„‚「『([{<]+/, '');
+    const token = input.slice(start, end).replace(/^["'“‘«‹„‚「『([{<]+/, '');
     pathOrAddress = /[\\/]/.test(token) || token.includes('@') || /^www\./i.test(token);
     return pathOrAddress;
   };
