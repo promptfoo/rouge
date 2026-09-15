@@ -893,6 +893,7 @@ function trackListBrackets(input: string, index: number, state: ListBracketState
 function listMarkerPrefix(
   input: string,
   marker: RegExpExecArray,
+  quoteFlags?: Uint8Array,
 ): {
   empty: boolean;
   boundary: boolean;
@@ -900,7 +901,10 @@ function listMarkerPrefix(
 } {
   let index = marker.index - 1;
   let lineBreak = /[\r\n]/.test(marker[0]);
-  while (index >= 0 && /[\s"'”’»›\])}>]/.test(input[index])) {
+  while (
+    index >= 0 &&
+    (/[\s"'”’»›\])}>]/.test(input[index]) || (input[index] === '`' && quoteFlags?.[index] === 4))
+  ) {
     lineBreak ||= /[\r\n]/.test(input[index]);
     index--;
   }
@@ -934,7 +938,7 @@ function nextListMarker(
       state.bracketDepth.some((depth) => depth > 0) ||
       state.quote !== undefined ||
       state.quoteFlags?.[marker.index] === 4;
-    const prefix = listMarkerPrefix(input, marker);
+    const prefix = listMarkerPrefix(input, marker, state.quoteFlags);
     const crossReference = isListCrossReference(input, marker, state, enclosedMarker);
     const authorInitial =
       previous !== undefined &&
@@ -1079,7 +1083,7 @@ function findListCandidate(
   let proseInitialEnd: number | undefined;
   while (current !== null) {
     const marker = current[0].trim();
-    const context = listMarkerPrefix(input, current);
+    const context = listMarkerPrefix(input, current, state.quoteFlags);
     const ambiguousMarker = /^\d+\.$/.test(marker) || /^\p{Cased}\p{M}*\.$/u.test(marker);
 
     const family = listMarkerFamily(marker, caseNeutral);

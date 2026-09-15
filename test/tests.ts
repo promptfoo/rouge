@@ -1168,6 +1168,25 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(refs)).toEqual([refs]);
     }, 5000);
 
+    test.each(['Use `Intro.`', 'Use `Intro!`', 'Use `«Intro.»`'])(
+      'recognizes a completed paired-code introduction before dotted items: %s',
+      (prefix) => {
+        const expected = [prefix, '1. Alpha', '2. Beta'];
+        expect(ss(`${prefix} 1. Alpha 2. Beta`)).toEqual(expected);
+        expect(segmentCaseNeutrally(`${prefix} 1. Alpha 2. Beta`)).toEqual(expected);
+      },
+    );
+
+    test('requires a terminal inside a paired code introduction', () => {
+      const input = 'Use `Intro` 1. Alpha 2. Beta';
+      const expected = ['Use `Intro` 1.', 'Alpha 2.', 'Beta'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      const unmatched = 'Use `unclosed. 1. Alpha 2. Beta';
+      expect(ss(unmatched)).toEqual(['Use `unclosed.', '1. Alpha', '2. Beta']);
+      expect(segmentCaseNeutrally(unmatched)).toEqual(['Use `unclosed.', '1. Alpha', '2. Beta']);
+    });
+
     test('keeps list bracket ownership linear through deep mixed literals', () => {
       const prefix = `${'[{<('.repeat(8000)}literal${')>}]'.repeat(8000)} Options:`;
       expect(ss(`${prefix} a) First b) Last.`)).toEqual([prefix, 'a) First', 'b) Last.']);
