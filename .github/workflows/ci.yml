@@ -46,6 +46,8 @@ jobs:
       - run: npm run type-check
       - name: Biome CI check
         run: npx biome ci . --error-on-warnings
+      - name: Check Markdown formatting
+        run: npx prettier --check "**/*.md"
       - run: npm run build
       - name: Verify build artifacts
         run: |
