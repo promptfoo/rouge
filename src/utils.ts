@@ -554,11 +554,7 @@ class SentenceBuffer {
   }
 
   #trackBracket(text: string, index: number): void {
-    if (
-      this.#asciiQuotes.double ||
-      this.#asciiQuotes.single ||
-      this.#typographicQuoteClosers.length > 0
-    ) {
+    if (hasOpenQuotation(this.#asciiQuotes, this.#typographicQuoteClosers)) {
       return;
     }
     const character = text[index];
@@ -851,6 +847,13 @@ function trackTypographicQuote(
   return false;
 }
 
+function hasOpenQuotation(
+  ascii: AsciiQuotationContext,
+  typography: TypographicQuotationStack,
+): boolean {
+  return ascii.double || ascii.single || typography.length > 0;
+}
+
 /** Index matches once so an unmatched outer aside does not hide later paired replies. */
 class InlineAsideMatches {
   #ends: Uint32Array | undefined;
@@ -876,10 +879,19 @@ class InlineAsideMatches {
     if (end === 0) {
       return false;
     }
-    const following = this.input.slice(end, end + 64);
-    const continuation = following.replace(/^[\s,;:\p{Pd}]+/u, '');
+    let next = end;
+    let separated = false;
+    while (next < this.input.length) {
+      const character = characterAt(this.input, next);
+      if (!/[\s,;:\p{Pd}]/u.test(character)) {
+        break;
+      }
+      separated ||= /[\s\p{Pd}]/u.test(character);
+      next += character.length;
+    }
+    const continuation = this.input.slice(next, next + 64);
     return (
-      /^[\s,;:\p{Pd}]*(?:\s|\p{Pd})/u.test(following) &&
+      separated &&
       (opening < 4 || sentenceContinuationReg.test(continuation)) &&
       (caseNeutral ? /^\p{Cased}/u.test(continuation) : /^\p{Ll}/u.test(continuation))
     );
@@ -1054,6 +1066,21 @@ function trackSourceAsciiQuotation(
   return through;
 }
 
+function trackBracketDepth(
+  character: string,
+  standalone: boolean,
+  brackets: { depth: number; standalone: boolean },
+): void {
+  if (openingBracketReg.test(character)) {
+    if (brackets.depth === 0) {
+      brackets.standalone = standalone;
+    }
+    brackets.depth++;
+  } else if (closingBracketReg.test(character)) {
+    brackets.depth = Math.max(0, brackets.depth - 1);
+  }
+}
+
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
 function sentenceChunks(
   input: string,
@@ -1085,13 +1112,8 @@ function sentenceChunks(
       quoteTokenThrough,
     );
     trackTypographicQuote(input, index, typographicQuoteClosers, flags[index]);
-    if (openingBracketReg.test(char)) {
-      if (brackets.depth === 0) {
-        brackets.standalone = start === -1;
-      }
-      brackets.depth++;
-    } else if (closingBracketReg.test(char)) {
-      brackets.depth = Math.max(0, brackets.depth - 1);
+    if (!hasOpenQuotation(asciiQuotes, typographicQuoteClosers)) {
+      trackBracketDepth(char, start === -1, brackets);
     }
     if (index < lastEnd || char === '\r' || char === '\n') {
       // Only closing-delimiter lookahead can cross CR/LF; other wraps reset the prefix.
@@ -1156,7 +1178,7 @@ function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllips
     const next = openingDelimiterEnd(input, match.index + match[0].length, true);
     const following = characterAt(input, next);
     const sentenceStart =
-      /^\p{Number}$/u.test(following) ||
+      numericSentenceStartReg.test(input.slice(next, next + 6)) ||
       (caseNeutral
         ? isCasedCharacter(following)
         : following.length > 0 && charIsUpperCase(following));

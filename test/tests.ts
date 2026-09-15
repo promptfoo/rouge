@@ -2540,6 +2540,72 @@ describe('Utility Functions', () => {
         },
       );
 
+      test.each([
+        ['"', '"'],
+        ["'", "'"],
+        ['``', "''"],
+        ["''", "''"],
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])('ignores bracket literals inside completed %s%s ellipsis quotations', (open, close) => {
+        for (const literal of ['(', ')', '[', ']', '{', '}', '<', '>']) {
+          const first = `He said ${open}Type ${literal}help...${close}`;
+          const input = `${first} Next sentence.`;
+          expect(ss(input)).toEqual([first, 'Next sentence.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            'next sentence.',
+          ]);
+          const pending = `He said (${open}Type ${literal}help...${close} before leaving).`;
+          expect(ss(pending)).toEqual([pending]);
+          expect(segmentCaseNeutrally(pending)).toEqual([pending]);
+        }
+      });
+
+      test.each(['$100', '+5', '-5', '−𝟝', '-£100', '€+5'])(
+        'recognizes %s after a spaced four-dot ellipsis',
+        (number) => {
+          const second = `${number} was the result.`;
+          for (const gap of [' ', '  ']) {
+            const first = 'Alpha . . . .';
+            expect(ss(`${first}${gap}${second}`)).toEqual([first, second]);
+            expect(segmentCaseNeutrally(`${first}${gap}${second}`)).toEqual([first, second]);
+          }
+          const omission = `Alpha . . . ${number} was the result.`;
+          expect(ss(omission)).toEqual([omission]);
+          expect(segmentCaseNeutrally(omission)).toEqual([omission]);
+        },
+      );
+
+      test.each([
+        ' '.repeat(64),
+        '\t'.repeat(128),
+        `,${' —;:'.repeat(100)}`,
+        '\u{10ead}',
+        '\u{10ead}'.repeat(128),
+      ])('keeps inline asides before a long connector run (%#)', (connector) => {
+        for (const aside of ['(Perhaps)', '“Perhaps,”', "``Perhaps,''"]) {
+          const input = `He paused... ${aside}${connector}before answering.`;
+          const normalized = input.replace(/ +/g, ' ');
+          expect(ss(input)).toEqual([normalized]);
+          expect(segmentCaseNeutrally(input)).toEqual([normalized]);
+        }
+        const second = `“Perhaps,”${connector}Alice replied.`;
+        expect(ss(`He paused... ${second}`)).toEqual(['He paused...', second]);
+        expect(segmentCaseNeutrally(`He paused... ${second}`)).toEqual(['He paused...', second]);
+      });
+
+      test('handles repeated long post-aside gaps without rescanning source tails', () => {
+        const sentence = `He paused... (Perhaps)${' '.repeat(1000)}before answering.`;
+        const input = `${sentence} `.repeat(1000);
+        const expected = new Array(1000).fill('He paused... (Perhaps) before answering.');
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      }, 5000);
+
       test('scores reference sentences ending in a three-dot ellipsis correctly', () => {
         expect(rouge.l('Beta Alpha...', 'Alpha... Beta.')).toBeCloseTo(6 / 7);
       });
