@@ -485,18 +485,43 @@ interface ListBracketState {
 
 interface ListScanState extends ListBracketState {
   cursor: number;
+  caseNeutral: boolean;
+  referenceThrough?: number;
   quote: string | undefined;
   quoteFlags?: Uint8Array;
   yearList?: boolean;
 }
 
+/** Paired single-backtick spans are opaque to list detection, independent of Treebank aliases. */
+function listCodeFlags(input: string): Uint8Array | undefined {
+  let flags: Uint8Array | undefined;
+  let opening = -1;
+  for (const token of input.matchAll(/`+/g)) {
+    if (token[0].length !== 1) {
+      continue;
+    }
+    if (opening >= 0) {
+      flags ??= new Uint8Array(input.length);
+      flags.fill(4, opening, token.index + 1);
+      opening = -1;
+    } else if (!isEscapedListQuote(input, token.index)) {
+      opening = token.index;
+    }
+  }
+  return flags;
+}
+
 /** Confirm numeric quote openers without treating unpaired year elisions as quotes. */
 function numericQuoteFlags(input: string): Uint8Array | undefined {
-  let openings: Uint8Array | undefined;
+  let openings = listCodeFlags(input);
   let candidate: number | undefined;
   for (const quote of input.matchAll(/'/g)) {
     const index = quote.index;
-    if (isEscapedListQuote(input, index) || isPairedNElision(input, index)) {
+    if (
+      openings?.[index] === 4 ||
+      isEscapedListQuote(input, index) ||
+      isPairedNElision(input, index)
+    ) {
       continue;
     }
     const previous = input[index - 1] ?? '';
@@ -515,7 +540,7 @@ function numericQuoteFlags(input: string): Uint8Array | undefined {
         openings ??= new Uint8Array(input.length);
         openings[candidate] = 1;
         // Confirmed numeric spans retain their internal possessive apostrophes.
-        openings.fill(2, candidate + 1, index);
+        markListQuoteRange(input, openings, candidate + 1, index);
         candidate = undefined;
       } else if (
         opener &&
@@ -545,7 +570,7 @@ function confirmedListQuoteFlags(
     const closer = character === "'" ? "'" : '’';
     const state = pending[closer];
     markNestedNumericQuote(flags, index, state.opening >= 0);
-    if (flags?.[index] === 2 || isLiteralListQuote(input, index)) {
+    if (flags?.[index] === 4 || flags?.[index] === 2 || isLiteralListQuote(input, index)) {
       continue;
     }
     const opening = listQuoteCloser(input, index, flags) === closer;
@@ -601,11 +626,11 @@ function markListQuoteRange(
   flags: Uint8Array,
   start: number,
   end: number,
-  closer: string,
+  closer?: string,
 ): void {
-  // Confirmed ranges are disjoint within each of the two quote families.
+  // Confirmed ranges are disjoint within each quote family and the numeric pass.
   for (let index = start; index < end; index++) {
-    if (input[index] === closer) {
+    if (flags[index] !== 4 && (closer === undefined || input[index] === closer)) {
       flags[index] = 2;
     }
   }
@@ -694,6 +719,9 @@ function matchedAngleOpeners(
   let matched: Uint8Array | undefined;
   let quote: string | undefined;
   for (let index = 0; index < input.length; index++) {
+    if (quoteFlags?.[index] === 4) {
+      continue;
+    }
     if (quote !== undefined) {
       if (input.startsWith(quote, index) && !isLiteralListQuote(input, index, quoteFlags)) {
         index += quote.length - 1;
@@ -734,7 +762,7 @@ function* unquotedListParentheses(
   let skipThrough = -1;
   for (const token of input.matchAll(/[()[\]{}<>"'`“”‘’«»‹›]/g)) {
     const index = token.index;
-    if (index <= skipThrough) {
+    if (index <= skipThrough || quoteFlags?.[index] === 4) {
       continue;
     }
     if (quote !== undefined) {
@@ -794,11 +822,12 @@ function parenthesisLabelFlags(
   return flags;
 }
 
-function listScanState(input: string): ListScanState {
+function listScanState(input: string, caseNeutral: boolean): ListScanState {
   const quoteFlags = confirmedListQuoteFlags(input, numericQuoteFlags(input));
   const angleOpeners = matchedAngleOpeners(input, quoteFlags);
   return {
     cursor: 0,
+    caseNeutral,
     bracketDepth: [0, 0, 0, 0],
     bracketStack: new Uint8Array(32),
     bracketStackLength: 0,
@@ -812,6 +841,9 @@ function listScanState(input: string): ListScanState {
 function advanceListScan(input: string, end: number, state: ListScanState): void {
   while (state.cursor < end) {
     const index = state.cursor++;
+    if (state.quoteFlags?.[index] === 4) {
+      continue;
+    }
     if (state.quote !== undefined) {
       const apostrophe = isLiteralListQuote(input, index, state.quoteFlags);
       if (input.startsWith(state.quote, index) && !apostrophe) {
@@ -899,8 +931,20 @@ function nextListMarker(
       bodyStart = marker.index + marker[0].length;
     }
     const enclosedMarker =
-      state.bracketDepth.some((depth) => depth > 0) || state.quote !== undefined;
+      state.bracketDepth.some((depth) => depth > 0) ||
+      state.quote !== undefined ||
+      state.quoteFlags?.[marker.index] === 4;
     const prefix = listMarkerPrefix(input, marker);
+    const crossReference = isListCrossReference(input, marker, state, enclosedMarker);
+    const authorInitial =
+      previous !== undefined &&
+      /^\p{Cased}\p{M}*\.$/u.test(marker[0].trim()) &&
+      (prefix.joinedNameInitial ||
+        colonIntroducedNameBoundary(
+          input,
+          marker.index + marker[0].length - 1,
+          state.caseNeutral,
+        ) === -1);
     const yearInProse =
       yearListMarkerReg.test(marker[0].trim()) &&
       !(state.yearList || prefix.empty || prefix.boundary);
@@ -915,16 +959,43 @@ function nextListMarker(
       !enclosedMarker &&
       !yearInProse &&
       !countInProse &&
-      (marker.index === 0 ||
-        !/\b(?:section|chapter|page|figure|table|paragraph|article|clause)s?$/i.test(
-          input.slice(Math.max(0, marker.index - 24), marker.index).trimEnd(),
-        ))
+      !crossReference &&
+      !authorInitial
     ) {
       return marker;
     }
     marker = expression.exec(input);
   }
   return null;
+}
+
+/** Reference labels continue through one prose run; strong punctuation starts a new context. */
+function isListCrossReference(
+  input: string,
+  marker: RegExpExecArray,
+  state: ListScanState,
+  enclosed: boolean,
+): boolean {
+  if (
+    state.referenceThrough !== undefined &&
+    /[.!?:;\r\n]/.test(input.slice(state.referenceThrough, marker.index))
+  ) {
+    state.referenceThrough = undefined;
+  }
+  if (
+    !enclosed &&
+    /\b(?:section|chapter|page|figure|table|paragraph|article|clause)s?$/i.test(
+      input.slice(Math.max(0, marker.index - 24), marker.index).trimEnd(),
+    )
+  ) {
+    state.referenceThrough = marker.index;
+  }
+  if (state.referenceThrough === undefined) {
+    return false;
+  }
+  // Consecutive ranges are disjoint, including across nextListMarker calls.
+  state.referenceThrough = marker.index + marker[0].length;
+  return true;
 }
 
 interface ListCandidate {
@@ -949,13 +1020,35 @@ function listMarkerFamily(marker: string, caseNeutral: boolean): RegExp {
   return new RegExp(`${start}[^\\r\\n]*${ending}$`, 'u');
 }
 
-function numericMarkerValue(marker: string): number {
-  return Number(marker.match(/^(?:[•⁃]\s*|[-*+]\s+)?(\d+)/)?.[1]);
+function numericMarkerValue(marker: string): string | undefined {
+  return marker.match(/^(?:[•⁃]\s*|[-*+]\s+)?(\d+)/)?.[1].replace(/^0+(?=\d)/, '');
 }
 
-function isDistantNumericMarker(first: number, marker: string, atBoundary: boolean): boolean {
+function isDistantNumericMarker(
+  first: string | undefined,
+  marker: string,
+  atBoundary: boolean,
+): boolean {
   const current = numericMarkerValue(marker);
-  return Number.isFinite(first) && Math.abs(current - first) > 10 && !atBoundary;
+  if (atBoundary || first === undefined || current === undefined) {
+    return false;
+  }
+  if (Math.abs(first.length - current.length) > 1) {
+    return true;
+  }
+  // Equal-length/adjacent-length labels require at most the current label's digits plus one.
+  // Keep only a bounded signed difference; no arbitrary-precision integer is constructed.
+  let difference = 0;
+  const length = Math.max(first.length, current.length);
+  for (let index = 0; index < length; index++) {
+    const firstDigit = Number(first[index - (length - first.length)] ?? '0');
+    const currentDigit = Number(current[index - (length - current.length)] ?? '0');
+    difference = difference * 10 + firstDigit - currentDigit;
+    if (Math.abs(difference) > 10) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function findListCandidate(
@@ -972,7 +1065,7 @@ function findListCandidate(
       emptyPrefix: boolean;
       prefix?: string;
       identity: string;
-      number: number;
+      number: string | undefined;
       bodyStart: number;
       hasBody: boolean;
     }
@@ -1100,7 +1193,7 @@ function segmentList(input: string, caseNeutral: boolean, depth: number): string
     return undefined;
   }
   const expression = new RegExp(listMarkerReg);
-  const state = listScanState(input);
+  const state = listScanState(input, caseNeutral);
   const candidate = findListCandidate(input, caseNeutral, expression, state);
   if (candidate === undefined) {
     return undefined;
@@ -1155,7 +1248,7 @@ function nestedMarkerPeriods(input: string, caseNeutral: boolean): Uint8Array | 
   if (families.size === 0) {
     return undefined;
   }
-  const context = listScanState(input);
+  const context = listScanState(input, caseNeutral);
   let periods: Uint8Array | undefined;
   // The configured marker grammar has at most six families, independent of input size.
   for (const family of families.values()) {

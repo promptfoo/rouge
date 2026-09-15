@@ -1053,6 +1053,121 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each([
+      'Use `foo a) Alpha b) Beta` literal.',
+      'Use `foo " a) Alpha b) Beta` literal.',
+      'Use `foo < a) Alpha b) Beta > ( c) Gamma` literal.',
+      "Use `foo '99 a) Alpha b) Beta` literal.",
+    ])('keeps paired single-backtick code spans opaque to list scans: %s', (sentence) => {
+      expect(ss(sentence)).toEqual([sentence]);
+      expect(segmentCaseNeutrally(sentence)).toEqual([sentence]);
+      expect(ss(`${sentence} Options: d) First e) Last.`)).toEqual([
+        sentence,
+        'Options:',
+        'd) First',
+        'e) Last.',
+      ]);
+      expect(segmentCaseNeutrally(`${sentence} Options: d) First e) Last.`)).toEqual([
+        sentence,
+        'Options:',
+        'd) First',
+        'e) Last.',
+      ]);
+      expect(
+        rouge.l(sentence, sentence.replace('a) Alpha b) Beta', 'b) Beta a) Alpha')),
+      ).toBeLessThan(1);
+    });
+
+    test.each([
+      [
+        'Use `unclosed literal. Options: a) Alpha b) Beta.',
+        ['Use `unclosed literal.', 'Options:', 'a) Alpha', 'b) Beta.'],
+      ],
+      [
+        "Use ``foo a) Alpha b) Beta'' literal. Options: a) One b) Two.",
+        ["Use ``foo a) Alpha b) Beta'' literal.", 'Options:', 'a) One', 'b) Two.'],
+      ],
+      [
+        'Use `one` and `two`. Options: a) First b) Last.',
+        ['Use `one` and `two`.', 'Options:', 'a) First', 'b) Last.'],
+      ],
+    ])('retains unpaired backticks, Treebank aliases and later lists: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['sections', 'figures', 'clauses'])(
+      'keeps complete cross-reference runs before later lists: %s',
+      (entity) => {
+        const sentence = `See ${entity} 1) Introduction, 2) Scope, and 3) Details.`;
+        expect(ss(sentence)).toEqual([sentence]);
+        expect(segmentCaseNeutrally(sentence)).toEqual([sentence]);
+        const expected = [sentence, 'Options:', '1) Alpha', '2) Beta.'];
+        const input = `${sentence} Options: 1) Alpha 2) Beta.`;
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+        expect(
+          rouge.l(
+            sentence,
+            sentence.replace('2) Scope, and 3) Details', '3) Details, and 2) Scope'),
+          ),
+        ).toBeLessThan(1);
+      },
+    );
+
+    test('retains reference runs encountered while continuing an existing list', () => {
+      const input =
+        'Options: 1) First. See sections 2) Scope, 3) Details, and 4) Appendix. Options: 5) Next 6) Last.';
+      const expected = [
+        'Options:',
+        '1) First.',
+        'See sections 2) Scope, 3) Details, and 4) Appendix.',
+        'Options:',
+        '5) Next',
+        '6) Last.',
+      ];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      ['9'.repeat(320), '2', `${'9'.repeat(319)}8`],
+      ['9'.repeat(320), `1${'0'.repeat(319)}`, `${'9'.repeat(319)}8`],
+      ['90071992547409920', '90071992547409940', '90071992547409921'],
+      ['99999999999999999', '100000000000000020', '100000000000000000'],
+      ['00090071992547409920', '2', '090071992547409921'],
+    ])('compares decimal marker distance without rounding: %s', (first, far, near) => {
+      const input = `Options: ${first}. First ${far}. More analysis ${near}. Last.`;
+      const expected = ['Options:', `${first}. First ${far}.`, 'More analysis', `${near}. Last.`];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['and', 'or', '&', ','])(
+      'preserves the author guard while continuing selected alphabetic items: %s',
+      (join) => {
+        const names = `Authors: C. Smith${join === ',' ? '' : ' '}${join} D. Jones.`;
+        const input = `Options: A. Alpha B. Beta. ${names}`;
+        const expected = ['Options:', 'A. Alpha', 'B. Beta.', names];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+      },
+    );
+
+    test('keeps confirmed code and reference ranges linear across many markers', () => {
+      const code = `Use ${'` a) Alpha b) Beta ` '.repeat(8000)}literal.`;
+      expect(ss(code)).toEqual([code]);
+      expect(segmentCaseNeutrally(code)).toEqual([code]);
+      const refs = `See sections ${Array.from({ length: 8000 }, (_, index) => `${index + 1}) Label`).join(', ')}.`;
+      expect(ss(refs)).toEqual([refs]);
+      expect(segmentCaseNeutrally(refs)).toEqual([refs]);
+    }, 5000);
+
     test('keeps list bracket ownership linear through deep mixed literals', () => {
       const prefix = `${'[{<('.repeat(8000)}literal${')>}]'.repeat(8000)} Options:`;
       expect(ss(`${prefix} a) First b) Last.`)).toEqual([prefix, 'a) First', 'b) Last.']);
