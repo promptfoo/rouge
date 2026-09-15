@@ -711,6 +711,80 @@ describe('Utility Functions', () => {
       );
     });
 
+    test.each(['[1]', '(1)', '[1], [2]'])(
+      'retains an unspaced cased sentence start after complete citation %s',
+      (citation) => {
+        const first = `Hello world.${citation}`;
+        const second = 'Today is Tuesday.';
+        expect(ss(first + second)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(first + second)).toEqual([first, second]);
+        expect(segmentCaseNeutrally((first + second).toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+        expect(ss(first + second.toLowerCase())).toEqual([first + second.toLowerCase()]);
+      },
+    );
+
+    test.each(['🙂 smiled.', '$100 was paid.', '+ taxes.'])(
+      'retains a spaced symbol-led sentence after an explicit citation: %s',
+      (second) => {
+        for (const citation of ['[1]', '(1)']) {
+          const first = `Alpha.${citation}`;
+          expect(ss(`${first} ${second}`)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(`${first} ${second}`.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+          ]);
+        }
+      },
+    );
+
+    test.each([
+      'Alpha.[1]🙂 smiled.',
+      'Alpha.[1]"🙂 smiled."',
+      'Alpha.1 🙂 smiled.',
+      'Hello world.1Today is Tuesday.',
+      'Co.[1] 🙂 smiled.',
+      'Alpha...[1] 🙂 smiled.',
+      'Alpha....[1] 🙂 smiled.',
+      'Alpha.[1] 100% agreed.',
+    ])('preserves competing citation continuation policy: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test('does not reconsider a recognized spaced citation before a lowercase continuation', () => {
+      for (const separator of ['', ' ']) {
+        const first = `Alpha.${separator}[1]`;
+        const input = `${first} beta.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'beta.']);
+        expect(ss(`${first} Beta.`)).toEqual([first, 'Beta.']);
+      }
+    });
+
+    test.each(['He said “Alpha. [1] beta.” Next.', 'He wrote (Alpha. [1] Beta.) Next.'])(
+      'retains a recognized citation inside its surrounding context: %s',
+      (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        const attached = input.replace('. [1]', '.[1]');
+        expect(ss(attached)).toEqual([attached]);
+        expect(segmentCaseNeutrally(attached)).toEqual([attached]);
+      },
+    );
+
+    test.each(['[oops]', '1'])(
+      'retains ordinary scanning for an unrecognized spaced citation: %s',
+      (next) => {
+        const second = `${next} Beta.`;
+        expect(ss(`Alpha. ${second}`)).toEqual(['Alpha.', second]);
+        expect(segmentCaseNeutrally(`Alpha. ${second}`)).toEqual(['Alpha.', second]);
+      },
+    );
+
     test.each([
       "He said '``Alpha.''[1]'",
       "He said ``'Alpha.'[1]''",

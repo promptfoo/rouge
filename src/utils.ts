@@ -1060,6 +1060,7 @@ function sentenceEnd(
   return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
 }
 
+/** Undefined permits ordinary scanning; -1 retains an explicit citation continuation. */
 function citationEnd(
   input: string,
   index: number,
@@ -1108,6 +1109,8 @@ function citationEnd(
   if (contentEnd === undefined) {
     return undefined;
   }
+  const groupedCitation = /[[(]/.test(input[citationStart]);
+  const continuation = groupedCitation ? -1 : undefined;
 
   const leadingClosers = input.slice(index + 1, delimiterEnd);
   const closedQuote = insideQuotes && /"|''/.test(leadingClosers);
@@ -1128,7 +1131,7 @@ function citationEnd(
       quotationQuotes.doubleDepth,
     )
   ) {
-    return undefined;
+    return continuation;
   }
   const closedBrackets =
     countClosingBrackets(input, index + 1, delimiterEnd) +
@@ -1144,18 +1147,28 @@ function citationEnd(
       caseNeutral,
     )
   ) {
-    return undefined;
+    return continuation;
   }
   if (end === input.length || /^\s+$/.test(input.slice(end))) {
     return end;
   }
-  if (!/[\s"'“‘«([{<]/.test(input[end])) {
-    return undefined;
-  }
-
-  return isCitationSentenceStart(input, index, end, caseNeutral, isNumericContinuation)
+  return isCitationSentenceStart(
+    input,
+    index,
+    end,
+    caseNeutral,
+    isNumericContinuation,
+    groupedCitation,
+    groupedCitation && end === contentEnd,
+  )
     ? end
-    : undefined;
+    : continuation;
+}
+
+function isCitationSeparator(input: string, end: number, allowUnspaced: boolean): boolean {
+  return (
+    /[\s"'“‘«([{<]/.test(input[end]) || (allowUnspaced && isCasedCharacter(characterAt(input, end)))
+  );
 }
 
 function isCitationSentenceStart(
@@ -1164,7 +1177,12 @@ function isCitationSentenceStart(
   end: number,
   caseNeutral: boolean,
   isNumericContinuation: (index: number) => boolean,
+  groupedCitation: boolean,
+  allowUnspaced: boolean,
 ): boolean {
+  if (!isCitationSeparator(input, end, allowUnspaced)) {
+    return false;
+  }
   let next = end;
   while (next < input.length && /[\s"'“‘«([{<]/.test(input[next])) {
     next++;
@@ -1189,10 +1207,9 @@ function isCitationSentenceStart(
   }
 
   const sentenceStart = characterAt(input, next);
+  const ordinaryTerminal = !(ellipsis || abbrvReg.test(gateSuffix));
   const uncasedLetter =
-    !(ellipsis || abbrvReg.test(gateSuffix)) &&
-    /^\p{Letter}$/u.test(sentenceStart) &&
-    !isCasedCharacter(sentenceStart);
+    ordinaryTerminal && /^\p{Letter}$/u.test(sentenceStart) && !isCasedCharacter(sentenceStart);
   const startsWithLetter =
     uncasedLetter ||
     (caseNeutral
@@ -1203,7 +1220,12 @@ function isCitationSentenceStart(
     !abbrvReg.test(gateSuffix) &&
     !ellipsis &&
     !isNumericContinuation(next);
-  return startsWithLetter || startsWithNumber;
+  const startsWithSymbol =
+    groupedCitation &&
+    ordinaryTerminal &&
+    /\s/.test(input.slice(end, next)) &&
+    /^\p{Symbol}$/u.test(sentenceStart);
+  return startsWithLetter || startsWithNumber || startsWithSymbol;
 }
 
 /** Isolated initial candidates keep these preceding-word scans disjoint. */
