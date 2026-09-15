@@ -1432,6 +1432,21 @@ describe('Utility Functions', () => {
         );
       }, 25_000);
 
+      test('avoids an aside index when an unmatched quotation rules out the boundary', () => {
+        expectBundledScriptToPass(
+          `
+            const summary = '‘'.repeat(7000000) + 'Alpha... (';
+            const sentences = module.exports.sentenceSegment(summary);
+            if (sentences.length !== 1 || sentences[0] !== summary) {
+              throw new Error('Unmatched quotation continuation changed');
+            }
+            process.stdout.write('ok');
+          `,
+          20_000,
+          ['--max-old-space-size=64'],
+        );
+      }, 25_000);
+
       test('should segment abbreviation chains within a small heap', () => {
         expectBundledScriptToPass(
           `
@@ -2016,6 +2031,82 @@ describe('Utility Functions', () => {
           const input = `He said "${abbreviation}." 2 people remained.`;
           expect(segmentCaseNeutrally(input)).toEqual([input]);
         }
+      });
+
+      test('ignores casing when resolving an s-ending quote in neutral mode', () => {
+        const first = "She chose 'Paris' Alice agreed...";
+        const second = 'Beta followed.';
+        const input = `${first} ${second}`;
+        expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+        expect(rouge.l(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+        const possessive = "He said 'The dogs' owners wait... Next.'";
+        expect(segmentCaseNeutrally(possessive)).toEqual([possessive]);
+      });
+
+      test.each([
+        ['(', ')'],
+        ['[', ']'],
+        ['{', '}'],
+        ['<', '>'],
+      ])('closes terminal %s%s inside a straight-single quotation', (open, close) => {
+        const first = `He said '${open}Enough...${close}'`;
+        const input = `${first} Next sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+        const continuation = `He said '${open}Enough...${close} Next sentence.'`;
+        expect(ss(continuation)).toEqual([continuation]);
+        expect(segmentCaseNeutrally(continuation)).toEqual([continuation]);
+      });
+
+      test.each(['``', "''"])('recognizes spaced Treebank closers after %s', (open) => {
+        for (const gap of [' ', '\t', '\n']) {
+          const first = `He said ${open}Enough...${gap}''`;
+          const input = `${first} Next sentence.`;
+          const expected = [first.replaceAll('\n', ' '), 'Next sentence.'];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+        }
+      });
+
+      test.each([' ', ''])('recognizes a Treebank opener after ellipsis and %j', (gap) => {
+        const second = "``Beta.''";
+        expect(ss(`Alpha...${gap}${second}`)).toEqual(['Alpha...', second]);
+        expect(segmentCaseNeutrally(`Alpha...${gap}${second}`)).toEqual(['Alpha...', second]);
+        for (const continuation of ["It was...``Beta...''", "Alpha...``100 points.''"]) {
+          expect(ss(continuation)).toEqual([continuation]);
+          expect(segmentCaseNeutrally(continuation)).toEqual([continuation]);
+        }
+      });
+
+      test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['„', '“'],
+        ['«', '»'],
+      ])('keeps adjacent %s%s quotation openings after a consumed closer', (open, close) => {
+        const expected = ['He said “Enough...”', `${open}Next...${close}`, 'Final.'];
+        const input = `${expected[0]}${expected[1]} ${expected[2]}`;
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+      });
+
+      test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['„', '“'],
+        ['«', '»'],
+      ])('ignores bracket literals inside %s%s quotation context', (open, close) => {
+        const first = `He said ${open}Alpha... [Beta...${close} and left...`;
+        const input = `${first} Next.`;
+        expect(ss(input)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
       });
 
       test('handles long sequences of merged ellipses in one scan', () => {
