@@ -2146,6 +2146,7 @@ function sentenceChunks(
     markerPeriods,
   );
   const hasUrlPrefix = urlPrefixChecker(input);
+  const hasFollowingAt = followingAtChecker(input);
   let lastEnd = 0;
   let start = -1;
   const quotations: QuotationState = {
@@ -2216,6 +2217,7 @@ function sentenceChunks(
           questionTerminal,
           hasUrlPrefix,
           pairs,
+          hasFollowingAt,
         );
     if (
       end === -1 ||
@@ -2400,6 +2402,7 @@ function sentenceEnd(
   questionTerminal: (start: number) => boolean,
   hasUrlPrefix: (end: number) => boolean,
   pairs: Int32Array,
+  hasFollowingAt: (next: number) => boolean,
 ): number {
   const insideQuotes = closingQuotes.length > 0;
   const end = closingDelimiterEnd(input, index, closingQuotes, pairs, brackets);
@@ -2424,6 +2427,7 @@ function sentenceEnd(
       end,
       caseNeutral,
       hasUrlPrefix(end),
+      hasFollowingAt,
       endsDelimitedSentence,
       closingQuotes,
       pairs,
@@ -2738,6 +2742,7 @@ function questionTerminalChecker(
 ): (start: number) => boolean {
   const nextTerminal = unquotedTerminalScanner(input, pairs, caseNeutral);
   const hasUrlPrefix = urlPrefixChecker(input);
+  const hasFollowingAt = followingAtChecker(input);
   const ellipsisCursor = { index: 0 };
   let through = -1;
   let question = false;
@@ -2771,6 +2776,7 @@ function questionTerminalChecker(
             terminal.index + 1,
             caseNeutral,
             insideUrl,
+            hasFollowingAt,
           ))
       ) {
         terminal = nextTerminal(terminal.index + terminal[0].length, argumentStart);
@@ -2890,6 +2896,25 @@ function urlPrefixChecker(input: string): (end: number) => boolean {
   };
 }
 
+/** Cache the last @ in each whitespace-delimited token for one monotone consumer. */
+function followingAtChecker(input: string): (next: number) => boolean {
+  let end = 0;
+  let lastAt = -1;
+  return (next) => {
+    if (next >= end) {
+      end = next;
+      lastAt = -1;
+      while (end < input.length && !/\s/.test(input[end])) {
+        if (input[end] === '@') {
+          lastAt = end;
+        }
+        end++;
+      }
+    }
+    return lastAt >= next;
+  };
+}
+
 function precedingIdentifierToken(input: string, index: number): string {
   let tokenStart = index;
   while (tokenStart > 0) {
@@ -2974,6 +2999,7 @@ function isUnspacedSentenceBoundary(
   next: number,
   caseNeutral: boolean,
   insideUrl: boolean,
+  hasFollowingAt: (next: number) => boolean,
   endsDelimitedSentence = false,
   closingQuotes = '',
   pairs?: Int32Array,
@@ -3025,7 +3051,7 @@ function isUnspacedSentenceBoundary(
     (trailingInitial && nextInitial.test(following)) ||
     insideAddress ||
     insideHostname ||
-    /^[^\s]*@/.test(following)
+    hasFollowingAt(next)
   );
 }
 
