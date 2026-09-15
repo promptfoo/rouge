@@ -615,9 +615,13 @@ function hasLaterAngleElisionOpening(input: string, start: number, end: number):
   }
   let next = input.indexOf(opener, start + 1);
   while (next !== -1 && next <= end) {
+    let previous = next - 1;
+    while (input[previous] === '\\') {
+      previous--;
+    }
     if (
-      !isAngleApostrophe(input, next) &&
-      (opener === '‘' || /^[\s([{<]$/.test(input[next - 1])) &&
+      angleQuoteCloser(input, next) !== undefined &&
+      (opener === '‘' || /^[\s([{<]$/.test(input[previous])) &&
       /\S/.test(input[next + 1] ?? '')
     ) {
       return true;
@@ -800,7 +804,16 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       char === '?' ||
       char === '!'
     ) {
-      const end = sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
+      const unspacedDelimitedBoundary = isUnspacedDelimitedSentenceStart(
+        input,
+        index,
+        caseNeutral,
+        insideQuotes,
+        brackets.depth,
+      );
+      const end = unspacedDelimitedBoundary
+        ? index + 1
+        : sentenceEnd(input, index, insideQuotes, brackets, caseNeutral);
       if (end === -1) {
         continue;
       }
@@ -808,7 +821,8 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       chunks.push(input.slice(lastEnd, start), input.slice(start, end).replace(/[\r\n]+/g, ' '));
       lastEnd = end;
       start = -1;
-      sentenceStarted = keepsAbbreviationContext(input, index, end, caseNeutral);
+      sentenceStarted =
+        !unspacedDelimitedBoundary && keepsAbbreviationContext(input, index, end, caseNeutral);
     }
   }
 
@@ -880,8 +894,28 @@ function isProtectedEllipsisPeriod(
   return range !== undefined && position >= range.start && position !== range.boundary;
 }
 
+/** Quoted literal marks stay consumable until their real enclosing closer. */
+function isUnmatchedAngleCloser(
+  input: string,
+  index: number,
+  quotePending: boolean,
+  brackets: BracketContext,
+): boolean {
+  return (
+    input[index] === '>' &&
+    !quotePending &&
+    index >= brackets.bracketQuoteEnd &&
+    brackets.angles?.[index] !== 1
+  );
+}
+
 /** Scan closing delimiters, including whitespace before a pending closing quote. */
-function closingDelimiterEnd(input: string, index: number, insideQuotes: boolean): number {
+function closingDelimiterEnd(
+  input: string,
+  index: number,
+  insideQuotes: boolean,
+  brackets: BracketContext,
+): number {
   let end = index + 1;
   let quotePending = insideQuotes;
   while (end < input.length) {
@@ -890,7 +924,10 @@ function closingDelimiterEnd(input: string, index: number, insideQuotes: boolean
       end += 2;
       continue;
     }
-    if (closingDelimiterReg.test(input[end])) {
+    if (
+      closingDelimiterReg.test(input[end]) &&
+      !isUnmatchedAngleCloser(input, end, quotePending, brackets)
+    ) {
       quotePending &&= input[end] !== '"';
       end++;
       continue;
@@ -904,7 +941,8 @@ function closingDelimiterEnd(input: string, index: number, insideQuotes: boolean
     if (
       next > end &&
       next < input.length &&
-      (closingBracketReg.test(input[next]) ||
+      ((closingBracketReg.test(input[next]) &&
+        !isUnmatchedAngleCloser(input, next, quotePending, brackets)) ||
         (quotePending && (input[next] === '"' || input.startsWith("''", next))))
     ) {
       end = next;
@@ -923,14 +961,7 @@ function sentenceEnd(
   brackets: BracketContext,
   caseNeutral: boolean,
 ): number {
-  if (
-    !insideQuotes &&
-    brackets.depth === 0 &&
-    isUnspacedDelimitedSentenceStart(input, index, caseNeutral)
-  ) {
-    return index + 1;
-  }
-  const end = closingDelimiterEnd(input, index, insideQuotes);
+  const end = closingDelimiterEnd(input, index, insideQuotes, brackets);
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const { closedBrackets, containsBracket, endsDelimitedSentence, endsDelimitedVersus } =
     closingDelimiterContext(input, index + 1, end, insideQuotes, suffix, brackets);
@@ -950,7 +981,12 @@ function sentenceEnd(
   if (
     closedBrackets > 0 &&
     (closedBrackets < brackets.depth ||
-      !(brackets.standalone || closesQuotation || endsDelimitedVersus))
+      !(
+        brackets.standalone ||
+        closesQuotation ||
+        endsDelimitedVersus ||
+        /^\s*$/.test(input.slice(end))
+      ))
   ) {
     return -1;
   }
@@ -1045,9 +1081,11 @@ function isUnspacedDelimitedSentenceStart(
   input: string,
   index: number,
   caseNeutral: boolean,
+  insideQuotes: boolean,
+  bracketDepth: number,
 ): boolean {
   let next = index + 1;
-  if (!/["'([{<]/.test(input[next] ?? '')) {
+  if (insideQuotes || bracketDepth > 0 || !/["'([{<]/.test(input[next] ?? '')) {
     return false;
   }
   if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {

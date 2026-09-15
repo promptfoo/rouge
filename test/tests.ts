@@ -3728,3 +3728,116 @@ describe('versus inside paired outer quotes and leading elisions', () => {
     },
   );
 });
+
+describe('escape parity in later quotation openers', () => {
+  test.each([0, 1, 2, 3, 4])(
+    'distinguishes independent ASCII and curly openers after %i backslashes',
+    (count) => {
+      const slashes = '\\'.repeat(count);
+      for (const abbreviation of ['vs.', 'v.s.']) {
+        for (const prefix of [
+          `'90s <team He said ${slashes}'No.' and "${abbreviation}"`,
+          `‘Tis < ${slashes}‘note’ and "${abbreviation}"`,
+        ]) {
+          const continuation = 'Examples followed> today.';
+          const input = `${prefix} ${continuation}`;
+          for (const caseNeutral of [false, true]) {
+            expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual(
+              count % 2 === 0 ? [input] : [prefix, continuation],
+            );
+          }
+        }
+      }
+    },
+  );
+
+  test('does not reinterpret a terminal-adjacent real closer as another opener', () => {
+    const first = "'Tis > odd.'";
+    const second = '<"v.s." Examples followed> today.';
+    const input = `${first} ${second}`;
+    expect(rouge.sentenceSegment(input)).toEqual([input]);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, second]);
+  });
+});
+
+describe('confirmed delimiter boundaries and wrapped final brackets', () => {
+  test.each(['vs.', 'v.s.', 'etc.'])(
+    'normalizes a wrapped final embedded %s clause',
+    (abbreviation) => {
+      for (const [opening, closing] of [
+        ['(', ')'],
+        ['[', ']'],
+        ['{', '}'],
+        ['<', '>'],
+      ]) {
+        for (const ending of ['', '   ', '\n']) {
+          const input = `The label is\n${opening}${abbreviation}${closing}${ending}`;
+          const expected = `The label is ${opening}${abbreviation}${closing}`;
+          for (const caseNeutral of [false, true]) {
+            expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([expected]);
+          }
+        }
+      }
+    },
+  );
+
+  test('retains the prior line-break behavior when an outer bracket stays incomplete', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('The label is\n((v.s.)', { caseNeutral })).toEqual([
+        'The label is',
+        '((v.s.)',
+      ]);
+      expect(rouge.sentenceSegment('The label is\n(v.s.) next.', { caseNeutral })).toEqual([
+        'The label is (v.s.) next.',
+      ]);
+    }
+  });
+
+  test.each(['\n', '\r\n', ' '])(
+    'keeps unmatched greater-than markers after the %j boundary',
+    (separator) => {
+      const input = `First sentence.${separator}> Quoted text.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          'First sentence.',
+          '> Quoted text.',
+        ]);
+        expect(rouge.sentenceSegment('First sentence.<Quoted text.>', { caseNeutral })).toEqual([
+          'First sentence.',
+          '<Quoted text.>',
+        ]);
+      }
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        'first sentence.',
+        '> quoted text.',
+      ]);
+    },
+  );
+
+  test.each(['vs.', 'v.s.', 'etc.', 'Jan.', 'U.S.'])(
+    'preserves confirmed unspaced delimited boundaries after %s',
+    (abbreviation) => {
+      const first = `Use ${abbreviation}`;
+      const second = '(Alice replied.)';
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(first + second, { caseNeutral })).toEqual([first, second]);
+        expect(rouge.sentenceSegment(`${first} ${second}`, { caseNeutral })).toEqual([
+          `${first} ${second}`,
+        ]);
+      }
+    },
+  );
+});
+
+test('preserves literal greater-than marks inside pending quotation spans', () => {
+  for (const first of [
+    'He said "vs.>"',
+    "He said 'v.s.>'",
+    'He noted <"v.s.>">',
+    'He said "Value.>"',
+  ]) {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+    }
+  }
+});
