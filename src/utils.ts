@@ -120,7 +120,8 @@ const sentenceSuffixLength = Math.max(10, ...GATE_SUBSTITUTIONS.map((word) => wo
 const closingDelimiterReg = /[\])}>"']/;
 const openingBracketReg = /[([{<]/;
 const closingBracketReg = /[\])}>]/;
-const listMarkerReg = /(?:^|\s)(?:(?:[•⁃]\s*)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+\S)/gu;
+const listMarkerReg =
+  /(?:^|\s)(?:(?:[•⁃]\s*|[-*+]\s+)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+\S)/gu;
 const yearListMarkerReg = /^(?:1\d{3}|20\d{2})\.$/;
 const nameWordPattern = String.raw`\p{Letter}[\p{Letter}\p{Mark}]*(?:['’\p{Pd}]\p{Letter}[\p{Letter}\p{Mark}]*)*`;
 const firstAuthorNameReg = new RegExp(
@@ -474,13 +475,18 @@ export function sentenceSegment(input: string, options: SentenceSegmentOptions =
   return acc.length === 0 ? [input] : acc;
 }
 
-interface ListScanState {
-  cursor: number;
+interface ListBracketState {
   bracketDepth: number[];
-  quote: string | undefined;
-  quoteFlags?: Uint8Array;
+  bracketStack: Uint8Array;
+  bracketStackLength: number;
   angleOpeners?: Uint8Array;
   parenthesisLabels?: Uint8Array;
+}
+
+interface ListScanState extends ListBracketState {
+  cursor: number;
+  quote: string | undefined;
+  quoteFlags?: Uint8Array;
   yearList?: boolean;
 }
 
@@ -716,10 +722,17 @@ function matchedAngleOpeners(
 function* unquotedListParentheses(
   input: string,
   quoteFlags: Uint8Array | undefined,
+  angleOpeners: Uint8Array | undefined,
 ): Generator<number> {
+  const brackets: ListBracketState = {
+    bracketDepth: [0, 0, 0, 0],
+    bracketStack: new Uint8Array(32),
+    bracketStackLength: 0,
+    angleOpeners,
+  };
   let quote: string | undefined;
   let skipThrough = -1;
-  for (const token of input.matchAll(/[()"'`“”‘’«»‹›]/g)) {
+  for (const token of input.matchAll(/[()[\]{}<>"'`“”‘’«»‹›]/g)) {
     const index = token.index;
     if (index <= skipThrough) {
       continue;
@@ -734,9 +747,15 @@ function* unquotedListParentheses(
     quote = listQuoteCloser(input, index, quoteFlags);
     if (quote !== undefined) {
       skipThrough = index + quote.length - 1;
-    } else if (/[()]/.test(token[0])) {
+      continue;
+    }
+    if (
+      /[()]/.test(token[0]) &&
+      brackets.bracketDepth[1] + brackets.bracketDepth[2] + brackets.bracketDepth[3] === 0
+    ) {
       yield index;
     }
+    trackListBrackets(input, index, brackets);
   }
 }
 
@@ -744,13 +763,14 @@ function* unquotedListParentheses(
 function parenthesisLabelFlags(
   input: string,
   quoteFlags: Uint8Array | undefined,
+  angleOpeners: Uint8Array | undefined,
 ): Uint8Array | undefined {
   const markers = input.matchAll(new RegExp(listMarkerReg));
   let marker = markers.next().value;
   let depth = 0;
   let candidate = -1;
   let flags: Uint8Array | undefined;
-  for (const index of unquotedListParentheses(input, quoteFlags)) {
+  for (const index of unquotedListParentheses(input, quoteFlags, angleOpeners)) {
     if (input[index] === '(') {
       depth++;
       candidate = -1;
@@ -776,20 +796,22 @@ function parenthesisLabelFlags(
 
 function listScanState(input: string): ListScanState {
   const quoteFlags = confirmedListQuoteFlags(input, numericQuoteFlags(input));
+  const angleOpeners = matchedAngleOpeners(input, quoteFlags);
   return {
     cursor: 0,
     bracketDepth: [0, 0, 0, 0],
+    bracketStack: new Uint8Array(32),
+    bracketStackLength: 0,
     quote: undefined,
     quoteFlags,
-    angleOpeners: matchedAngleOpeners(input, quoteFlags),
-    parenthesisLabels: parenthesisLabelFlags(input, quoteFlags),
+    angleOpeners,
+    parenthesisLabels: parenthesisLabelFlags(input, quoteFlags, angleOpeners),
   };
 }
 
 function advanceListScan(input: string, end: number, state: ListScanState): void {
   while (state.cursor < end) {
     const index = state.cursor++;
-    const character = input[index];
     if (state.quote !== undefined) {
       const apostrophe = isLiteralListQuote(input, index, state.quoteFlags);
       if (input.startsWith(state.quote, index) && !apostrophe) {
@@ -804,13 +826,35 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
       state.cursor += quote.length - 1;
       continue;
     }
-    const opening = '([{<'.indexOf(character);
-    const closing = ')]}>'.indexOf(character);
-    if (opening !== -1 && (character !== '<' || state.angleOpeners?.[index] === 1)) {
-      state.bracketDepth[opening]++;
-    } else if (closing !== -1 && !(character === ')' && state.parenthesisLabels?.[index] === 1)) {
-      state.bracketDepth[closing] = Math.max(0, state.bracketDepth[closing] - 1);
+    trackListBrackets(input, index, state);
+  }
+}
+
+/** Match the current literal's closer; crossing or unmatched closers stay literal. */
+function trackListBrackets(input: string, index: number, state: ListBracketState): void {
+  const character = input[index];
+  const opening = '([{<'.indexOf(character);
+  if (opening !== -1 && (character !== '<' || state.angleOpeners?.[index] === 1)) {
+    if (state.bracketStackLength === state.bracketStack.length) {
+      const grown = new Uint8Array(Math.max(32, state.bracketStack.length * 2));
+      grown.set(state.bracketStack);
+      state.bracketStack = grown;
     }
+    state.bracketStack[state.bracketStackLength++] = opening;
+    state.bracketDepth[opening]++;
+    return;
+  }
+  const closing = ')]}>'.indexOf(character);
+  if (
+    closing === -1 ||
+    state.bracketDepth[closing] === 0 ||
+    (character === ')' && state.parenthesisLabels?.[index] === 1)
+  ) {
+    return;
+  }
+  if (state.bracketStack[state.bracketStackLength - 1] === closing) {
+    state.bracketStackLength--;
+    state.bracketDepth[closing]--;
   }
 }
 
@@ -872,7 +916,7 @@ function nextListMarker(
       !yearInProse &&
       !countInProse &&
       (marker.index === 0 ||
-        !/\b(?:section|chapter|page|figure|table|paragraph|article|clause)$/i.test(
+        !/\b(?:section|chapter|page|figure|table|paragraph|article|clause)s?$/i.test(
           input.slice(Math.max(0, marker.index - 24), marker.index).trimEnd(),
         ))
     ) {
@@ -893,7 +937,7 @@ interface ListCandidate {
 function listMarkerFamily(marker: string, caseNeutral: boolean): RegExp {
   let start: string;
   if (/\d/.test(marker)) {
-    start = '^\\s*(?:[•⁃]\\s*)?\\d';
+    start = '^\\s*(?:[•⁃]\\s*|[-*+]\\s+)?\\d';
   } else if (caseNeutral) {
     start = '^\\s*\\p{Cased}';
   } else {
@@ -906,7 +950,7 @@ function listMarkerFamily(marker: string, caseNeutral: boolean): RegExp {
 }
 
 function numericMarkerValue(marker: string): number {
-  return Number(marker.match(/^(?:[•⁃]\s*)?(\d+)/)?.[1]);
+  return Number(marker.match(/^(?:[•⁃]\s*|[-*+]\s+)?(\d+)/)?.[1]);
 }
 
 function isDistantNumericMarker(first: number, marker: string, atBoundary: boolean): boolean {
@@ -985,7 +1029,11 @@ function findListCandidate(
         deferredByFamily.set(family.source, {
           candidate,
           expressionIndex: expression.lastIndex,
-          state: { ...state, bracketDepth: [...state.bracketDepth] },
+          state: {
+            ...state,
+            bracketDepth: [...state.bracketDepth],
+            bracketStack: state.bracketStack.slice(0, state.bracketStackLength),
+          },
         });
       }
     }
@@ -1112,7 +1160,12 @@ function nestedMarkerPeriods(input: string, caseNeutral: boolean): Uint8Array | 
   // The configured marker grammar has at most six families, independent of input size.
   for (const family of families.values()) {
     const expression = new RegExp(listMarkerReg);
-    const state = { ...context, bracketDepth: [0, 0, 0, 0] };
+    const state = {
+      ...context,
+      bracketDepth: [0, 0, 0, 0],
+      bracketStack: new Uint8Array(32),
+      bracketStackLength: 0,
+    };
     const candidate = findListCandidate(input, caseNeutral, expression, state, family);
     if (candidate === undefined) {
       continue;
@@ -1288,7 +1341,7 @@ function sentenceEnd(
     return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
   }
   if (end === index + 1) {
-    return colonIntroducedNameBoundary(input, index);
+    return colonIntroducedNameBoundary(input, index, caseNeutral);
   }
 
   const closedBrackets = countClosingBrackets(input, index + 1, end);
@@ -1331,12 +1384,18 @@ function sentenceEnd(
   return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
 }
 
-function colonIntroducedNameBoundary(input: string, index: number): number {
+function colonIntroducedNameBoundary(input: string, index: number, caseNeutral: boolean): number {
   if (input[index] !== '.') {
     return index + 1;
   }
-  const before = input.slice(Math.max(0, index - 96), index + 1);
-  const after = input.slice(index + 1, index + 96);
+  let before = input.slice(Math.max(0, index - 96), index + 1);
+  let after = input.slice(index + 1, index + 96);
+  if (caseNeutral) {
+    // Lowercasing can expand a code point (İ → i + combining dot). Apply the
+    // same bounded window to that text so the lowercased input has equal context.
+    before = before.toLowerCase().slice(-97);
+    after = after.toLowerCase().slice(0, 95);
+  }
   const firstInitial = /:\s+\p{Cased}\p{M}*\.$/iu.test(before) && firstAuthorNameReg.test(after);
   const laterInitial = laterAuthorInitialReg.test(before);
   const joinsName =

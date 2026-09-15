@@ -960,6 +960,109 @@ describe('Utility Functions', () => {
       }
     });
 
+    test.each(['section', 'chapter', 'page', 'figure', 'table', 'paragraph', 'article', 'clause'])(
+      'retains singular and plural cross-references to %s in prose',
+      (entity) => {
+        for (const suffix of ['', 's']) {
+          const input = `See ${entity}${suffix} 1) Introduction and 2) Scope for details.`;
+          const reversed = `See ${entity}${suffix} 2) Scope and 1) Introduction for details.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(rouge.l(input, reversed)).toBeLessThan(1);
+        }
+      },
+    );
+
+    test.each(['-', '*', '+'])('retains Markdown prefixes on numbered items: %s', (bullet) => {
+      for (const ending of [')', '.', '.)']) {
+        const first = `${bullet} 1${ending} Alpha`;
+        const second = `${bullet} 2${ending} Beta`;
+        expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\r\n${second}`)).toEqual([first, second]);
+      }
+      expect(ss(`${bullet} 1) First ${bullet} 42) Last`)).toEqual([
+        `${bullet} 1) First`,
+        `${bullet} 42) Last`,
+      ]);
+    });
+
+    test.each([
+      ['<', '>'],
+      ['[', ']'],
+      ['{', '}'],
+    ])('keeps parenthesis labels owned by their containing literal: %s', (open, close) => {
+      const prefix = `${open}(section a) detail${close} Options:`;
+      const expected = [prefix, 'b) Beta', 'c) Gamma foo)'];
+      expect(ss(`${prefix} b) Beta c) Gamma foo)`)).toEqual(expected);
+      expect(segmentCaseNeutrally(`${prefix} b) Beta c) Gamma foo)`)).toEqual(expected);
+      const unmatched = `${open}(literal detail${close} Options: b) Beta c) Gamma`;
+      expect(ss(unmatched)).toEqual([unmatched]);
+      expect(segmentCaseNeutrally(unmatched)).toEqual([unmatched]);
+    });
+
+    test.each([
+      [
+        '<(literal ] detail> Options: b) Beta c) Gamma',
+        ['<(literal ] detail> Options: b) Beta c) Gamma'],
+      ],
+      [
+        '[literal } detail] Options: b) Beta c) Gamma',
+        ['[literal } detail] Options:', 'b) Beta', 'c) Gamma'],
+      ],
+      [
+        '<(section a) "literal > )" detail> Options: b) Beta c) Gamma foo)',
+        ['<(section a) "literal > )" detail> Options:', 'b) Beta', 'c) Gamma foo)'],
+      ],
+    ])('preserves unmatched closer and quoted-literal controls: %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      '( [ ) Options: a) Alpha b) Beta foo)',
+      '( [ ) ] Options: a) Alpha b) Beta foo)',
+      '( [ literal ] ) Options: a) Alpha b) Beta foo)',
+    ])('keeps malformed delimiter ownership consistent between list scans: %s', (input) => {
+      const wellFormed = input.includes('literal');
+      const expected = wellFormed
+        ? ['( [ literal ] ) Options:', 'a) Alpha', 'b) Beta foo)']
+        : [input];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('retains the documented bounded author-initial context', () => {
+      const surname = 'Surname'.repeat(20);
+      const input = `Authors: A. ${surname} and B. Jones.`;
+      expect(ss(input)).toEqual([`Authors: A. ${surname} and B.`, 'Jones.']);
+      expect(segmentCaseNeutrally(input)).toEqual(['Authors: A.', `${surname} and B.`, 'Jones.']);
+      const ordinary = 'Authors: A. Smith and B. Jones.';
+      expect(ss(ordinary)).toEqual([ordinary]);
+      expect(segmentCaseNeutrally(ordinary)).toEqual([ordinary]);
+    });
+
+    test.each([30, 40, 41, 42, 60, 90])(
+      'applies the bounded author context after JS lowercasing: %d',
+      (length) => {
+        const input = `Authors: A. ${'İ'.repeat(length)}name and B. Jones.`;
+        const lower = input.toLowerCase();
+        expect(segmentCaseNeutrally(input).map((part) => part.toLowerCase())).toEqual(
+          segmentCaseNeutrally(lower),
+        );
+        expect(rouge.l(input, lower, { caseSensitive: false })).toBe(1);
+      },
+    );
+
+    test('keeps list bracket ownership linear through deep mixed literals', () => {
+      const prefix = `${'[{<('.repeat(8000)}literal${')>}]'.repeat(8000)} Options:`;
+      expect(ss(`${prefix} a) First b) Last.`)).toEqual([prefix, 'a) First', 'b) Last.']);
+      expect(segmentCaseNeutrally(`${prefix} a) First b) Last.`)).toEqual([
+        prefix,
+        'a) First',
+        'b) Last.',
+      ]);
+    }, 5000);
+
     test('classifies repeated paired n elisions with bounded local context', () => {
       const input = `He said ‘${'rock ’n’ roll '.repeat(20_000)}has a) Alpha and b) Beta.’`;
       expect(ss(input)).toEqual([input]);
