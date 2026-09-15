@@ -4031,3 +4031,44 @@ describe('Standalone versus pronoun continuations', () => {
     },
   );
 });
+
+describe('Paired single-backtick literals inside versus brackets', () => {
+  test.each([
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+  ])('keeps literal %s%s marks inside the surrounding enclosure', (opening, closing) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      for (const literal of [opening, closing]) {
+        const input = `He noted ${opening}\`literal ${literal}\` and "${versus}" Examples followed${closing} today.`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        }
+      }
+    }
+  });
+
+  test('releases a completed surrounding bracket after a paired literal', () => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const first = `He noted (\`literal )\` and "${versus}")`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`${first} Examples followed.`, { caseNeutral })).toEqual([
+          first,
+          'Examples followed.',
+        ]);
+      }
+    }
+  });
+
+  test('keeps unmatched single backticks under the existing delimiter rules', () => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const first = `He noted (\`literal ) and "${versus}"`;
+      for (const caseNeutral of [false, true]) {
+        expect(
+          rouge.sentenceSegment(`${first} Examples followed) today.`, { caseNeutral }),
+        ).toEqual([first, 'Examples followed) today.']);
+      }
+    }
+  });
+});

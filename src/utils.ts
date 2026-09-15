@@ -733,12 +733,7 @@ function pairedBracketQuoteEnd(
   currentEnd: number,
   positions: Record<string, number>,
 ): number {
-  if (
-    index <= currentEnd ||
-    !/["'`‘“«]/.test(input[index]) ||
-    (input[index] === '`' && !input.startsWith('``', index)) ||
-    input[index - 1] === "'"
-  ) {
+  if (index <= currentEnd || !/["'`‘“«]/.test(input[index]) || input[index - 1] === "'") {
     return currentEnd;
   }
   const closer = angleQuoteCloser(input, index);
