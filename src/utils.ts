@@ -121,7 +121,7 @@ const closingDelimiterReg = /[\])}>"']/;
 const openingBracketReg = /[([{<]/;
 const closingBracketReg = /[\])}>]/;
 const listMarkerReg =
-  /(?:^|\s)(?:(?:[•⁃]\s*|[-*+]\s+)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+\S)/gu;
+  /(?:^|\s)(?:(?:[•⁃][^\S\r\n]*|[-*+][^\S\r\n]+)?\d+|\p{Cased}\p{M}*)(?:\.\)|[.)])(?=\s+\S)/gu;
 const yearListMarkerReg = /^(?:1\d{3}|20\d{2})\.$/;
 const nameWordPattern = String.raw`\p{Letter}[\p{Letter}\p{Mark}]*(?:['’\p{Pd}]\p{Letter}[\p{Letter}\p{Mark}]*)*`;
 const firstAuthorNameReg = new RegExp(
@@ -973,6 +973,32 @@ function nextListMarker(
   return null;
 }
 
+/** Scan disjoint reference gaps; abbreviation and decimal periods do not end their context. */
+function hasListReferenceBoundary(
+  input: string,
+  start: number,
+  end: number,
+  caseNeutral: boolean,
+): boolean {
+  for (const terminal of input.slice(start, end).matchAll(/[.!?:;\r\n]/g)) {
+    const index = start + terminal.index;
+    if (terminal[0] !== '.') {
+      return true;
+    }
+    const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+    const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+    if (
+      (abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix)) ||
+      acronymReg.test(gateSuffix) ||
+      (/\d/.test(input[index - 1] ?? '') && /\d/.test(input[index + 1] ?? ''))
+    ) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 /** Reference labels continue through one prose run; strong punctuation starts a new context. */
 function isListCrossReference(
   input: string,
@@ -982,7 +1008,7 @@ function isListCrossReference(
 ): boolean {
   if (
     state.referenceThrough !== undefined &&
-    /[.!?:;\r\n]/.test(input.slice(state.referenceThrough, marker.index))
+    hasListReferenceBoundary(input, state.referenceThrough, marker.index, state.caseNeutral)
   ) {
     state.referenceThrough = undefined;
   }
@@ -1012,7 +1038,7 @@ interface ListCandidate {
 function listMarkerFamily(marker: string, caseNeutral: boolean): RegExp {
   let start: string;
   if (/\d/.test(marker)) {
-    start = '^\\s*(?:[•⁃]\\s*|[-*+]\\s+)?\\d';
+    start = '^\\s*(?:[•⁃][^\\S\\r\\n]*|[-*+][^\\S\\r\\n]+)?\\d';
   } else if (caseNeutral) {
     start = '^\\s*\\p{Cased}';
   } else {
@@ -1025,7 +1051,7 @@ function listMarkerFamily(marker: string, caseNeutral: boolean): RegExp {
 }
 
 function numericMarkerValue(marker: string): string | undefined {
-  return marker.match(/^(?:[•⁃]\s*|[-*+]\s+)?(\d+)/)?.[1].replace(/^0+(?=\d)/, '');
+  return marker.match(/^(?:[•⁃][^\S\r\n]*|[-*+][^\S\r\n]+)?(\d+)/)?.[1].replace(/^0+(?=\d)/, '');
 }
 
 function isDistantNumericMarker(

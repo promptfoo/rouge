@@ -4163,3 +4163,72 @@ test.each(['"literal > sign"', "'literal > sign'", "'99 > sign'"])(
     }
   },
 );
+
+describe('Numeric bullet prefixes stay on their marker line', () => {
+  test.each(['-', '*', '+', '•', '⁃'])(
+    'keeps %s before a line break in the introduction',
+    (bullet) => {
+      for (const gap of ['\n', '\r\n']) {
+        const input = `Heading ${bullet}${gap}1) Alpha\n2) Beta`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+            `Heading ${bullet}`,
+            '1) Alpha',
+            '2) Beta',
+          ]);
+        }
+      }
+    },
+  );
+
+  test.each(['-', '*', '+', '•', '⁃'])(
+    'keeps a horizontal %s prefix with its numeric marker',
+    (bullet) => {
+      const input = `Heading ${bullet}\t1) Alpha\n2) Beta`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          'Heading',
+          `${bullet}\t1) Alpha`,
+          '2) Beta',
+        ]);
+      }
+    },
+  );
+});
+
+describe('Reference labels retain abbreviation and decimal context', () => {
+  test.each(['Intro e.g. setup', 'Intro i.e. setup', 'Dr. Smith', 'Setup 1.5'])(
+    'retains the prose reference through %s',
+    (title) => {
+      const input = `See sections 1) ${title}, 2) Scope, and 3) Details.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        input.toLowerCase(),
+      ]);
+    },
+  );
+
+  test.each(['.', ';', ':', '!', '?'])(
+    'ends reference context at a genuine %s boundary',
+    (terminal) => {
+      const input = `See sections 1) Intro${terminal} Options: 2) Scope 3) Details.`;
+      for (const caseNeutral of [false, true]) {
+        const sentences = rouge.sentenceSegment(input, { caseNeutral });
+        expect(sentences.slice(-2)).toEqual(['2) Scope', '3) Details.']);
+      }
+    },
+  );
+
+  test('reference order remains significant across abbreviation-bearing titles', () => {
+    const first = 'See sections 1) Intro e.g. setup, 2) Scope, and 3) Details.';
+    const reordered = 'See sections 3) Details, 2) Scope, and 1) Intro e.g. setup.';
+    expect(rouge.l(first, reordered)).toBeLessThan(1);
+  });
+
+  test('scans repeated abbreviation-bearing reference gaps once', () => {
+    const input = `See sections 1) Intro e.g. setup${', 2) More e.g. setup'.repeat(8000)}.`;
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
+  }, 5000);
+});
