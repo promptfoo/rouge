@@ -4037,6 +4037,136 @@ describe('Core Functions', () => {
       expect(l(candidate, reference, { tokenizer: () => [] })).toBe(0);
     });
 
+    describe('custom LCS token copying', () => {
+      const segmenter = (input: string): string[] => input.split('|');
+      const summary = new Array(250).fill(new Array(8).fill('x').join(' ')).join('|');
+
+      test.each(['lcs', 'lcsIndices'] as const)(
+        'accepts exactly one million copied token slots for %s',
+        (mode) => {
+          const sentence = new Array(20).fill('x').join(' ');
+          const candidate = new Array(100).fill(sentence).join('|');
+          const reference = new Array(250).fill(sentence).join('|');
+          let calls = 0;
+          const callback = (): [] => {
+            calls++;
+            return [];
+          };
+          const options = mode === 'lcs' ? { lcs: callback } : { lcsIndices: callback };
+          expect(l(candidate, reference, { segmenter, ...options })).toBe(0);
+          expect(calls).toBe(25_000);
+        },
+      );
+
+      test.each(['lcs', 'lcsIndices'] as const)(
+        'rejects the combined %s copying cost when either side grows',
+        (mode) => {
+          const callback = jest.fn((): [] => []);
+          const options = mode === 'lcs' ? { lcs: callback } : { lcsIndices: callback };
+          for (const [candidate, reference] of [
+            [`${summary} x`, summary],
+            [summary, `${summary} x`],
+          ]) {
+            expect(() => l(candidate, reference, { segmenter, ...options })).toThrow(
+              /custom LCS token copying exceeds the work limit/,
+            );
+          }
+          expect(callback).not.toHaveBeenCalled();
+        },
+      );
+
+      test.each(['lcs', 'lcsIndices'] as const)(
+        'rejects amplified %s copying before invoking the callback',
+        (mode) => {
+          expectBundledScriptToPass(
+            `
+              const candidate = new Array(100000).fill('x').join(' ');
+              const reference = new Array(30000).fill('x!').join(' ');
+              let calls = 0;
+              let failure;
+              try {
+                module.exports.l(candidate, reference, {
+                  ${mode}: () => { calls++; return []; },
+                });
+              } catch (error) {
+                failure = error;
+              }
+              if (!(failure instanceof RangeError) ||
+                  !/custom LCS token copying exceeds the work limit/.test(failure.message) ||
+                  calls !== 0) {
+                throw new Error('Amplified token copying was not rejected before callbacks');
+              }
+              process.stdout.write('ok');
+            `,
+            5000,
+          );
+        },
+        10_000,
+      );
+
+      test.each(['lcs', 'lcsIndices'] as const)(
+        'returns for empty token summaries before the %s copy budget',
+        (mode) => {
+          const callback = jest.fn((): [] => []);
+          const options = mode === 'lcs' ? { lcs: callback } : { lcsIndices: callback };
+          const split = (input: string): string[] =>
+            input === 'empty' ? new Array(1001).fill('') : ['tokens'];
+          const tokenizer = (input: string): string[] =>
+            input === 'tokens' ? new Array(1000).fill('x') : [];
+          for (const [candidate, reference] of [
+            ['empty', 'nonempty'],
+            ['nonempty', 'empty'],
+          ]) {
+            expect(l(candidate, reference, { segmenter: split, tokenizer, ...options })).toBe(0);
+          }
+          expect(callback).not.toHaveBeenCalled();
+        },
+      );
+
+      test('does not apply the copy budget to the built-in LCS with a custom segmenter', () => {
+        expect(l(summary, `${summary} x`, { segmenter, lcs: rouge.lcs })).toBeCloseTo(4000 / 4001);
+      });
+
+      test.each(['lcs', 'lcsIndices'] as const)(
+        'preserves isolated mutable arrays and original alignment for %s',
+        (mode) => {
+          const arrays = new Set<string[]>();
+          const inputs: string[][] = [];
+          const consume = (candidate: string[], reference: string[]): string | undefined => {
+            expect(Array.isArray(candidate) && Array.isArray(reference)).toBe(true);
+            expect(arrays.has(candidate) || arrays.has(reference)).toBe(false);
+            arrays.add(candidate);
+            arrays.add(reference);
+            inputs.push([...candidate, ...reference]);
+            const common = candidate[0] === reference[0] ? candidate[0] : undefined;
+            candidate.length = 0;
+            reference.length = 0;
+            return common;
+          };
+          const options =
+            mode === 'lcs'
+              ? {
+                  lcs: (candidate: string[], reference: string[]): string[] => {
+                    const token = consume(candidate, reference);
+                    return token === undefined ? [] : [token];
+                  },
+                }
+              : {
+                  lcsIndices: (candidate: string[], reference: string[]): number[] =>
+                    consume(candidate, reference) === undefined ? [] : [0],
+                };
+          expect(l('a|b', 'a|b', { segmenter, ...options })).toBe(1);
+          expect(inputs).toEqual([
+            ['a', 'a'],
+            ['b', 'a'],
+            ['a', 'b'],
+            ['b', 'b'],
+          ]);
+          expect(arrays.size).toBe(8);
+        },
+      );
+    });
+
     test('should preserve word separation after an ellipsis for custom tokenizers', () => {
       const tokenizer = (input: string): string[] => input.split(/\s+/);
       expect(l('what?', 'Wait... what?', { tokenizer })).toBeCloseTo(2 / 3);
@@ -4298,6 +4428,38 @@ describe('Core Functions', () => {
         expect(score(mixedCase, lowerCase, { caseSensitive: false })).toBe(1);
       },
     );
+
+    test.each(['ΟΣ.Α', 'ΟΣ.Α Β', 'ΟΣ.\u0301Α', 'İΟΣ.Α', 'ΟΣ.Α\nNext sentence.', 'ΟΣ. Α', 'ΟΣ\nΑ'])(
+      'preserves whole-summary case context across segmentation: %s',
+      (input) => {
+        for (const score of [n, s, l]) {
+          expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(
+            score(input, input, { caseSensitive: false }),
+          );
+        }
+      },
+    );
+
+    test('preserves whole-summary sigma casing next to a mark-only initial', () => {
+      const input = 'fooΣ.\u0345.B next.';
+      for (const score of [n, s, l]) {
+        expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      }
+    });
+
+    test('protects prepared sentences from a custom LCS consuming its arguments', () => {
+      expect(
+        l('alpha|beta', 'alpha|beta', {
+          segmenter: (input) => input.split('|'),
+          lcs: (candidate, reference) => {
+            const common = candidate.filter((token) => reference.includes(token));
+            candidate.length = 0;
+            reference.length = 0;
+            return common;
+          },
+        }),
+      ).toBe(1);
+    });
 
     test.each([
       ['ROUGE-N', n],
