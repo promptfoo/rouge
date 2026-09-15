@@ -2227,6 +2227,44 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['.?', '!?', '?..!', '...?!'])(
+      'protects the URL punctuation run %s inside a wrapped question',
+      (run) => {
+        const first = 'She asked “Acme Co.';
+        const second = `Which https://example.com/path${run}query was it?”`;
+        expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+        const relative = `She described “Acme Co.\nwhose path is https://example.com/path${run}query today.”`;
+        expect(ss(relative)).toEqual([relative.replaceAll('\n', ' ')]);
+        expect(segmentCaseNeutrally(relative)).toEqual([relative.replaceAll('\n', ' ')]);
+      },
+    );
+
+    test('scans one long URL punctuation run without repeated suffix lookahead', () => {
+      const first = 'She asked “Acme Co.';
+      const second = `Which https://example.com/path${'.?!'.repeat(20_000)}query was it?”`;
+      expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+    }, 5000);
+
+    test.each(['Which one?', 'Whose example.com?', 'What happened?'])(
+      'normalizes a Treebank opener before the wrapped starter %s',
+      (question) => {
+        const first = 'Use etc.';
+        const second = `\`\`${question}''`;
+        expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      },
+    );
+
     test('retains an actual question after a long punctuated URL', () => {
       const first = 'She asked “Acme Co.';
       const second = `Which https://example.com/${'path!query?'.repeat(20_000)}end was it?”`;
@@ -2332,6 +2370,52 @@ describe('Utility Functions', () => {
         ]);
       },
     );
+
+    test.each(['²', '2', '𝟚', 'ᵃ', '2ᵃ', '\u{107a5}'])(
+      'recognizes a nested question with citation %s at the enclosing scope end',
+      (citation) => {
+        for (const [outerOpen, outerClose, innerOpen, innerClose] of [
+          ['“', '”', '‘', '’'],
+          ['‘', '’', '"', '"'],
+          ['“', '”', "'", "'"],
+          ['“', '”', '``', "''"],
+        ]) {
+          const first = `She said ${outerOpen}Use etc.`;
+          const second = `Which answer was ${innerOpen}What?${innerClose}${citation}${outerClose}`;
+          const input = `${first}\n${second}`;
+          expect(ss(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+          ]);
+        }
+      },
+    );
+
+    test.each(['² and left.', '² while waiting.'])(
+      'does not treat an inner question with continuation %s as ending its scope',
+      (tail) => {
+        const input = `She said “Use etc.\nWhich answer was ‘What?’${tail}”`;
+        const expected = [input.replaceAll('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test('preserves a later outer question after a cited inner question', () => {
+      const first = 'She said “Use etc.';
+      const second = 'Which answer was ‘What?’² and why?”';
+      expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+    });
+
+    test('scans a long attached citation when locating a scoped question', () => {
+      const first = 'She said “Use etc.';
+      const second = `Which answer was ‘What?’${'²'.repeat(20_000)}”`;
+      expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+    }, 5000);
 
     test.each(['', ' Next.'])('retains a final quoted question before tail %s', (tail) => {
       const sentences = ['He joined “Acme Co.”', '(It closed.)', 'Which “what?”'];

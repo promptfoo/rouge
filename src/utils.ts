@@ -475,7 +475,7 @@ function quotedQuestionAtScopeEnd(
   if (input[terminal] !== '?') {
     return -1;
   }
-  let next = end;
+  let next = quotationCitationTailEnd(input, end);
   while (next < scopeEnd && /[\s"'”’\])}>]/.test(input[next])) {
     next++;
   }
@@ -529,12 +529,11 @@ function questionQuotationPairs(source: QuestionSource, caseNeutral: boolean): I
   }
   const ellipses = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
-  const hasUrlPrefix = urlPrefixChecker(input);
+  const isUrlTerminal = urlTerminalChecker(input);
   for (const terminal of input.matchAll(/[.!?]/g)) {
     const index = terminal.index;
-    const insideUrl = hasUrlPrefix(index);
     if (
-      (insideUrl && /^[^\s.!?"'“”‘’()[\]{}<>]/.test(input.slice(index + 1, index + 3))) ||
+      isUrlTerminal(index) ||
       (terminal[0] === '.' &&
         (isProtectedEllipsisPeriod(index, ellipses, ellipsisCursor) ||
           isProtectedQuestionPeriod(input, index)))
@@ -558,6 +557,26 @@ function urlPrefixChecker(input: string): (index: number) => boolean {
       next = markers.next();
     }
     return hasPrefix;
+  };
+}
+
+/** Cache each punctuation run's end so URL lookahead never rescans that run. */
+function urlTerminalChecker(input: string): (index: number) => boolean {
+  const hasUrlPrefix = urlPrefixChecker(input);
+  let through = -1;
+  let continues = false;
+  return (index) => {
+    if (!hasUrlPrefix(index)) {
+      return false;
+    }
+    if (index >= through) {
+      through = index + 1;
+      while (/[.!?]/.test(input[through] ?? '')) {
+        through++;
+      }
+      continues = /^[^\s.!?"'“”‘’()[\]{}<>]/.test(characterAt(input, through));
+    }
+    return continues;
   };
 }
 
@@ -813,7 +832,7 @@ export function sentenceSegment(
 
       if (chunk.hasLineBreaks) {
         const nextChunk = chunks[idx + 1];
-        const nextSentence = nextChunk?.replace(/^[\s"'“‘’([{<]+/, '');
+        const nextSentence = nextChunk?.slice(questionContentStart(nextChunk, 0));
         const abbreviation = gateSuffix.trimEnd();
         const insideSmartQuotes = quoteSource.double || quoteSource.single;
         const independentSentence = isIndependentSentence(
@@ -1245,6 +1264,18 @@ function sentenceEnd(
   return sentenceEndAfterDelimiter(input, end, gateSuffix, closedBrackets, caseNeutral);
 }
 
+/** Consume the directly attached numeric run and optional supported modifier marker. */
+function quotationCitationTailEnd(input: string, start: number): number {
+  let end = start;
+  while (/^\p{Number}$/u.test(characterAt(input, end))) {
+    end += characterAt(input, end).length;
+  }
+  if (isAlphabeticFootnote(input, end - 1)) {
+    end += characterAt(input, end).length;
+  }
+  return end;
+}
+
 /** Attach supported citations after a consumed quotation, including enclosing brackets. */
 function quotationCitationEnd(
   input: string,
@@ -1253,22 +1284,16 @@ function quotationCitationEnd(
   quotes: QuoteState,
   straightSingle: boolean,
 ): number {
-  let end = delimiterEnd;
-  const delimiters = input.slice(index + 1, end);
+  const delimiters = input.slice(index + 1, delimiterEnd);
   if (
     !(
       /(?:["”’]|'')[\s)\]}>]*$/.test(delimiters) ||
       (straightSingle && /^'[\s)\]}>]*$/.test(delimiters))
     )
   ) {
-    return end;
+    return delimiterEnd;
   }
-  while (/^\p{Number}$/u.test(characterAt(input, end))) {
-    end += characterAt(input, end).length;
-  }
-  if (isAlphabeticFootnote(input, end - 1)) {
-    end += characterAt(input, end).length;
-  }
+  const end = quotationCitationTailEnd(input, delimiterEnd);
   if (end === delimiterEnd) {
     return end;
   }
