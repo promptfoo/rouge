@@ -733,6 +733,69 @@ function isUnspacedDelimitedSentenceStart(
   );
 }
 
+function caseNeutralIdentifierContext(input: string, index: number): boolean {
+  let tokenStart = index;
+  while (tokenStart > 0) {
+    const previousUnit = input.charCodeAt(tokenStart - 1);
+    const width = previousUnit >= 0xdc_00 && previousUnit <= 0xdf_ff ? 2 : 1;
+    const character = input.slice(tokenStart - width, tokenStart);
+    if (!/^[\p{Letter}\p{Mark}\p{Number}_-]$/u.test(character)) {
+      break;
+    }
+    tokenStart -= width;
+  }
+  const token = input.slice(tokenStart, index);
+  if (!/\p{Cased}/u.test(token)) {
+    return false;
+  }
+  return (
+    hasStableAsciiIdentifierEvidence(input, tokenStart, index) ||
+    (/\p{Script=Latin}/u.test(token) && /(?:\p{Script=Greek}|(?=\p{Mark})\p{Cased})/u.test(token))
+  );
+}
+
+function isDottedIdentifierContinuation(input: string): boolean {
+  let cursor = 0;
+  for (let atoms = 0; atoms < 2; atoms++) {
+    const base = characterAt(input, cursor);
+    if (!/^[\p{Cased}\p{Number}_-]$/u.test(base)) {
+      return false;
+    }
+    cursor += base.length;
+    let next = characterAt(input, cursor);
+    if (base === 'İ' || next === '\u0307') {
+      // A marked atom accepts the entire mark run; splitting it into another atom
+      // cannot extend that run and needlessly introduces backtracking.
+      while (/^\p{Mark}$/u.test(next)) {
+        cursor += next.length;
+        next = characterAt(input, cursor);
+      }
+    }
+    if (next === '' || /^[\s/.]$/u.test(next)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasStableAsciiIdentifierEvidence(input: string, start: number, end: number): boolean {
+  for (let cursor = start; cursor < end; cursor++) {
+    const code = input.charCodeAt(cursor);
+    if ((code >= 48 && code <= 57) || code === 95) {
+      return true;
+    }
+    const lowerCode = code === 0x21_2a ? 107 : code | 32;
+    if (lowerCode < 97 || lowerCode > 122) {
+      continue;
+    }
+    if (/^\p{Mark}$/u.test(characterAt(input, cursor + 1))) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 function isUnspacedSentenceBoundary(
   input: string,
   index: number,
@@ -753,6 +816,7 @@ function isUnspacedSentenceBoundary(
   }
 
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const identifier = caseNeutral && caseNeutralIdentifierContext(input, index);
   const following = input.slice(next);
   const insideAddress =
     precedingToken.includes('@') && !/@[^\s.]+(?:\.[^\s.]+)+\.$/u.test(precedingToken);
@@ -766,26 +830,29 @@ function isUnspacedSentenceBoundary(
         hostnameLabel === hostnameLabel.toLowerCase() ||
         hostnameLabel === hostnameLabel.toUpperCase()));
   const dottedIdentifier = caseNeutral
-    ? /\b\p{Cased}[\p{Letter}\p{Number}_-]*\.$/u.test(suffix) &&
-      /^[\p{Cased}\p{Number}_-]{1,2}(?=\s|[/.]|$)/u.test(following)
+    ? identifier && isDottedIdentifierContinuation(following)
     : /\b\p{Lu}[\p{Letter}\p{Number}_-]*\.$/u.test(suffix) &&
       /^[\p{Lu}\p{Number}_-]+(?=\s|[/.]|$)/u.test(following);
-  const initial = caseNeutral ? /^\p{Cased}\./u : /^\p{Lu}\./u;
-  const trailingInitial = caseNeutral ? /\b\p{Cased}\.$/u : /\b\p{Lu}\.$/u;
-  const nextInitial = caseNeutral ? /^\p{Cased}(?=\s|$)/u : /^\p{Lu}(?=\s|$)/u;
+  const initial = caseNeutral ? /^\p{Cased}\p{M}*\./u : /^\p{Lu}\./u;
+  const trailingInitial = caseNeutral
+    ? /(?:^|[^\p{Letter}\p{Mark}\p{Number}_-])\p{Cased}\p{M}*\.$/u
+    : /\b\p{Lu}\.$/u;
+  const nextInitial = caseNeutral
+    ? /^(?![ai](?:\s|$))\p{Cased}\p{M}*(?=\s|$)/iu
+    : /^\p{Lu}(?=\s|$)/u;
   const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  const contextChangingGreekInitial = /^[Σσς]\p{M}+\.\p{Case_Ignorable}*\p{Cased}/u.test(following);
   const continuesAbbreviation =
     abbrvReg.test(gateSuffix) &&
     (excepReg.test(gateSuffix) ||
       (geographicAcronymReg.test(gateSuffix) && geographicContinuationReg.test(following)));
   return !(
     continuesAbbreviation ||
-    initial.test(following) ||
+    ((initial.test(following) || dottedIdentifier) && !contextChangingGreekInitial) ||
     (trailingInitial.test(suffix) && nextInitial.test(following)) ||
     /^[^\s]*@/.test(following) ||
     insideAddress ||
-    insideHostname ||
-    dottedIdentifier
+    insideHostname
   );
 }
 
