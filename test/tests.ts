@@ -3697,3 +3697,34 @@ describe('versus quote context and cached escape validation', () => {
     );
   }, 10_000);
 });
+
+describe('versus inside paired outer quotes and leading elisions', () => {
+  test.each(['vs.', 'v.s.'])(
+    'keeps inner double-quoted labels inside a pending outer single quotation: %s',
+    (abbreviation) => {
+      const input = `He noted 'He wrote "${abbreviation}" Examples followed' today.`;
+      const completed = `He noted 'He wrote "${abbreviation}"'`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        expect(rouge.sentenceSegment(`${completed} Examples followed.`, { caseNeutral })).toEqual([
+          completed,
+          'Examples followed.',
+        ]);
+      }
+    },
+  );
+
+  test.each(['Cause', 'em', 'til', 'till'])(
+    'keeps leading %s elisions from borrowing a later independent quote',
+    (elision) => {
+      for (const abbreviation of ['vs.', 'v.s.']) {
+        const input = `'${elision} a note: <"${abbreviation}" Examples followed> He said 'No.'`;
+        const paired = `'${elision} > odd' <"${abbreviation}" Examples followed> today.`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+          expect(rouge.sentenceSegment(paired, { caseNeutral })).toEqual([paired]);
+        }
+      }
+    },
+  );
+});

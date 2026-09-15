@@ -606,7 +606,7 @@ function hasLaterAngleElisionOpening(input: string, start: number, end: number):
   if (
     !(
       /['‘]/.test(opener) &&
-      /^(?:t(?:is|was)(?![\p{ID_Continue}\u200c\u200d])|\p{Number})/iu.test(
+      /^(?:(?:t(?:is|was)|em|cause|till?)(?![\p{ID_Continue}\u200c\u200d])|\p{Number})/iu.test(
         input.slice(start + 1, start + 16),
       )
     )
@@ -1027,7 +1027,9 @@ function closingDelimiterContext(
       closedBrackets += Number(!quotePending && index >= brackets.bracketQuoteEnd);
     }
     closesQuote ||=
-      !quotePending && (input[index] === "'" || (insideQuotes && input[index] === '"'));
+      !quotePending &&
+      index >= brackets.bracketQuoteEnd &&
+      (input[index] === "'" || (insideQuotes && input[index] === '"'));
   }
   const endsDelimitedSentence =
     closesQuote || (brackets.standalone && closedBrackets > 0 && closedBrackets >= brackets.depth);
