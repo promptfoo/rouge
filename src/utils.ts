@@ -221,7 +221,7 @@ function markCurlyApostrophes(input: string, apostrophes: Uint8Array): void {
       const leadingElision =
         !openingIsElision &&
         (opening !== undefined || candidateStart !== undefined) &&
-        /^‘(?:(?:t(?:is|was)|em)\b|\p{Number})/iu.test(input.slice(index, index + 6));
+        (isLeadingElision(input, index) || /^\p{Number}$/u.test(following));
       if (!(wordInternal || leadingElision)) {
         opening = index;
         candidateStart = undefined;

@@ -1824,6 +1824,52 @@ describe('Utility Functions', () => {
       );
     }, 5000);
 
+    test.each([
+      'Til tomorrow',
+      'twere wise',
+      'twill pass',
+      'twould help',
+      'round the corner',
+      'cause it matters',
+      'cos it matters',
+      'bout time',
+      'neath the bridge',
+      'fore dawn',
+      'tween the trees',
+      'gainst the wall',
+      'cept the last',
+      'twenties music',
+    ])('retains every established inner leading elision after a real terminal: %s', (phrase) => {
+      const sentence = `She said ‘Wait. ‘${phrase}.’`;
+      expect(ss(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`.toLowerCase())).toEqual([
+        sentence.toLowerCase(),
+        'next.',
+      ]);
+      expect(ss(`${sentence}Next.`)).toEqual([sentence, 'Next.']);
+    });
+
+    test('retains leading-elision recovery and its existing outer-span precedence', () => {
+      const recovered = '‘Til tomorrow. She said ‘Twas strange. Really.’ Next.';
+      const expected = ['‘Til tomorrow.', 'She said ‘Twas strange. Really.’', 'Next.'];
+      expect(ss(recovered)).toEqual(expected);
+      expect(segmentCaseNeutrally(recovered)).toEqual(expected);
+      // With a non-elision outer opener, the recognized inner elision retains that span.
+      const ambiguous = '‘Unmatched intro. She said ‘Til tomorrow. We can wait.’';
+      expect(ss(`${ambiguous} Next.`)).toEqual([ambiguous, 'Next.']);
+      expect(segmentCaseNeutrally(`${ambiguous} Next.`)).toEqual([ambiguous, 'Next.']);
+      const numeric = 'She said ‘Wait. ‘90s music.’';
+      expect(ss(`${numeric} Next.`)).toEqual([numeric, 'Next.']);
+      expect(segmentCaseNeutrally(`${numeric} Next.`)).toEqual([numeric, 'Next.']);
+    });
+
+    test('keeps repeated full-vocabulary elision classification bounded', () => {
+      const sentence = `She said ‘${'Wait. ‘Til tomorrow. '.repeat(8000)}Done.’`;
+      expect(ss(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+    }, 5000);
+
     test('recognizes astral digits before measurement apostrophes', () => {
       const input = "The answer 'Yes' worked. It was 𝟝' tall. Next.";
       const expected = ["The answer 'Yes' worked.", "It was 𝟝' tall.", 'Next.'];
