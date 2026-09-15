@@ -550,7 +550,7 @@ export interface SentenceSegmentOptions {
 interface BracketContext {
   depth: number;
   standalone: boolean;
-  singleQuoteEnd: number;
+  bracketQuoteEnd: number;
   angles?: Uint8Array;
 }
 
@@ -634,13 +634,17 @@ function angleQuotationEnd(
   closer: string,
   positions: Record<string, number>,
 ): number {
-  let index = Math.max(start + closer.length, positions[closer] ?? 0);
+  const cached = positions[closer];
+  let index = Math.max(start + closer.length, cached ?? 0);
   while (index < input.length) {
     const found = input.indexOf(closer, index);
     if (found === -1) {
       break;
     }
-    if (!(isEscapedAngleQuote(input, found) || isAngleApostrophe(input, found))) {
+    if (
+      found === cached ||
+      !(isEscapedAngleQuote(input, found) || isAngleApostrophe(input, found))
+    ) {
       positions[closer] = found;
       return hasLaterAngleElisionOpening(input, start, found) ? -1 : found + closer.length;
     }
@@ -696,7 +700,7 @@ function matchedAngleDelimiters(input: string): Uint8Array | undefined {
 }
 
 /** Reuse paired-quote recognition only for the surrounding bracket context. */
-function plainSingleQuoteEnd(
+function pairedBracketQuoteEnd(
   input: string,
   index: number,
   currentEnd: number,
@@ -704,15 +708,14 @@ function plainSingleQuoteEnd(
 ): number {
   if (
     index <= currentEnd ||
-    input[index] !== "'" ||
+    !/['‘“«]/.test(input[index]) ||
     input.startsWith("''", index) ||
     input[index - 1] === "'"
   ) {
     return currentEnd;
   }
-  return angleQuoteCloser(input, index) === "'"
-    ? angleQuotationEnd(input, index, "'", positions) - 1
-    : currentEnd;
+  const closer = angleQuoteCloser(input, index);
+  return closer === undefined ? currentEnd : angleQuotationEnd(input, index, closer, positions) - 1;
 }
 
 function followsParagraph(input: string, index: number): boolean {
@@ -757,11 +760,11 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   let start = -1;
   let sentenceStarted = false;
   let insideQuotes = false;
-  const singleQuotePositions: Record<string, number> = {};
+  const bracketQuotePositions: Record<string, number> = {};
   const brackets: BracketContext = {
     depth: 0,
     standalone: false,
-    singleQuoteEnd: -1,
+    bracketQuoteEnd: -1,
     angles: matchedAngleDelimiters(input),
   };
 
@@ -769,13 +772,13 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
     const char = input[index];
     insideQuotes = quotationState(input, index, insideQuotes);
     if (!insideQuotes) {
-      brackets.singleQuoteEnd = plainSingleQuoteEnd(
+      brackets.bracketQuoteEnd = pairedBracketQuoteEnd(
         input,
         index,
-        brackets.singleQuoteEnd,
-        singleQuotePositions,
+        brackets.bracketQuoteEnd,
+        bracketQuotePositions,
       );
-      if (index >= brackets.singleQuoteEnd) {
+      if (index >= brackets.bracketQuoteEnd) {
         updateBracketContext(input, index, !sentenceStarted, brackets);
       }
     }
@@ -1021,9 +1024,10 @@ function closingDelimiterContext(
       (input[index] !== '>' || brackets.angles?.[index] === 1)
     ) {
       containsBracket = true;
-      closedBrackets += Number(!quotePending && index >= brackets.singleQuoteEnd);
+      closedBrackets += Number(!quotePending && index >= brackets.bracketQuoteEnd);
     }
-    closesQuote ||= input[index] === "'" || (insideQuotes && input[index] === '"');
+    closesQuote ||=
+      !quotePending && (input[index] === "'" || (insideQuotes && input[index] === '"'));
   }
   const endsDelimitedSentence =
     closesQuote || (brackets.standalone && closedBrackets > 0 && closedBrackets >= brackets.depth);

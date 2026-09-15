@@ -3656,3 +3656,44 @@ describe('versus delimiters across wrapped prose', () => {
     );
   }, 10_000);
 });
+
+describe('versus quote context and cached escape validation', () => {
+  test.each(['‘literal )’', '“literal )”', '«literal )»'])(
+    'ignores brackets in the existing smart quotation forms: %s',
+    (quoted) => {
+      for (const abbreviation of ['vs.', 'v.s.']) {
+        const input = `He noted <${quoted} and "${abbreviation}" Examples followed> today.`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        }
+      }
+    },
+  );
+
+  test.each(['vs.', 'v.s.'])(
+    'keeps an inner single-quoted label inside the pending double quotation: %s',
+    (abbreviation) => {
+      const input = `He noted "He wrote '${abbreviation}' Examples followed" today.`;
+      const closed = `He noted "He wrote '${abbreviation}'"`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        expect(rouge.sentenceSegment(`${closed} Examples followed.`, { caseNeutral })).toEqual([
+          closed,
+          'Examples followed.',
+        ]);
+      }
+    },
+  );
+
+  test('reuses escape validation for a closer shared by leading elision candidates', () => {
+    expectBundledScriptToPass(
+      `
+        const input = '<' + '‘1 '.repeat(50000) + String.fromCharCode(92).repeat(100000) + '’>';
+        const actual = module.exports.sentenceSegment(input);
+        if (actual.length !== 1 || actual[0] !== input) throw new Error('Shared closer changed content');
+        process.stdout.write('ok');
+      `,
+      3000,
+    );
+  }, 10_000);
+});
