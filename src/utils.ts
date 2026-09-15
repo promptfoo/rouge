@@ -280,6 +280,7 @@ function questionStartChecker(
   let question = false;
   let protectedChunk = -1;
   let protectedPeriods: SpacedEllipsisRange[] = [];
+  let hasUrlPrefix!: (index: number) => boolean;
   const ellipsisCursor = { index: 0 };
   return (index, offset = 0) => {
     if (index < through || (index === through && offset <= throughOffset)) {
@@ -294,6 +295,7 @@ function questionStartChecker(
         );
         protectedChunk = chunkIndex;
         ellipsisCursor.index = 0;
+        hasUrlPrefix = urlPrefixChecker(chunks[chunkIndex]);
       }
       const terminals = /[.!?]/g;
       terminals.lastIndex = chunkIndex === index ? offset : 0;
@@ -301,7 +303,12 @@ function questionStartChecker(
         if (
           terminal[0] === '.' &&
           (isProtectedEllipsisPeriod(terminal.index, protectedPeriods, ellipsisCursor) ||
-            isProtectedQuestionPeriod(chunks, chunkIndex, terminal.index))
+            isProtectedQuestionPeriod(
+              chunks,
+              chunkIndex,
+              terminal.index,
+              hasUrlPrefix(terminal.index),
+            ))
         ) {
           continue;
         }
@@ -317,10 +324,25 @@ function questionStartChecker(
   };
 }
 
+/** Scan URL prefixes and whitespace once, retaining only the current token's state. */
+function urlPrefixChecker(input: string): (index: number) => boolean {
+  const markers = input.matchAll(/\s|https?:\/\/|www\./gi);
+  let next = markers.next();
+  let hasPrefix = false;
+  return (index) => {
+    while (!next.done && next.value.index + next.value[0].length - 1 <= index) {
+      hasPrefix = !/^\s/.test(next.value[0]);
+      next = markers.next();
+    }
+    return hasPrefix;
+  };
+}
+
 function isProtectedQuestionPeriod(
   chunks: readonly string[],
   chunk: number,
   index: number,
+  hasUrlPrefix: boolean,
 ): boolean {
   const text = chunks[chunk];
   const suffix = text.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
@@ -332,10 +354,7 @@ function isProtectedQuestionPeriod(
   return (
     abbrvReg.test(suffix.toLowerCase()) ||
     caseNeutralAcronymReg.test(word) ||
-    (/^[^\s.!?"'“”‘’()[\]{}<>]/.test(following) &&
-      /https?:\/\/|www\./i.test(
-        text.slice(Math.max(0, index - 320), index + 1).match(/\S+$/)?.[0] ?? '',
-      )) ||
+    (/^[^\s.!?"'“”‘’()[\]{}<>]/.test(following) && hasUrlPrefix) ||
     hostnameLabelReg.test(following) ||
     (/\p{Number}$/u.test(text.slice(Math.max(0, index - 2), index)) &&
       /^\p{Number}/u.test(following))
@@ -797,6 +816,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
   const chunks: string[] = [];
   const questionInSource = questionStartChecker([input], caseNeutral);
   const startsQuestion = (offset: number): boolean => questionInSource(0, offset);
+  const hasUrlPrefix = urlPrefixChecker(input);
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
   let lastEnd = 0;
@@ -839,6 +859,7 @@ function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8A
         caseNeutral,
         straightSingle,
         startsQuestion,
+        hasUrlPrefix(index),
       );
       if (end === -1) {
         continue;
@@ -956,6 +977,7 @@ function sentenceEnd(
   caseNeutral: boolean,
   straightSingle: boolean,
   startsQuestion: (offset: number) => boolean,
+  insideUrl: boolean,
 ): number {
   const insideQuotes = quotes.double || quotes.smartDouble || quotes.single;
   if (
@@ -996,7 +1018,7 @@ function sentenceEnd(
     !/\s/.test(input[end]) &&
     !isUnspacedDelimitedSentenceStart(input, end - 1, caseNeutral)
   ) {
-    return isUnspacedSentenceBoundary(input, index, end, caseNeutral) ? end : -1;
+    return isUnspacedSentenceBoundary(input, index, end, caseNeutral, insideUrl) ? end : -1;
   }
   if (end === index + 1) {
     return end;
@@ -1145,6 +1167,7 @@ function isUnspacedSentenceBoundary(
   index: number,
   next: number,
   caseNeutral: boolean,
+  insideUrl: boolean,
 ): boolean {
   const nextCharacter = characterAt(input, next);
   const startsWithLetter = caseNeutral
@@ -1154,7 +1177,6 @@ function isUnspacedSentenceBoundary(
     return false;
   }
   const precedingToken = input.slice(Math.max(0, index - 320), next).match(/\S+$/)?.[0] ?? '';
-  const insideUrl = /https?:\/\/|www\./i.test(precedingToken);
   if (input[index] !== '.') {
     return !insideUrl;
   }

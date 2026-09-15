@@ -2252,6 +2252,47 @@ describe('Utility Functions', () => {
       );
     });
 
+    test.each(['https://example.com/', 'http://example.com/', 'WWW.example.com/'])(
+      'retains question and URL boundaries beyond a long %s prefix',
+      (prefix) => {
+        const first = 'She said “Use etc.';
+        const question = `Which ${prefix}${'path'.repeat(100)}.part?`;
+        const second = `${question}”`;
+        const input = `${first}\n${second}`;
+        expect(ss(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+        const parenthetical = `He joined “Acme Co.” (It closed.) ${question}`;
+        const expected = ['He joined “Acme Co.”', '(It closed.)', question];
+        expect(ss(parenthetical)).toEqual(expected);
+        expect(segmentCaseNeutrally(parenthetical)).toEqual(expected);
+      },
+    );
+
+    test.each(['. Who asked?”', ' ended. Who asked?”'])(
+      'stops question lookahead after a long URL with tail %s',
+      (tail) => {
+        const input = `She described “Acme Co.\nwhose site is https://example.com/${'path'.repeat(100)}${tail}`;
+        const expected = [input.slice(0, -12).replaceAll('\n', ' '), 'Who asked?”'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('scans many URL path periods once while finding a question terminal', () => {
+      const first = 'She said “Use etc.';
+      const second = `Which https://example.com/${'path.'.repeat(20_000)}part?”`;
+      const input = `${first}\n${second}`;
+      expect(ss(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+    }, 5000);
+
     test('shares source question lookahead across repeated parenthetical candidates', () => {
       const input = `${'“Acme Co.” (Mr.) Whose Mr. '.repeat(5000)}?`;
       expect(ss(input)).toEqual([input]);
