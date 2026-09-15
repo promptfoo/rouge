@@ -1560,7 +1560,7 @@ function isUnspacedDelimitedSentenceStart(
   );
 }
 
-function caseNeutralIdentifierContext(input: string, index: number): boolean {
+function precedingIdentifierToken(input: string, index: number): string {
   let tokenStart = index;
   while (tokenStart > 0) {
     const previousUnit = input.charCodeAt(tokenStart - 1);
@@ -1571,12 +1571,27 @@ function caseNeutralIdentifierContext(input: string, index: number): boolean {
     }
     tokenStart -= width;
   }
-  const token = input.slice(tokenStart, index);
+  return input.slice(tokenStart, index);
+}
+
+function hasCaseNeutralTrailingInitial(input: string, index: number, tokenLength: number): boolean {
+  let start = index - tokenLength;
+  // A cased symbol can precede the token's marks; include its predecessor too.
+  for (let context = 0; context < 2 && start > 0; context++) {
+    const previous = input.codePointAt(start - 2);
+    start -= previous !== undefined && previous > 0xff_ff ? 2 : 1;
+  }
+  return /(?:^|[^\p{Letter}\p{Mark}\p{Number}_-])(?!\p{Mark})\p{Cased}\p{M}*$/u.test(
+    input.slice(start, index),
+  );
+}
+
+function caseNeutralIdentifierContext(token: string): boolean {
   if (!/\p{Cased}/u.test(token)) {
     return false;
   }
   return (
-    hasStableAsciiIdentifierEvidence(input, tokenStart, index) ||
+    hasStableAsciiIdentifierEvidence(token) ||
     (/\p{Script=Latin}/u.test(token) && /(?:\p{Script=Greek}|(?=\p{Mark})\p{Cased})/u.test(token))
   );
 }
@@ -1605,9 +1620,9 @@ function isDottedIdentifierContinuation(input: string): boolean {
   return false;
 }
 
-function hasStableAsciiIdentifierEvidence(input: string, start: number, end: number): boolean {
-  for (let cursor = start; cursor < end; cursor++) {
-    const code = input.charCodeAt(cursor);
+function hasStableAsciiIdentifierEvidence(token: string): boolean {
+  for (let cursor = 0; cursor < token.length; cursor++) {
+    const code = token.charCodeAt(cursor);
     if ((code >= 48 && code <= 57) || code === 95) {
       return true;
     }
@@ -1615,7 +1630,7 @@ function hasStableAsciiIdentifierEvidence(input: string, start: number, end: num
     if (lowerCode < 97 || lowerCode > 122) {
       continue;
     }
-    if (/^\p{Mark}$/u.test(characterAt(input, cursor + 1))) {
+    if (/^\p{Mark}$/u.test(characterAt(token, cursor + 1))) {
       continue;
     }
     return true;
@@ -1643,7 +1658,7 @@ function isUnspacedSentenceBoundary(
   }
 
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-  const identifier = caseNeutral && caseNeutralIdentifierContext(input, index);
+  const token = caseNeutral ? precedingIdentifierToken(input, index) : '';
   const following = input.slice(next);
   const insideAddress =
     precedingToken.includes('@') && !/@[^\s.]+(?:\.[^\s.]+)+\.$/u.test(precedingToken);
@@ -1657,13 +1672,13 @@ function isUnspacedSentenceBoundary(
         hostnameLabel === hostnameLabel.toLowerCase() ||
         hostnameLabel === hostnameLabel.toUpperCase()));
   const dottedIdentifier = caseNeutral
-    ? identifier && isDottedIdentifierContinuation(following)
+    ? caseNeutralIdentifierContext(token) && isDottedIdentifierContinuation(following)
     : /\b\p{Lu}[\p{Letter}\p{Number}_-]*\.$/u.test(suffix) &&
       /^[\p{Lu}\p{Number}_-]+(?=\s|[/.]|$)/u.test(following);
   const initial = caseNeutral ? /^\p{Cased}\p{M}*\./u : /^\p{Lu}\./u;
   const trailingInitial = caseNeutral
-    ? /(?:^|[^\p{Letter}\p{Mark}\p{Number}_-])\p{Cased}\p{M}*\.$/u
-    : /\b\p{Lu}\.$/u;
+    ? hasCaseNeutralTrailingInitial(input, index, token.length)
+    : /\b\p{Lu}\.$/u.test(suffix);
   const nextInitial = caseNeutral
     ? /^(?![ai](?:\s|$))\p{Cased}\p{M}*(?=\s|$)/iu
     : /^\p{Lu}(?=\s|$)/u;
@@ -1676,7 +1691,7 @@ function isUnspacedSentenceBoundary(
   return !(
     continuesAbbreviation ||
     ((initial.test(following) || dottedIdentifier) && !contextChangingGreekInitial) ||
-    (trailingInitial.test(suffix) && nextInitial.test(following)) ||
+    (trailingInitial && nextInitial.test(following)) ||
     /^[^\s]*@/.test(following) ||
     insideAddress ||
     insideHostname

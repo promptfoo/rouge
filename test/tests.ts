@@ -1900,6 +1900,116 @@ describe('Utility Functions', () => {
       expect(rouge.l(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
     });
 
+    test.each([
+      'Use AC.İ for instructions.',
+      'Open İD.X for instructions.',
+      'Use İ.A next.',
+      'Use İAAAAAAAA.A next.',
+      'Use Σ.A next.',
+      'Use İ.Α next.',
+      'Foo.İ. Next.',
+      'A.I\u0307 for instructions.',
+      'Use AC.I\u0307\u0323 for instructions.',
+    ])('preserves combining marks in case-neutral identifiers: %s', (input) => {
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        segmentCaseNeutrally(input).map((sentence) => sentence.toLowerCase()),
+      );
+      for (const score of [rouge.n, rouge.s, rouge.l]) {
+        expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      }
+    });
+
+    test('does not count combining marks as extra identifier letters', () => {
+      const input = `Use AC.I${'\u0345'.repeat(16_000)}! Next.`;
+      expect(segmentCaseNeutrally(input)).toEqual([
+        'Use AC.',
+        `I${'\u0345'.repeat(16_000)}!`,
+        'Next.',
+      ]);
+    });
+
+    test('reads complete identifier bases before long combining-mark sequences', () => {
+      for (const base of ['A', '\u{10400}']) {
+        const input = `Use ${base}${'\u0307'.repeat(16_000)}.B next.`;
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      }
+    });
+
+    test('does not treat a cased combining mark as an identifier base', () => {
+      expect(segmentCaseNeutrally('Use \u0345.A next.')).toEqual(['Use \u0345.', 'A next.']);
+    });
+
+    test('keeps marked name initials attached to numbered list items', () => {
+      const input = '1. I\u0307. Smith will attend 2. A. Brown will attend';
+      const expected = ['1. I\u0307. Smith will attend', '2. A. Brown will attend'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test('does not treat a cased combining mark before B as an initial', () => {
+      expect(segmentCaseNeutrally('Use \u0345.B next.')).toEqual(['Use \u0345.', 'B next.']);
+      expect(segmentCaseNeutrally('use \u0345.b next.')).toEqual(['use \u0345.', 'b next.']);
+    });
+
+    test.each(['Ⓐ', 'ⓐ', '🄰'])('keeps cased symbol initial %s before another initial', (base) => {
+      for (const marks of ['', '\u0307'.repeat(16_000)]) {
+        for (const prefix of ['', 'Use ']) {
+          const input = `${prefix}${base}${marks}.B next.`;
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+        }
+      }
+    });
+
+    test.each([
+      ['A', 'Ⓐ', false],
+      ['𐐀', '🄰', false],
+      ['0', 'Ⓐ', false],
+      ['_', 'Ⓐ', false],
+      ['-', 'Ⓐ', false],
+      ['\u0301', 'Ⓐ', false],
+      ['Ⓐ', 'Ⓑ', true],
+      ['Ⓐ', 'Я', true],
+      ['😀', '🄰', true],
+      ['\ud800', '🄰', true],
+      ['\udc00', '🄰', true],
+    ])('checks the complete predecessor %s of initial %s', (prefix, base, joins) => {
+      for (const marks of ['', '\u0307'.repeat(16_000)]) {
+        const first = `Use ${prefix}${base}${marks}.`;
+        const input = `${first}B next.`;
+        const expected = joins ? [input] : [first, 'B next.'];
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      }
+    });
+
+    test.each(['A test.', 'I agree.', 'No one answered.'])(
+      'keeps an adjacent sentence after a marked symbol before %s',
+      (continuation) => {
+        const first = `Use 🄰${'\u0307'.repeat(16_000)}.`;
+        const input = `${first}${continuation}`;
+        expect(segmentCaseNeutrally(input)).toEqual([first, continuation]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          [first, continuation].map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('keeps symbols outside ordinary-word identifier evidence', () => {
+      const input = 'Use AⒶg\u0303.No one answered.';
+      const expected = ['Use AⒶg\u0303.', 'No one answered.'];
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
     test('keeps bracketed references inside their sentence', () => {
       expect(ss('He wrote (see Fig.[2] for details). Next.')).toEqual([
         'He wrote (see Fig.[2] for details).',
@@ -4444,6 +4554,22 @@ describe('Core Functions', () => {
       const input = 'fooΣ.\u0345.B next.';
       for (const score of [n, s, l]) {
         expect(score(input, input.toLowerCase(), { caseSensitive: false })).toBe(1);
+      }
+    });
+
+    test('preserves sigma scores across the rejected mark-only initial boundary', () => {
+      const input = 'fooΣ.\u0345.B next.';
+      const lower = input.toLowerCase();
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([
+        'fooΣ.\u0345.',
+        'B next.',
+      ]);
+      expect(rouge.sentenceSegment(lower, { caseNeutral: true })).toEqual([
+        'fooσ.\u0345.',
+        'b next.',
+      ]);
+      for (const score of [n, s, l]) {
+        expect(score(input, lower, { caseSensitive: false })).toBe(1);
       }
     });
 
