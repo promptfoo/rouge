@@ -190,10 +190,8 @@ jobs:
       # This requires npm 11.5.1+ (Node 24 includes npm 11.6.0) and the package
       # must be configured on npmjs.com to trust this GitHub repository/workflow.
       # See: https://docs.npmjs.com/trusted-publishers/
-      # The --provenance flag generates SLSA Build Level 3 attestation for supply chain security.
+      # The --provenance flag signs an attestation for this workflow and archive.
       - name: Publish the selected release
-        env:
-          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
-          RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
-        # npm reads these fields for the source recorded in its provenance.
-        run: GITHUB_SHA="$RELEASE_SHA" GITHUB_REF="refs/tags/$RELEASE_TAG" npm publish ./release-package/*.tgz --access public --provenance
+        # Provenance identifies the authenticated workflow revision. The release
+        # checkout and artifact hash checks above bind the package to its source.
+        run: npm publish ./release-package/*.tgz --access public --provenance
