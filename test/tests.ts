@@ -1542,6 +1542,100 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(input)).toEqual(expected);
     }, 5000);
 
+    test.each([
+      ['1. «First. Second.» 2. «Third.»', ['1. «First. Second.»', '2. «Third.»']],
+      ['1. ‹First. Second.› 2. ‹Third.›', ['1. ‹First. Second.›', '2. ‹Third.›']],
+      ['1. “First. Second.” 2. “Third.”', ['1. “First. Second.”', '2. “Third.”']],
+      [
+        'He said «First. Then “inner.” Last.» Next.',
+        ['He said «First. Then “inner.” Last.»', 'Next.'],
+      ],
+      [
+        'He said ‹First. Then ‘inner.’ Last.› Next.',
+        ['He said ‹First. Then ‘inner.’ Last.›', 'Next.'],
+      ],
+      ['He said «First. Second.»«Next.»', ['He said «First. Second.»', '«Next.»']],
+      ['He said ‹First. Second.› ‹Next.›', ['He said ‹First. Second.›', '‹Next.›']],
+      ['Use etc.\n«Next sentence.»', ['Use etc.', '«Next sentence.»']],
+      ['Use etc.\n‹Next sentence.›', ['Use etc.', '‹Next sentence.›']],
+      ['«It ended.» Was «Why?» Next.', ['«It ended.»', 'Was «Why?»', 'Next.']],
+      ['‹It ended.› Was ‹Why?› Next.', ['‹It ended.›', 'Was ‹Why?›', 'Next.']],
+      [
+        'The word “No.” was documented at https://example.com/?%20x today. Next.',
+        ['The word “No.” was documented at https://example.com/?%20x today.', 'Next.'],
+      ],
+      [
+        'The word “No.” was documented at https://example.com/?&key=value today. Next.',
+        ['The word “No.” was documented at https://example.com/?&key=value today.', 'Next.'],
+      ],
+      [
+        'The word “No.” was documented at https://example.com/?=value today. Next.',
+        ['The word “No.” was documented at https://example.com/?=value today.', 'Next.'],
+      ],
+      [
+        'The word “No.” was documented at https://example.com/?#section today. Next.',
+        ['The word “No.” was documented at https://example.com/?#section today.', 'Next.'],
+      ],
+      [
+        'The word “No.” was documented at https://example.com/?/path today. Next.',
+        ['The word “No.” was documented at https://example.com/?/path today.', 'Next.'],
+      ],
+      [
+        '“It ended.” Was https://example.com/?%20x valid? Next.',
+        ['“It ended.”', 'Was https://example.com/?%20x valid?', 'Next.'],
+      ],
+      [
+        '“It ended.” Was https://example.com/valid? Next.',
+        ['“It ended.”', 'Was https://example.com/valid?', 'Next.'],
+      ],
+      [
+        "He said 'Tis done. The value is 5' aloud. Next.",
+        ["He said 'Tis done. The value is 5' aloud.", 'Next.'],
+      ],
+      [
+        "He said 'Tis done. It was 5' tall. Take it.' Next.",
+        ["He said 'Tis done. It was 5' tall. Take it.'", 'Next.'],
+      ],
+      ["He wrote 'Tis 5' on the card. Next.", ["He wrote 'Tis 5' on the card.", 'Next.']],
+      ['He said "First. Then «inner»"Next.', ['He said "First. Then «inner»"Next.']],
+      ["He said 'First. Then ‹inner›'Next.", ["He said 'First. Then ‹inner›'Next."]],
+      ["He said «First. Then 'inner.'» Next.", ["He said «First. Then 'inner.'»", 'Next.']],
+      ["He said ‹First. Then 'inner.'› Next.", ["He said ‹First. Then 'inner.'›", 'Next.']],
+      [
+        'He said «First. Then ‹Inner. Next.› Last.» End.',
+        ['He said «First. Then ‹Inner. Next.› Last.»', 'End.'],
+      ],
+      [
+        '«Unmatched. Next. «Paired. Last.» End.',
+        ['«Unmatched.', 'Next.', '«Paired. Last.»', 'End.'],
+      ],
+      [
+        '‹Unmatched. Next. ‹Paired. Last.› End.',
+        ['‹Unmatched.', 'Next.', '‹Paired. Last.›', 'End.'],
+      ],
+    ])(
+      'retains guillemet families, URL queries and numeric-ending quotations: %s',
+      (input, expected) => {
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test('keeps both guillemet endpoint families linear across repeated mixed quotations', () => {
+      const sentence = 'He said «First. Then ‹Inner. Next.› Last.»';
+      const input = new Array(3000).fill(sentence).join(' ');
+      const expected = new Array(3000).fill(sentence);
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test('keeps URL query punctuation lookahead linear across a long token', () => {
+      const url = `https://example.com/${'?%20x'.repeat(8000)}`;
+      const sentence = `The word “No.” was documented at ${url} today.`;
+      expect(ss(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+    }, 5000);
+
     test('recognizes astral digits before measurement apostrophes', () => {
       const input = "The answer 'Yes' worked. It was 𝟝' tall. Next.";
       const expected = ["The answer 'Yes' worked.", "It was 𝟝' tall.", 'Next.'];
