@@ -7124,10 +7124,11 @@ describe('Utility Functions', () => {
         expect(segmentCaseNeutrally(input)).toEqual(expected);
       });
 
-      test('preserves existing quoted spaced-four-dot handling before an aside', () => {
+      test('splits a completed quoted spaced-four-dot sentence before an aside', () => {
         const input = 'He said “Enough . . . .” (Perhaps) before leaving.';
-        expect(ss(input)).toEqual([input]);
-        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        const expected = ['He said “Enough . . . .”', '(Perhaps) before leaving.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
       });
 
       test.each(['\t', '\u00a0', '\u2003', ' \t  '])(
@@ -7188,8 +7189,11 @@ describe('Utility Functions', () => {
           'He said “Enough.”\t“Beta.”',
           'He said “Enough . . . .”\t“Beta.”',
         ]) {
-          const expected =
+          let expected =
             input === 'He said “Enough.”\t“Beta.”' ? ['He said “Enough.”', '“Beta.”'] : [input];
+          if (input === 'He said “Enough . . . .”\t“Beta.”') {
+            expected = ['He said “Enough . . . .”', '“Beta.”'];
+          }
           expect(ss(input)).toEqual(expected);
           expect(segmentCaseNeutrally(input)).toEqual(expected);
         }
@@ -11293,4 +11297,1912 @@ describe('Ellipsis delimiter handoffs use the complete source context', () => {
       'tail...',
     ]);
   });
+});
+
+describe('Utility Functions', () => {
+  describe('sentenceSegment', () => {
+    const ss = rouge.sentenceSegment;
+    const segmentCaseNeutrally = (input: string): string[] => ss(input, { caseNeutral: true });
+
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+    ])('recognizes typographic quotation pairs %s%s without changing text', (open, close) => {
+      const first = `${open}Alpha.${close}`;
+      const second = `${open}Beta.${close}`;
+      expect(ss(`${first} ${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+      expect(rouge.l(`${first} ${second}`, `${second} ${first}`)).toBe(1);
+      expect(ss(`We invested in ${open}Acme Co.\nInternational Holdings${close} today.`)).toEqual([
+        `We invested in ${open}Acme Co. International Holdings${close} today.`,
+      ]);
+    });
+
+    test.each(['Class of ’99', 'Rock ’n’ roll', 'The students’ work'])(
+      'does not open a quotation for an apostrophe in %s',
+      (prefix) => {
+        const input = `${prefix} etc.\nNext sentence.`;
+        const expected = [`${prefix} etc.`, 'Next sentence.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['And go.', 'Before dawn.', 'To work.'])(
+      'recognizes a new single-curly quotation beginning with %s',
+      (continuation) => {
+        const input = `‘First.’ ‘${continuation}’`;
+        const expected = ['‘First.’', `‘${continuation}’`];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test.each([
+      ['"', '"', '“', '”'],
+      ['“', '”', '"', '"'],
+      ["'", "'", '‘', '’'],
+      ['‘', '’', "'", "'"],
+    ])('preserves the outer %s%s quotation around %s%s', (open, close, innerOpen, innerClose) => {
+      const input = `We invested in ${open}The ${innerOpen}Acme${innerClose} Co.\nInternational Holdings${close} today.`;
+      const expected = `We invested in ${open}The ${innerOpen}Acme${innerClose} Co. International Holdings${close} today.`;
+      expect(ss(input)).toEqual([expected]);
+      expect(segmentCaseNeutrally(input)).toEqual([expected]);
+    });
+
+    test.each(['’Twas the night.', '’99 was a year.'])(
+      'recognizes the sentence beginning with %s',
+      (sentence) => {
+        expect(ss(`“Stop.” ${sentence}`)).toEqual(['“Stop.”', sentence]);
+        expect(segmentCaseNeutrally(`“Stop.” ${sentence}`)).toEqual(['“Stop.”', sentence]);
+      },
+    );
+
+    test.each(['—', '–', ';'])('closes a single-curly quotation before %s', (punctuation) => {
+      const first = `The term ‘class’${punctuation}see Acme Co.`;
+      expect(ss(`${first}\nNext sentence.`)).toEqual([first, 'Next sentence.']);
+      expect(segmentCaseNeutrally(`${first}\nNext sentence.`)).toEqual([first, 'Next sentence.']);
+    });
+
+    test('closes spaced smart quotes and nested bracketed quotations', () => {
+      expect(ss('He said “Stop. ” Next.')).toEqual(['He said “Stop. ”', 'Next.']);
+      expect(ss('He said ‘Stop. ’ Next.')).toEqual(['He said ‘Stop. ’', 'Next.']);
+      expect(ss('She said ‘The students’ protest ended. ’ Next.')).toEqual([
+        'She said ‘The students’ protest ended. ’',
+        'Next.',
+      ]);
+      expect(ss('He said “The students’ protest. ” Next.')).toEqual([
+        'He said “The students’ protest. ”',
+        'Next.',
+      ]);
+      expect(ss('He said “She called ‘Stop.’ ” Next.')).toEqual([
+        'He said “She called ‘Stop.’ ”',
+        'Next.',
+      ]);
+      expect(ss('She said ‘Don’t stop. ’ Next.')).toEqual(['She said ‘Don’t stop. ’', 'Next.']);
+      expect(ss('She said ‘Rock ’n’ roll! ’ Next.')).toEqual([
+        'She said ‘Rock ’n’ roll! ’',
+        'Next.',
+      ]);
+      expect(ss('He said “(Stop.)” Next.')).toEqual(['He said “(Stop.)”', 'Next.']);
+      expect(ss('Use etc.\n“Next sentence.”')).toEqual(['Use etc.', '“Next sentence.”']);
+      expect(ss('She said “Don’t stop.” Next.')).toEqual(['She said “Don’t stop.”', 'Next.']);
+    });
+
+    test('retains smart-single possessives across chunk boundaries', () => {
+      const input = '‘The students’ protest at Acme Co.\nInternational Holdings.’';
+      const expected = ['‘The students’ protest at Acme Co. International Holdings.’'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('classifies a million smart possessives within a small heap', () => {
+      expectBundledScriptToPass(
+        `
+          const input = 'A ‘' + 's’ '.repeat(1050000) + 'x’.';
+          const sentences = module.exports.sentenceSegment(input, { caseNeutral: true });
+          if (sentences.length !== 1 || sentences[0] !== input) {
+            throw new Error('Smart possessive segmentation changed');
+          }
+          process.stdout.write('ok');
+        `,
+        15_000,
+        ['--max-old-space-size=64'],
+      );
+    }, 20_000);
+
+    test.each([
+      ['The students’ work continues.', ['The students’ work continues.']],
+      ['John’s car.', ['John’s car.']],
+      [
+        'Next sentence. The children’s protest continued.',
+        ['Next sentence.', 'The children’s protest continued.'],
+      ],
+      ['Next sentence. ‘Another.’', ['Next sentence.', '‘Another.’']],
+    ] as const)(
+      'does not borrow a later apostrophe from %s to close a quotation',
+      (continuation, sentences) => {
+        const first = 'He called it ‘Success’ before we use etc.';
+        const input = `${first}\n${continuation}`;
+        const expected = [first, ...sentences];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('uses conservative boundaries when both smart-single candidates end in s', () => {
+      const input = 'She cited ‘The students’ work at Acme Co.\nInternational Holdings’ yesterday.';
+      const expected = [
+        'She cited ‘The students’ work at Acme Co.',
+        'International Holdings’ yesterday.',
+      ];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test('closes nested smart quotations before a wrapped abbreviation', () => {
+      const first = 'He said “She called ‘Stop.’” before we use etc.';
+      expect(ss(`${first}\nNext.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first}\nNext.`)).toEqual([first, 'Next.']);
+    });
+
+    test.each(['The U.S.’ Economy grew.', 'The U.S.’s Economy grew.', 'The U.S.’S Economy grew.'])(
+      'keeps unquoted abbreviation possessives inside a sentence: %s',
+      (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
+
+    test.each(["'Twas", "'99"])(
+      'preserves line breaks after the straight-apostrophe elision %s',
+      (elision) => {
+        const first = `${elision} etc.`;
+        const input = `${first}\nNext sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+      },
+    );
+
+    test.each([
+      ['The “U.S.” Economy grew.', '"'],
+      ['the firm “acme co.” grew.', '"'],
+      ['The ‘U.S.’ Economy grew.', "'"],
+      ['the firm ‘acme co.’ grew.', "'"],
+    ])('keeps quoted-abbreviation rules consistent across quote styles: %s', (input, quote) => {
+      const straightQuotes = (text: string): string => text.replace(/[“”‘’]/g, quote);
+      for (const caseNeutral of [false, true]) {
+        for (const text of [input, input.toLowerCase()]) {
+          expect(ss(text, { caseNeutral }).map(straightQuotes)).toEqual(
+            ss(straightQuotes(text), { caseNeutral }),
+          );
+        }
+      }
+    });
+
+    test.each(['Bob left.', 'The office closed.', 'Yesterday was busy.', 'Did it close?'])(
+      'retains a sentence after a quoted abbreviation before %s',
+      (next) => {
+        const first = 'The company is “Acme Co.”';
+        const input = `${first} ${next}`;
+        expect(ss(input)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          next.toLowerCase(),
+        ]);
+      },
+    );
+
+    test.each(['Class of ‘99', '‘Twas', '‘Tis'])(
+      'does not open an unmatched quotation for the elision %s',
+      (elision) => {
+        const first = `${elision} etc.`;
+        const input = `${first}\nNext sentence. ‘Another.’`;
+        const expected = [first, 'Next sentence.', '‘Another.’'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+        expect(ss(`${first}\nNext sentence.`)).toEqual(expected.slice(0, 2));
+      },
+    );
+
+    test('uses ordinary fallback for an unmatched smart double quote across a line wrap', () => {
+      const input = 'he said “Use etc.\nNext sentence.';
+      const expected = ['he said “Use etc.', 'Next sentence.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['Class of ‘99', '‘Twas', '‘Tis'])(
+      'does not pair leading elision %s with a later ambiguous possessive',
+      (leading) => {
+        const first = `${leading} at Acme Co.`;
+        const second = 'James’ book followed.';
+        const input = `${first}\n${second}`;
+        expect(ss(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      },
+    );
+
+    test('preserves a paired quotation starting with an abbreviated year', () => {
+      const input = 'She said ‘99 etc.\nMore notes.’';
+      const expected = ['She said ‘99 etc. More notes.’'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each(['‘Twas', '‘Tis', '‘em', '‘99', '‘Cause', '‘Til', '‘Till'])(
+      'retains an outer quotation around the leading elision %s',
+      (elision) => {
+        const input = `she said ‘use Acme Co.\n${elision} wisely.’`;
+        const expected = [input.replaceAll('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('retains a possessive candidate before a left-curly elision', () => {
+      const input = 'she said ‘the students’ project uses Acme Co.\n‘99 materials.’';
+      const expected = [input.replaceAll('\n', ' ')];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test('does not borrow an unquoted possessive to classify a later year quotation', () => {
+      const first = 'The students’ work.';
+      const quotation = '‘99 etc.\nMore notes.’';
+      const input = `${first} ${quotation}`;
+      const expected = [first, quotation.replaceAll('\n', ' ')];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['’Twas', '’Tis', '’em', '’99', '’Cause', '’Til', '’Till'])(
+      'retains sentence-initial elision %s inside an outer smart quotation',
+      (elision) => {
+        const first = 'She said ‘First.';
+        const second = `${elision} Acme Co.\nInternational Holdings.’`;
+        const input = `${first} ${second} Next.`;
+        const expected = [`${first} ${second.replaceAll('\n', ' ')}`, 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test.each(['Cause I left.', 'Til I returned.'])(
+      'keeps the leading elision inside its outer quotation: %s',
+      (sentence) => {
+        const first = 'She said ‘First.';
+        const second = `’${sentence}’`;
+        const input = `${first} ${second} Next.`;
+        const expected = [`${first} ${second}`, 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+        const adjacent = `She said ‘Stop.’${sentence}`;
+        expect(ss(adjacent)).toEqual(['She said ‘Stop.’', sentence]);
+        expect(segmentCaseNeutrally(adjacent)).toEqual(['She said ‘Stop.’', sentence]);
+      },
+    );
+
+    test('keeps a right-curly year elision inside a quotation after a word', () => {
+      const first = 'She said ‘Use the ’90s style.';
+      const second = 'Keep it.’';
+      const input = `${first} ${second} Next.`;
+      const expected = [`${first} ${second}`, 'Next.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+      const wrapped = 'She said ‘Use the ’90s Acme Co.\nInternational style.’ Next.';
+      const joined = ['She said ‘Use the ’90s Acme Co. International style.’', 'Next.'];
+      expect(ss(wrapped)).toEqual(joined);
+      expect(segmentCaseNeutrally(wrapped)).toEqual(joined);
+    });
+
+    test('attaches the outer closer after a possessive followed by a period', () => {
+      const first = 'She said ‘the students’.’';
+      const input = `${first} Next.`;
+      expect(ss(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+    });
+
+    test('keeps a possessive before punctuation inside a smart double quotation', () => {
+      const first = 'He said “the students’.”';
+      const input = `${first} Next.`;
+      expect(ss(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+    });
+
+    test.each(['.', ',', ';', ':'])(
+      'retains a quoted possessive before %s punctuation',
+      (punctuation) => {
+        const first = `‘That book is James’${punctuation}`;
+        const input = `${first} We use Acme Co.\nInternational Holdings.’`;
+        const second = 'We use Acme Co. International Holdings.’';
+        const expected = [`${first} ${second}`];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test.each([
+      ['‘', '’'],
+      ['“', '”'],
+    ])('preserves independent sentences inside %s%s quotes across a wrap', (open, close) => {
+      const first = `${open}I live in the U.S.`;
+      for (const question of [
+        'How about you?',
+        'Was it useful?',
+        'Can you help?',
+        'Will you help?',
+        'Should you help?',
+      ]) {
+        const second = `${question}${close}`;
+        const input = `${first}\n${second}`;
+        const expected = [first, second];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+        expect(ss(input.replaceAll('\n', ' '))).toEqual([`${first} ${second}`]);
+      }
+    });
+
+    test.each(['was founded in 1990.', 'is growing.', 'has expanded.'])(
+      'retains a quoted abbreviation wrap before the predicate %s',
+      (predicate) => {
+        const input = `She said “Acme Co.\n${predicate}”`;
+        const expected = [input.replaceAll('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('keeps the conservative name-led wrap rule inside an open quotation', () => {
+      const first = '‘I live in the U.S.';
+      const second = 'Bob moved away.’';
+      const input = `${first}\n${second}`;
+      const joined = [`${first} ${second}`];
+      expect(ss(input)).toEqual(joined);
+      expect(segmentCaseNeutrally(input)).toEqual(joined);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        joined.map((sentence) => sentence.toLowerCase()),
+      );
+      expect(ss(`${first} ${second}`)).toEqual(joined);
+    });
+
+    test.each(['‘Stop. ’', '‘(Stop.) ’'])(
+      'attaches a spaced closer before an unspaced sentence after %s',
+      (first) => {
+        const input = `${first}Next.`;
+        expect(ss(input)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+      },
+    );
+
+    test.each(['Hawai‘i', 'don‘t', 'á‘b', '𝒜‘b'])(
+      'does not open a quotation at a word-internal left apostrophe: %s',
+      (word) => {
+        const first = `${word} etc.`;
+        const input = `${first}\nNext sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          'next sentence.',
+        ]);
+      },
+    );
+
+    test('keeps an outer quotation open through a word-internal left apostrophe', () => {
+      const input =
+        'She described ‘the students’ Hawai‘i project at Acme Co.\nInternational site’ today.';
+      const expected = [
+        'She described ‘the students’ Hawai‘i project at Acme Co. International site’ today.',
+      ];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      ['The company is “Acme Co.”', 'It closed yesterday.'],
+      ['He lives in the “U.S.”', 'How about you?'],
+      ['The company is ‘Acme Co.’', 'It closed yesterday.'],
+      ['He lives in the ‘U.S.’', 'How about you?'],
+    ])('retains a sentence after the quoted abbreviation in %s', (first, second) => {
+      const input = `${first} ${second}`;
+      const expected = [first, second];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['()', '[]', '{}', '<>'])(
+      'retains an unspaced sentence after bracketed smart quotation %s',
+      (brackets) => {
+        const first = `He said ‘${brackets[0]}Stop.${brackets[1]}’`;
+        const input = `${first}Next.`;
+        const expected = [first, 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+      },
+    );
+
+    test.each(['(significant)', '(significant.)'])(
+      'closes a bracketed smart quotation %s before a citation',
+      (quotation) => {
+        const first = `The result was ‘${quotation}’².`;
+        const input = `${first} We use Acme Co.\nNext.`;
+        const expected = [first, 'We use Acme Co.', 'Next.'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['2', '²', '𝟚'])(
+      'closes a punctuation-ending smart quotation before citation %s',
+      (citation) => {
+        for (const [open, close] of [
+          ['‘', '’'],
+          ['“', '”'],
+        ]) {
+          for (const terminal of ['.', '?', '!']) {
+            const first = `The result was ${open}Stop${terminal}${close}${citation}.`;
+            const input = `${first} We use Acme Co.\nNext.`;
+            const expected = [first, 'We use Acme Co.', 'Next.'];
+            expect(ss(input)).toEqual(expected);
+            expect(segmentCaseNeutrally(input)).toEqual(expected);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+              expected.map((sentence) => sentence.toLowerCase()),
+            );
+            const cited = `The result was ${open}Stop${terminal}${close}${citation}`;
+            expect(ss(`${cited} Next sentence.`)).toEqual([cited, 'Next sentence.']);
+            expect(segmentCaseNeutrally(`${cited} Next sentence.`)).toEqual([
+              cited,
+              'Next sentence.',
+            ]);
+            expect(segmentCaseNeutrally(`${cited} Next sentence.`.toLowerCase())).toEqual([
+              cited.toLowerCase(),
+              'next sentence.',
+            ]);
+          }
+        }
+      },
+    );
+
+    test('keeps a citation after a spaced smart closer with the quoted sentence', () => {
+      const first = 'She said ‘Stop. ’2';
+      expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+    });
+
+    test.each(['times', 'Times'])(
+      'keeps an unspaced numeric continuation before %s attached to a quote',
+      (word) => {
+        const input = `He repeated “Stop!”2${word}.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
+
+    test.each(['(formerly Smith Inc.)', '(New York branch)'])(
+      'retains the parenthetical continuation %s after a quoted abbreviation',
+      (continuation) => {
+        for (const [open, close] of [
+          ['‘', '’'],
+          ['“', '”'],
+        ]) {
+          for (const separator of ['', ' ', '\t']) {
+            const input = `He works at ${open}Acme Co.${close}${separator}${continuation} today.`;
+            expect(ss(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+          }
+        }
+      },
+    );
+
+    test.each(['He said [“Stop.”] Next.', 'The winner was (she said “Wow!”) Alice Smith.'])(
+      'keeps quote-inside-bracket heuristics consistent across quote styles: %s',
+      (input) => {
+        const straightQuotes = (text: string): string => text.replace(/[“”]/g, '"');
+        for (const caseNeutral of [false, true]) {
+          expect(ss(input, { caseNeutral }).map(straightQuotes)).toEqual(
+            ss(straightQuotes(input), { caseNeutral }),
+          );
+        }
+      },
+    );
+
+    test.each([
+      ["'", "'"],
+      ['‘', '’'],
+    ])('recognizes a neutral continuation-word start inside %s%s quotes', (open, close) => {
+      const first = 'He said "No."';
+      const second = `${open}and more work.${close}`;
+      const input = `${first} ${second}`;
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+    });
+
+    test.each(['ᵃ', 'ᵇ', 'ᶜ'])(
+      'keeps an alphabetic footnote %s after a smart-single closer',
+      (footnote) => {
+        const input = `The study called it ‘significant at Acme Co.\nInternational Holdings’${footnote}.`;
+        const expected = [input.replaceAll('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test.each(['2', '²', '𝟚'])(
+      'preserves a spaced smart-single closer before numeric footnote %s',
+      (marker) => {
+        for (const gap of [' ', '\t']) {
+          const input = `The result was ‘significant at Acme Co.\nInternational Holdings${gap}’${marker}.`;
+          const expected = [input.replace(/\s+/g, ' ')];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+            expected.map((part) => part.toLowerCase()),
+          );
+          const double = input.replace('‘', '“').replace('’', '”');
+          expect(ss(double)).toEqual([double.replace(/\s+/g, ' ')]);
+          expect(segmentCaseNeutrally(double)).toEqual([double.replace(/\s+/g, ' ')]);
+        }
+      },
+    );
+
+    test.each(['ᵃ', 'ᵇ', 'ᶜ'])(
+      'attaches supported alphabetic footnote %s after a quoted terminal',
+      (footnote) => {
+        for (const [open, close] of [
+          ['‘', '’'],
+          ['“', '”'],
+        ]) {
+          for (const terminal of ['.', '?', '!']) {
+            const first = `The result was ${open}Stop${terminal}${close}${footnote}.`;
+            expect(ss(`${first} Next sentence.`)).toEqual([first, 'Next sentence.']);
+            expect(segmentCaseNeutrally(`${first} Next sentence.`)).toEqual([
+              first,
+              'Next sentence.',
+            ]);
+            expect(segmentCaseNeutrally(`${first} Next sentence.`.toLowerCase())).toEqual([
+              first.toLowerCase(),
+              'next sentence.',
+            ]);
+          }
+        }
+      },
+    );
+
+    test('keeps modifier letters within contraction words', () => {
+      const input = 'She said ‘l’ᵃmour at Acme Co.\nInternational Holdings.’';
+      const expected = [input.replaceAll('\n', ' ')];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([' ', '\t', '\n'])(
+      'attaches alphabetic footnotes before whitespace %j',
+      (separator) => {
+        for (const [open, close] of [
+          ['‘', '’'],
+          ['“', '”'],
+          ['"', '"'],
+        ]) {
+          const first = `${open}Stop?${close}ᵃ`;
+          const input = `${first}${separator}Next sentence.`;
+          expect(ss(input)).toEqual([first, 'Next sentence.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            'next sentence.',
+          ]);
+        }
+      },
+    );
+
+    test.each(['ᵃ', '²'])('attaches closing delimiters after a quotation footnote %s', (marker) => {
+      for (const first of [
+        `He said [“Stop?”${marker}]`,
+        `He said [‘Stop?’${marker} ]`,
+        `“He said ‘Stop?’${marker}”`,
+        `‘He said “Stop?”${marker}’`,
+      ]) {
+        const input = `${first} Next sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          'next sentence.',
+        ]);
+      }
+      const adjacentQuote = `He said "Stop?"${marker}"2 people agreed."`;
+      for (const caseNeutral of [false, true]) {
+        expect(ss(adjacentQuote, { caseNeutral })).toEqual([
+          `He said "Stop?"${marker}`,
+          '"2 people agreed."',
+        ]);
+      }
+    });
+
+    test.each(bracketPairs)('attaches numeric citations after enclosing %s%s', (open, close) => {
+      for (const quote of [
+        ['‘', '’'],
+        ['“', '”'],
+      ]) {
+        for (const marker of ['2', '²', '𝟚']) {
+          const first = `He said ${open}${quote[0]}Stop?${quote[1]}${close}${marker}`;
+          const input = `${first} Next.`;
+          expect(ss(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+        }
+      }
+    });
+
+    test('preserves mode-specific bare-number boundaries after quoted terminals', () => {
+      const first = '“Stop!”';
+      const second = '2024 was pivotal.';
+      expect(ss(`${first} ${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+      expect(ss(`${first}${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first}${second}`)).toEqual([`${first}2024`, 'was pivotal.']);
+      expect(segmentCaseNeutrally(`${first}${second}`.toLowerCase())).toEqual([
+        `${first.toLowerCase()}2024`,
+        'was pivotal.',
+      ]);
+    });
+
+    test.each([' ', '\n'])(
+      'recognizes a parenthetical sentence after a quoted abbreviation with separator %j',
+      (separator) => {
+        const first = 'The company is “Acme Co.”';
+        for (const second of ['(It closed.)', '(The office closed.)', '(Bob left.)']) {
+          expect(ss(`${first}${separator}${second}`)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(`${first}${separator}${second}`)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(`${first}${separator}${second}`.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+          ]);
+          const straightFirst = first.replace(/[“”]/g, '"');
+          expect(ss(`${straightFirst}${separator}${second}`)).toEqual([straightFirst, second]);
+          expect(segmentCaseNeutrally(`${straightFirst}${separator}${second}`)).toEqual([
+            straightFirst,
+            second,
+          ]);
+        }
+        const continuation = `${first}${separator}(It owns subsidiaries) today.`;
+        expect(ss(continuation)).toEqual([continuation.replaceAll('\n', ' ')]);
+        expect(segmentCaseNeutrally(continuation)).toEqual([continuation.replaceAll('\n', ' ')]);
+      },
+    );
+
+    test.each(['yesterday.', 'with his brother.', 'after the meeting.'])(
+      'retains a parenthetical interruption before the outer continuation %s',
+      (tail) => {
+        for (const [open, close] of [
+          ['“', '”'],
+          ['‘', '’'],
+          ['"', '"'],
+        ]) {
+          for (const separator of [' ', '\n']) {
+            const input = `He joined ${open}Acme Co.${close}${separator}(Was it the right choice?) ${tail}`;
+            const expected = input.replaceAll('\n', ' ');
+            expect(ss(input)).toEqual([expected]);
+            expect(segmentCaseNeutrally(input)).toEqual([expected]);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([expected.toLowerCase()]);
+          }
+        }
+      },
+    );
+
+    test.each(['He left.', 'Was it worth it?', 'In fact, he stayed.'])(
+      'recognizes a separate parenthetical before the independent sentence %s',
+      (third) => {
+        const first = 'He joined “Acme Co.”';
+        const second = '(Was it the right choice?)';
+        const input = `${first} ${second} ${third}`;
+        expect(ss(input)).toEqual([first, second, third]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second, third]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          [first, second, third].map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test.each(['Bob left.', 'The office closed.', 'Yesterday was busy.'])(
+      'keeps an independent multiword sentence after a parenthetical: %s',
+      (third) => {
+        for (const quotes of [
+          ['“', '”'],
+          ['"', '"'],
+        ]) {
+          const first = `He joined ${quotes[0]}Acme Co.${quotes[1]}`;
+          const second = '(Was it the right choice?)';
+          const input = `${first} ${second} ${third}`;
+          expect(ss(input)).toEqual([first, second, third]);
+          expect(segmentCaseNeutrally(input)).toEqual([first, second, third]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+            [first, second, third].map((part) => part.toLowerCase()),
+          );
+        }
+      },
+    );
+
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+    ])('attaches a pending straight single closer before adjacent %s%s', (open, close) => {
+      const first = "He said 'Stop.'";
+      const second = `${open}Next.${close}`;
+      const input = `${first}${second}`;
+      expect(ss(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+      const nested = `'${open}Beta.${close}'`;
+      expect(ss(`Alpha.${nested}`)).toEqual(['Alpha.', nested]);
+      expect(segmentCaseNeutrally(`Alpha.${nested}`)).toEqual(['Alpha.', nested]);
+    });
+
+    test.each([
+      ['which operates abroad.', 'Which operates abroad?'],
+      ['who works abroad.', 'Who works abroad?'],
+      ['whose office closed.', 'Whose office closed?'],
+      ['whom we consulted.', 'Whom did we consult?'],
+    ])('distinguishes a quoted relative clause from a question: %s', (relative, question) => {
+      for (const [open, close] of [
+        ['“', '”'],
+        ['‘', '’'],
+      ]) {
+        const first = `She described ${open}Acme Co.`;
+        const input = `${first}\n${relative}${close}`;
+        expect(ss(input)).toEqual([input.replaceAll('\n', ' ')]);
+        expect(segmentCaseNeutrally(input)).toEqual([input.replaceAll('\n', ' ')]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          input.toLowerCase().replaceAll('\n', ' '),
+        ]);
+        const second = `${question}${close}`;
+        expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      }
+    });
+
+    test.each([
+      ['‘', '’'],
+      ['“', '”'],
+    ])('recognizes a straight quote immediately inside %s%s', (open, close) => {
+      const first = `${open}"Stop."${close}`;
+      expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(rouge.treeBankTokenize(first)).toEqual([open, '``', 'Stop.', "''", close]);
+    });
+
+    test.each(['http://', 'https://', 'www.'])(
+      'ignores query and path punctuation in scoped questions with %s',
+      (prefix) => {
+        const first = 'She asked “Acme Co.';
+        for (const punctuation of ['?', '!']) {
+          const second = `Which ${prefix}example.com/a${punctuation}b was it?”`;
+          const input = `${first}\n${second}`;
+          expect(ss(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+          ]);
+          const relative = `She described “Acme Co.\nwhose link is ${prefix}example.com/a${punctuation}b and stays here.”`;
+          expect(ss(relative)).toEqual([relative.replaceAll('\n', ' ')]);
+          expect(segmentCaseNeutrally(relative)).toEqual([relative.replaceAll('\n', ' ')]);
+          expect(segmentCaseNeutrally(relative.toLowerCase())).toEqual([
+            relative.toLowerCase().replaceAll('\n', ' '),
+          ]);
+        }
+      },
+    );
+
+    test.each(['.?', '!?', '?..!', '...?!'])(
+      'protects the URL punctuation run %s inside a wrapped question',
+      (run) => {
+        const first = 'She asked “Acme Co.';
+        const second = `Which https://example.com/path${run}query was it?”`;
+        expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+        const relative = `She described “Acme Co.\nwhose path is https://example.com/path${run}query today.”`;
+        expect(ss(relative)).toEqual([relative.replaceAll('\n', ' ')]);
+        expect(segmentCaseNeutrally(relative)).toEqual([relative.replaceAll('\n', ' ')]);
+      },
+    );
+
+    test('scans one long URL punctuation run without repeated suffix lookahead', () => {
+      const first = 'She asked “Acme Co.';
+      const second = `Which https://example.com/path${'.?!'.repeat(20_000)}query was it?”`;
+      expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+    }, 5000);
+
+    test.each(['Which one?', 'Whose example.com?', 'What happened?'])(
+      'normalizes a Treebank opener before the wrapped starter %s',
+      (question) => {
+        const first = 'Use etc.';
+        const second = `\`\`${question}''`;
+        expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first}\n${second}`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      },
+    );
+
+    test('retains an actual question after a long punctuated URL', () => {
+      const first = 'She asked “Acme Co.';
+      const second = `Which https://example.com/${'path!query?'.repeat(20_000)}end was it?”`;
+      expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+    }, 5000);
+
+    test.each([
+      'Which example.com?',
+      'Which https://example.xyz?',
+      'Which Mr. Smith?',
+      'Who chose 1.2?',
+      'Whose U.S. government closed?',
+    ])('finds a question terminal beyond protected periods: %s', (question) => {
+      const first = 'She asked “Acme Co.';
+      const second = `${question}”`;
+      const input = `${first}\n${second}`;
+      expect(ss(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+      const parenthetical = `He joined “Acme Co.” (It closed.) ${question}`;
+      expect(ss(parenthetical)).toEqual(['He joined “Acme Co.”', '(It closed.)', question]);
+      expect(segmentCaseNeutrally(parenthetical)).toEqual([
+        'He joined “Acme Co.”',
+        '(It closed.)',
+        question,
+      ]);
+    });
+
+    test.each([
+      ['‘', '’'],
+      ['“', '”'],
+      ['"', '"'],
+      ["'", "'"],
+      ['``', "''"],
+    ])('keeps inner %s%s terminals inside an enclosing question', (open, close) => {
+      const first = 'She asked “Acme Co.';
+      const question = `Which ${open}Stop.${close} did she quote?`;
+      const second = `${question}”`;
+      const input = `${first}\n${second}`;
+      const parenthetical = ['He joined “Acme Co.”', '(It closed.)', question];
+      for (const segment of [ss, segmentCaseNeutrally]) {
+        expect(segment(input)).toEqual([first, second]);
+        expect(segment(parenthetical.join(' '))).toEqual(parenthetical);
+      }
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+      expect(segmentCaseNeutrally(parenthetical.join(' ').toLowerCase())).toEqual(
+        parenthetical.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+      ['"', '"'],
+      ["'", "'"],
+      ['``', "''"],
+    ])('recognizes a scoped question behind leading %s%s', (open, close) => {
+      const inner = open === '‘' ? '“what?”' : '‘what?’';
+      const first = `${open}Which ${inner} did she quote?${close}`;
+      const input = `${first} Next.`;
+      expect(ss(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+    });
+
+    test('scans a long leading delimiter run once before checking a question starter', () => {
+      const first = `${'('.repeat(100_000)}Which ‘Stop.’ did she quote?${')'.repeat(100_000)}`;
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+    }, 5000);
+
+    test.each(['whose headquarters are in the U.S.', 'whose advisor is Mr. Smith.'])(
+      'stops question lookahead at the outer closer after %s',
+      (relative) => {
+        const first = `She described “Acme Co.\n${relative}”`;
+        const expected = [first.replaceAll('\n', ' '), 'What followed?'];
+        const input = `${first} What followed?`;
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test.each(['Whose U.S.’ economy grew?', 'Which ‘twas odd’ line did she quote?'])(
+      'retains literal apostrophes while locating a question terminal: %s',
+      (question) => {
+        const first = 'She asked “Acme Co.';
+        const second = `${question}”`;
+        const input = `${first}\n${second}`;
+        expect(ss(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      },
+    );
+
+    test.each(['²', '2', '𝟚', 'ᵃ', '2ᵃ', '\u{107a5}'])(
+      'recognizes a nested question with citation %s at the enclosing scope end',
+      (citation) => {
+        for (const [outerOpen, outerClose, innerOpen, innerClose] of [
+          ['“', '”', '‘', '’'],
+          ['‘', '’', '"', '"'],
+          ['“', '”', "'", "'"],
+          ['“', '”', '``', "''"],
+        ]) {
+          const first = `She said ${outerOpen}Use etc.`;
+          const second = `Which answer was ${innerOpen}What?${innerClose}${citation}${outerClose}`;
+          const input = `${first}\n${second}`;
+          expect(ss(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+          ]);
+        }
+      },
+    );
+
+    test.each(['² and left.', '² while waiting.'])(
+      'does not treat an inner question with continuation %s as ending its scope',
+      (tail) => {
+        const input = `She said “Use etc.\nWhich answer was ‘What?’${tail}”`;
+        const expected = [input.replaceAll('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test('preserves a later outer question after a cited inner question', () => {
+      const first = 'She said “Use etc.';
+      const second = 'Which answer was ‘What?’² and why?”';
+      expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+    });
+
+    test('scans a long attached citation when locating a scoped question', () => {
+      const first = 'She said “Use etc.';
+      const second = `Which answer was ‘What?’${'²'.repeat(20_000)}”`;
+      expect(ss(`${first}\n${second}`)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(`${first}\n${second}`)).toEqual([first, second]);
+    }, 5000);
+
+    test.each(['', ' Next.'])('retains a final quoted question before tail %s', (tail) => {
+      const sentences = ['He joined “Acme Co.”', '(It closed.)', 'Which “what?”'];
+      const expected = tail ? [...sentences, tail.trimStart()] : sentences;
+      const input = `${sentences.join(' ')}${tail}`;
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['‘Stop?’,', '‘Stop?’—'])(
+      'keeps an inner question separate from a relative-clause terminal: %s',
+      (quoted) => {
+        const first = `She described “Acme Co.\nwhose motto was ${quoted} then left.”`;
+        const input = `${first} What followed?`;
+        const expected = [first.replaceAll('\n', ' '), 'What followed?'];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['Which', 'Whose', 'Whom'])(
+      'ignores possessive casing while locating a neutral %s terminal',
+      (starter) => {
+        const input = `She asked “Acme Co.\n${starter} 'Paris' Alice. 'Stop.' Who asked?”`;
+        const expected = [input.replaceAll('\n', ' ')];
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('advances source scopes across repeated paired questions', () => {
+      const sentences = ['She asked “Acme Co.', 'Which ‘Stop.’ did she quote?”', 'Next.'];
+      const input = `${`${sentences[0]}\n${sentences[1]} ${sentences[2]} `.repeat(3000)}`.trimEnd();
+      const expected = Array.from({ length: 3000 }, () => sentences).flat();
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test('reuses scoped lookahead across adjacent quoted questions', () => {
+      const sentence = 'Which "what?"';
+      const input = `${`${sentence} `.repeat(5000)}`.trimEnd();
+      const expected = Array.from({ length: 5000 }, () => sentence);
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test('indexes a long quoted question within a constrained JavaScript heap', () => {
+      expectBundledScriptToPass(
+        `
+          const first = 'She asked “Acme Co.';
+          const second = 'Which ‘' + 'word '.repeat(1400000) + 'Stop.’ did she quote?”';
+          const input = first + '\\n' + second;
+          const sentences = module.exports.sentenceSegment(input, { caseNeutral: true });
+          if (sentences.length !== 2 || sentences[0] !== first || sentences[1] !== second) {
+            throw new Error('Long scoped question boundaries changed');
+          }
+          process.stdout.write('ok');
+        `,
+        15_000,
+        ['--max-old-space-size=64'],
+      );
+    }, 20_000);
+
+    test.each(['whose advisor is Mr. Smith.', 'whose office is on example.com.'])(
+      'keeps a relative clause with protected periods joined: %s',
+      (relative) => {
+        const input = `She described “Acme Co.\n${relative}”`;
+        const expected = input.replaceAll('\n', ' ');
+        expect(ss(input)).toEqual([expected]);
+        expect(segmentCaseNeutrally(input)).toEqual([expected]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([expected.toLowerCase()]);
+      },
+    );
+
+    test('stops a relative-clause lookahead at the terminal after a URL', () => {
+      const first = 'She described “Acme Co.\nwhose site is https://example.com.';
+      const second = 'Who asked?”';
+      const input = `${first} ${second}`;
+      const expected = [input.replaceAll('\n', ' ')];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['https://example.com/', 'http://example.com/', 'WWW.example.com/'])(
+      'retains question and URL boundaries beyond a long %s prefix',
+      (prefix) => {
+        const first = 'She said “Use etc.';
+        const question = `Which ${prefix}${'path'.repeat(100)}.part?`;
+        const second = `${question}”`;
+        const input = `${first}\n${second}`;
+        expect(ss(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+        const parenthetical = `He joined “Acme Co.” (It closed.) ${question}`;
+        const expected = ['He joined “Acme Co.”', '(It closed.)', question];
+        expect(ss(parenthetical)).toEqual(expected);
+        expect(segmentCaseNeutrally(parenthetical)).toEqual(expected);
+      },
+    );
+
+    test.each(['. Who asked?”', ' ended. Who asked?”'])(
+      'stops question lookahead after a long URL with tail %s',
+      (tail) => {
+        const input = `She described “Acme Co.\nwhose site is https://example.com/${'path'.repeat(100)}${tail}`;
+        const expected = [input.replaceAll('\n', ' ')];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test('scans many URL path periods once while finding a question terminal', () => {
+      const first = 'She said “Use etc.';
+      const second = `Which https://example.com/${'path.'.repeat(20_000)}part?”`;
+      const input = `${first}\n${second}`;
+      expect(ss(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+    }, 5000);
+
+    test('shares source question lookahead across repeated parenthetical candidates', () => {
+      const input = `${'“Acme Co.” (Mr.) Whose Mr. '.repeat(5000)}?`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    }, 5000);
+
+    test('advances cached source terminals after separate parenthetical questions', () => {
+      const sentences = ['He joined “Acme Co.”', '(It closed.)', 'Which Mr. Smith?'];
+      const input = `${`${sentences.join(' ')} `.repeat(1000)}`.trimEnd();
+      const expected = Array.from({ length: 1000 }, () => sentences).flat();
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test('reuses question terminals across many provisional abbreviation chunks', () => {
+      const first = 'She asked “Acme Co.';
+      const second = 'Which Mr. Smith?”';
+      const count = 5000;
+      const input = `${`${first}\n${second} `.repeat(count)}`.trimEnd();
+      const expected = Array.from({ length: count }, () => [first, second]).flat();
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test.each([
+      ['‘', '’'],
+      ['“', '”'],
+    ])('closes a nested straight quotation before its outer %s%s closer', (open, close) => {
+      const first = `${open}He said 'Stop.'${close}`;
+      const input = `${first} Next.'Another.'`;
+      expect(ss(input)).toEqual([first, 'Next.', "'Another.'"]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.', "'Another.'"]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        'next.',
+        "'another.'",
+      ]);
+    });
+
+    test.each(['“Next.”', '‘Next.’', '"Next."', '(Next.)'])(
+      'recognizes a delimited tail after a separate parenthetical: %s',
+      (third) => {
+        const first = 'He joined “Acme Co.”';
+        const second = '(It closed.)';
+        const input = `${first} ${second} ${third}`;
+        expect(ss(input)).toEqual([first, second, third]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second, third]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+          third.toLowerCase(),
+        ]);
+      },
+    );
+
+    test.each(['Which one . . .?', 'Which one .\t. .?', 'Which one . . . .?'])(
+      'recognizes a question beyond protected spaced ellipses: %s',
+      (question) => {
+        const first = 'She said “Use etc.';
+        const second = `${question}”`;
+        const input = `${first}\n${second}`;
+        expect(ss(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+        const parenthetical = `He joined “Acme Co.” (It closed.) ${question}`;
+        expect(ss(parenthetical)).toEqual(['He joined “Acme Co.”', '(It closed.)', question]);
+        expect(segmentCaseNeutrally(parenthetical)).toEqual([
+          'He joined “Acme Co.”',
+          '(It closed.)',
+          question,
+        ]);
+      },
+    );
+
+    test.each(['whose office . . . remained.', 'Which one . . . indeed.'])(
+      'retains a non-question continuation across a spaced ellipsis: %s',
+      (clause) => {
+        const input = `She said “Use etc.\n${clause}”`;
+        const expected = input.replaceAll('\n', ' ');
+        expect(ss(input)).toEqual([expected]);
+        expect(segmentCaseNeutrally(input)).toEqual([expected]);
+      },
+    );
+
+    test('stops question lookahead at a genuine four-dot boundary in its casing mode', () => {
+      const input = 'She said “Use etc.\nWhich one . . . . Next?”';
+      const expected = ['She said “Use etc. Which one . . . .', 'Next?”'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      const lowercase = input.replace('Next?', 'next?');
+      expect(ss(lowercase)).toEqual(['She said “Use etc.', 'Which one . . . . next?”']);
+      expect(segmentCaseNeutrally(lowercase)).toEqual([expected[0], 'next?”']);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test('shares spaced-ellipsis protection across many cached question ranges', () => {
+      const first = 'She said “Use etc.';
+      const second = 'Which one . . .?”';
+      const input = `${`${first}\n${second} `.repeat(5000)}`.trimEnd();
+      const expected = Array.from({ length: 5000 }, () => [first, second]).flat();
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
+    test('requires a paired single quote before attaching a closing apostrophe', () => {
+      const unmatched = 'He said Stop.’ Next.';
+      const possessive = 'The U.S.’ Economy grew.';
+      for (const caseNeutral of [false, true]) {
+        expect(ss(unmatched, { caseNeutral })).toEqual([unmatched]);
+        expect(ss(possessive, { caseNeutral })).toEqual([possessive]);
+        expect(ss('He said ‘Stop.’ Next.', { caseNeutral })).toEqual(['He said ‘Stop.’', 'Next.']);
+      }
+    });
+
+    test.each(['²', '2', '𝟚', '²³', '12'])(
+      'opens the next smart quotation after a quoted acronym and numeric citation %s',
+      (citation) => {
+        const first = `‘U.S.’${citation}`;
+        for (const second of ['‘Next.’', '‘Tis true.’']) {
+          const input = first + second;
+          expect(ss(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+          ]);
+        }
+      },
+    );
+
+    test.each(['Use 2‘word’ as notation.', '‘U.S.’ ²‘Next.’', '‘U.S.’ text2‘word’ remained.'])(
+      'requires an attached citation after the actual tentative closer: %s',
+      (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
+
+    test('scans a long numeric citation once before the next smart quotation', () => {
+      const first = `‘U.S.’${'²'.repeat(20_000)}`;
+      const second = '‘Next.’';
+      expect(ss(first + second)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(first + second)).toEqual([first, second]);
+    }, 5000);
+
+    test.each(['Stop.”', 'He said "Stop.”'])(
+      'retains a stray closing mark with its preceding text: %s',
+      (first) => {
+        expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+      },
+    );
+
+    test.each(['“Stop!” she shouted.', 'He asked “Why?” repeatedly.'])(
+      'keeps dialogue-tag heuristics consistent across quote styles: %s',
+      (input) => {
+        const straightQuotes = (text: string): string => text.replace(/[“”]/g, '"');
+        expect(ss(input)).toEqual([input]);
+        const expected = segmentCaseNeutrally(straightQuotes(input));
+        expect(segmentCaseNeutrally(input).map(straightQuotes)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase()).map(straightQuotes)).toEqual(
+          expected.map((sentence) => sentence.toLowerCase()),
+        );
+      },
+    );
+
+    test.each(['6', '𝟞'])('does not use a later %s-feet mark as a quotation closer', (feet) => {
+      const first = 'The label ‘Success’ appears in Calif.';
+      const second = `The board is ${feet}’ wide.`;
+      const input = `${first}\n${second}`;
+      expect(ss(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+      ]);
+    });
+
+    test.each(['.', '!', '?'])(
+      'retains an unspaced sentence after a %s smart closer',
+      (terminal) => {
+        const first = `He said ‘Stop${terminal}’`;
+        const input = `${first}Next sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          'next sentence.',
+        ]);
+      },
+    );
+
+    test.each([
+      ['He said ‘Stop.’', '“Next.”'],
+      ['He said “Stop.”', '‘Next.’'],
+      ['He said “Stop.”', '“Next.”'],
+      ['He said ‘Stop.’', '(Next.)'],
+      ['He said ‘Stop.’', '"Next."'],
+      ['He said “Stop.”', '"Next."'],
+    ])('separates %s from an adjacent delimited sentence', (first, second) => {
+      const input = `${first}${second}`;
+      const expected = [first, second];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['He said ‘Dr.’“Smith”.', 'He said ‘Stop.’[2] Next.', 'He said ‘Stop.’(2) Next.'])(
+      'preserves title continuations and attached citations in %s',
+      (input) => {
+        const expected = input.endsWith(' Next.') ? [input.slice(0, -6), 'Next.'] : [input];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['s', 'S'])('retains the ’%s contraction after a quoted acronym', (contraction) => {
+      const input = `‘The U.S.’${contraction} Economy grew.’`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each(['U.S.', 'U.S.A.', 'E.U.'])(
+      'preserves a quoted possessive after the acronym %s',
+      (acronym) => {
+        const input = `‘The ${acronym}’ Economy grew.’`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      },
+    );
+
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+    ])(
+      'attaches isolated modifier footnotes before adjacent smart openers after %s%s',
+      (open, close) => {
+        for (const marker of ['ᵃ', 'ᵇ']) {
+          const first = `${open}Stop?${close}${marker}`;
+          for (const [nextOpen, nextClose] of [
+            ['“', '”'],
+            ['‘', '’'],
+          ]) {
+            const second = `${nextOpen}Next.${nextClose}`;
+            expect(ss(`${first}${second}`)).toEqual([first, second]);
+            expect(segmentCaseNeutrally(`${first}${second}`)).toEqual([first, second]);
+            expect(segmentCaseNeutrally(`${first}${second}`.toLowerCase())).toEqual([
+              first.toLowerCase(),
+              second.toLowerCase(),
+            ]);
+          }
+          const word = `${open}Stop?${close}${marker}word.`;
+          expect(ss(word)).toEqual([word]);
+          expect(segmentCaseNeutrally(word)).toEqual([`${open}Stop?${close}`, `${marker}word.`]);
+        }
+      },
+    );
+
+    test.each(['ᵃ', '2ᵃ', '𝟚ᵇ', '\u{107a5}'])(
+      'opens a smart quotation after an acronym and modifier citation %s',
+      (marker) => {
+        const first = `‘U.S.’${marker}`;
+        expect(ss(`${first}‘Next.’`)).toEqual([first, '‘Next.’']);
+        expect(segmentCaseNeutrally(`${first}‘Next.’`)).toEqual([first, '‘Next.’']);
+        expect(segmentCaseNeutrally(`${first}‘Next.’`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          '‘next.’',
+        ]);
+      },
+    );
+
+    test.each([
+      ['[', ']'],
+      ['(', ')'],
+    ])('retains a bracketed modifier citation within %s%s', (left, right) => {
+      for (const [open, close] of [
+        ['“', '”'],
+        ['‘', '’'],
+      ]) {
+        for (const marker of ['ᵃ', 'ᵇ', '\u{107a5}']) {
+          const first = `The result was ${open}Stop?${close}${left}${marker}${right}.`;
+          const expected = [first, 'Next.'];
+          expect(ss(`${first} Next.`)).toEqual(expected);
+          expect(segmentCaseNeutrally(`${first} Next.`)).toEqual(expected);
+          expect(segmentCaseNeutrally(`${first} Next.`.toLowerCase())).toEqual(
+            expected.map((sentence) => sentence.toLowerCase()),
+          );
+        }
+      }
+    });
+
+    test.each(['[ᵃword]', '[a]', '[ᵃ)', '(ᵃ]'])(
+      'retains ordinary delimited text instead of treating %s as a modifier citation',
+      (tail) => {
+        const input = `“Stop?”${tail}. Next.`;
+        expect(ss(input)).toEqual([`“Stop?”${tail}.`, 'Next.']);
+        expect(segmentCaseNeutrally(input)).toEqual(['“Stop?”', `${tail}.`, 'Next.']);
+      },
+    );
+
+    test.each(['.', '?', '!'])(
+      'recovers an unmatched immediate ASCII closer after %s before whitespace',
+      (terminal) => {
+        const first = `He left${terminal}"`;
+        for (const separator of [' ', '\t', '\n', '\r\n']) {
+          const input = `${first}${separator}Next.`;
+          expect(ss(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+        }
+      },
+    );
+
+    test('retains casing and EOF policy when recovering an unmatched ASCII closer', () => {
+      expect(ss('He left." next.')).toEqual(['He left." next.']);
+      expect(ss('He left."')).toEqual(['He left."']);
+      expect(segmentCaseNeutrally('He left."')).toEqual(['He left."']);
+      const input = 'He left." Next Co.\nHe stayed.';
+      const expected = ['He left."', 'Next Co.', 'He stayed.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      ['He left."Next."', ['He left.', '"Next."']],
+      ['He left. "Next."', ['He left.', '"Next."']],
+      ['He said "Stop." Next.', ['He said "Stop."', 'Next.']],
+      ['He said “Stop.”" Next."', ['He said “Stop.”" Next."']],
+      ['He said "Stop?"²" Next."', ['He said "Stop?"²', '" Next."']],
+      ['He said "Stop?"²"2 people agreed."', ['He said "Stop?"²', '"2 people agreed."']],
+    ])('preserves pending closers and subsequent openers in %s', (input, expected) => {
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((part) => part.toLowerCase()),
+      );
+    });
+
+    test.each(['First.', '“First.”', '‘First.’', '"First."'])(
+      'recognizes an adjacent Treebank opener after %s',
+      (first) => {
+        const second = "``Next.''";
+        expect(ss(first + second)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(first + second)).toEqual([first, second]);
+        expect(segmentCaseNeutrally((first + second).toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+      },
+    );
+
+    test.each(["`Next.'", "```Next.'''"])(
+      'does not treat the unsupported backtick run %s as a paired opener',
+      (tail) => {
+        const input = `First.${tail}`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
+
+    test('preserves casing and numeric policy after an adjacent Treebank opener', () => {
+      expect(ss("First.``next.''")).toEqual(["First.``next.''"]);
+      expect(ss("First.``2 people agreed.''")).toEqual(['First.', "``2 people agreed.''"]);
+      expect(segmentCaseNeutrally("First.``2 people agreed.''")).toEqual([
+        'First.',
+        "``2 people agreed.''",
+      ]);
+      const company = "We use Acme Co.``International Holdings.''";
+      expect(ss(company)).toEqual([company]);
+      expect(segmentCaseNeutrally(company)).toEqual([company]);
+      expect(segmentCaseNeutrally(company.toLowerCase())).toEqual([company.toLowerCase()]);
+    });
+
+    test('retains the outer quotation around an unmatched inner ASCII apostrophe', () => {
+      const input = "‘He said Stop?'2 people agreed.’";
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each(['2', '²', '𝟚', 'ᵃ', '\u{107a5}'])(
+      'attaches the citation %s after an inner ASCII single closer',
+      (marker) => {
+        for (const [open, close] of [
+          ['“', '”'],
+          ['‘', '’'],
+        ]) {
+          const first = `${open}He said 'Stop?'${marker}${close}`;
+          expect(ss(first)).toEqual([first]);
+          expect(segmentCaseNeutrally(first)).toEqual([first]);
+          expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(`${first} Next.`.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            'next.',
+          ]);
+        }
+      },
+    );
+
+    test.each(['²', '2', '𝟚'])('closes a quotation before a numeric citation %s', (citation) => {
+      const first = `The result was ‘significant’${citation}.`;
+      const input = `${first} We use Acme Co.\nNext sentence.`;
+      const expected = [first, 'We use Acme Co.', 'Next sentence.'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each([
+      ['‘', '’'],
+      ['“', '”'],
+    ])('carries %s%s quotation state across sentences', (open, close) => {
+      const input = `${open}First. We use Acme Co.\nInternational Holdings.${close}`;
+      const expected = [input.replaceAll('\n', ' ')];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    });
+
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+    ])('retains spaced ellipsis boundaries before %s%s closers', (open, close) => {
+      const first = `He said ${open}Wait . . . .${close}`;
+      const expected = [first, 'Next.'];
+      expect(ss(`${first} Next.`)).toEqual(expected);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual(expected);
+    });
+  });
+});
+
+describe('Quotation continuation ownership across parser features', () => {
+  test('retains a separated year elision inside a confirmed quotation', () => {
+    const first = 'She said ‘First. ’99 Acme Co. International Holdings.’';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+      expect(rouge.sentenceSegment('‘U.S.’12‘Next.’', { caseNeutral })).toEqual([
+        '‘U.S.’12',
+        '‘Next.’',
+      ]);
+      expect(rouge.sentenceSegment('She said ‘First.’[99] Next.', { caseNeutral })).toEqual([
+        'She said ‘First.’[99]',
+        'Next.',
+      ]);
+    }
+  });
+
+  test('keeps auxiliary lookahead inside the same confirmed elision span', () => {
+    const first = 'She said ‘"No." Was Alpha. ’99 Beta? Next.’';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Tail.`, { caseNeutral })).toEqual([first, 'Tail.']);
+    }
+  });
+
+  test.each([
+    ['‘', '’'],
+    ['“', '”'],
+  ])('does not let a title override an independent attached parenthetical %s%s', (open, close) => {
+    const title = `He said ${open}Dr.${close}`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${title}(Bob left.)`, { caseNeutral })).toEqual([
+        title,
+        '(Bob left.)',
+      ]);
+      const inline = `${title}(the physician) yesterday.`;
+      expect(rouge.sentenceSegment(inline, { caseNeutral })).toEqual([inline]);
+      const name = `${title}“Smith”.`;
+      expect(rouge.sentenceSegment(name, { caseNeutral })).toEqual([name]);
+    }
+  });
+
+  test('preserves the one-word tail ambiguity only when case is ignored', () => {
+    const input = 'He said “Dr.”(It closed.) Done.';
+    expect(rouge.sentenceSegment(input)).toEqual(['He said “Dr.”', '(It closed.)', 'Done.']);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('He said “Dr.”(It closed.) Bob left.', { caseNeutral })).toEqual(
+        ['He said “Dr.”', '(It closed.)', 'Bob left.'],
+      );
+    }
+  });
+
+  test('keeps contiguous alphanumeric tails distinct from grouped citations', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('“Stop?”2Next.', { caseNeutral })).toEqual(['“Stop?”2Next.']);
+      expect(rouge.sentenceSegment('“Stop?”[2]Next.', { caseNeutral })).toEqual([
+        '“Stop?”[2]',
+        'Next.',
+      ]);
+    }
+  });
+
+  test('checks ellipsis boundaries in the prospective question scope', () => {
+    const prefix = 'She asked “Acme Co.';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${prefix}\nWhich Alpha... Next?”`, { caseNeutral })).toEqual([
+        `${prefix} Which Alpha... Next?”`,
+      ]);
+      expect(
+        rouge.sentenceSegment(`${prefix}\nWhich Alpha... (or Beta) did Alice choose?”`, {
+          caseNeutral,
+        }),
+      ).toEqual([prefix, 'Which Alpha... (or Beta) did Alice choose?”']);
+    }
+  });
+
+  test.each(['.[1]', '....[1]'])(
+    'retains a validated citation %s while deciding a scoped question',
+    (terminal) => {
+      const prefix = 'She asked “Acme Co.';
+      const question = `Which Alpha${terminal} or Beta?”`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`${prefix}\n${question}`, { caseNeutral })).toEqual([
+          prefix,
+          question,
+        ]);
+      }
+    },
+  );
+
+  test.each(['²', '[2]', 'ᵃ'])(
+    'uses the complete Treebank closer before a scoped question citation %s',
+    (citation) => {
+      const prefix = 'She asked “Acme Co.';
+      const question = `Which \`\`What?''${citation}”`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`${prefix}\n${question}`, { caseNeutral })).toEqual([
+          prefix,
+          question,
+        ]);
+      }
+    },
+  );
+});
+
+describe('Scoped questions preserve accepted ellipsis boundaries', () => {
+  test.each(['....', '.....', ' . . . .'])(
+    'honors the accepted or retained decision inside a paired span for %j',
+    (ellipsis) => {
+      const prefix = 'She asked “Acme Co.';
+      const question = `Which ‘Alpha${ellipsis} next.’ did she quote?”`;
+      const input = `${prefix}\n${question}`;
+      expect(rouge.sentenceSegment(input)).toEqual([prefix, question]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([
+        `${prefix} Which ‘Alpha${ellipsis}`,
+        'next.’ did she quote?”',
+      ]);
+    },
+  );
+
+  test('uses the actual spaced boundary instead of a bare-ellipsis quantity decision', () => {
+    const prefix = 'She asked “Acme Co.';
+    const bare = 'Which ‘Alpha.... 12 points.’ did she quote?”';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${prefix}\n${bare}`, { caseNeutral })).toEqual([prefix, bare]);
+      expect(
+        rouge.sentenceSegment(`${prefix}\nWhich ‘Alpha . . . . .5 points.’ did she quote?”`, {
+          caseNeutral,
+        }),
+      ).toEqual([`${prefix} Which ‘Alpha . . . .`, '.5 points.’ did she quote?”']);
+    }
+  });
+
+  test('preserves accepted unspaced malformed-annotation boundaries without extending citation syntax', () => {
+    const prefix = 'She asked “Acme Co.';
+    const question = 'Which ‘Alpha....[x] next.’ did she quote?”';
+    expect(rouge.sentenceSegment(`${prefix}\n${question}`)).toEqual([prefix, question]);
+    expect(rouge.sentenceSegment(`${prefix}\n${question}`, { caseNeutral: true })).toEqual([
+      `${prefix} Which ‘Alpha....`,
+      '[x] next.’ did she quote?”',
+    ]);
+  });
+});
+
+describe('Abbreviation-final parenthetical ownership', () => {
+  test.each([
+    ['\n', '\n\n'],
+    ['\r\n', '\r\n\r\n'],
+    ['\r', '\r\r'],
+    ['\n', '\n \t\n'],
+    ['\n\n', ' '],
+    ['\n', '\n'],
+    [' ', ' '],
+    ['', '\n\n'],
+  ])('retains independent sentences around separators %j and %j', (before, after) => {
+    for (const [open, close] of [
+      ['“', '”'],
+      ['‘', '’'],
+      ['"', '"'],
+    ]) {
+      const expected = [
+        `The company is ${open}Acme Co.${close}`,
+        '(It acquired Smith Inc.)',
+        'Next sentence.',
+      ];
+      const input = expected[0] + before + expected[1] + after + expected[2];
+      expect(rouge.sentenceSegment(input)).toEqual(expected);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual(expected);
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    }
+  });
+
+  test.each(['', ' Bob left.'])('retains a complete long aside before tail %j', (tail) => {
+    const first = 'The company is “Acme Co.”';
+    const aside = `(It acquired ${'a'.repeat(180)} Inc.)`;
+    const expected = [first, aside, ...(tail ? [tail.trim()] : [])];
+    const input = `${first} ${aside}${tail}`;
+    expect(rouge.sentenceSegment(input)).toEqual(expected);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual(expected);
+    expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual(
+      expected.map((sentence) => sentence.toLowerCase()),
+    );
+  });
+
+  test('retains a spaced abbreviation label and an outer continuation', () => {
+    for (const input of [
+      '“Acme Co.” ( Mr. ) Whose Mr.?',
+      'He joined “Acme Co.” (formerly Smith Inc.) with his brother.',
+      'He joined “Acme Co.” (formerly Smith Inc.) after the meeting.',
+    ]) {
+      expect(rouge.sentenceSegment(input)).toEqual([input]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
+    }
+  });
+
+  test.each(['(formerly Smith Inc.)', '(formerly Smith.)'])(
+    'preserves mode-specific terminal-fragment treatment for %s',
+    (aside) => {
+      const first = 'The company is “Acme Co.”';
+      const input = `${first} ${aside}`;
+      expect(rouge.sentenceSegment(input)).toEqual([input]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, aside]);
+    },
+  );
+});
+
+describe('Bracketed modifier footnote boundaries', () => {
+  test.each(['[ᵃ]', '(ᵃ)', '[𐞥]', '(𐞥)'])(
+    'attaches the supported marker %s before an independent sentence',
+    (marker) => {
+      for (const [open, close] of [
+        ['“', '”'],
+        ['‘', '’'],
+        ['"', '"'],
+      ]) {
+        for (const terminal of ['.', '?', '!']) {
+          const first = `The result was ${open}Stop${terminal}${close}${marker}`;
+          const input = `${first} Next.`;
+          expect(rouge.sentenceSegment(input)).toEqual([first, 'Next.']);
+          expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, 'Next.']);
+          expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+            first.toLowerCase(),
+            'next.',
+          ]);
+        }
+      }
+    },
+  );
+
+  test.each([' Next.', 'Next.', '“Next.”'])(
+    'keeps the next sentence opener after a marker and tail %j',
+    (tail) => {
+      const first = 'The result was “Stop?”[ᵃ]';
+      const expected = [first, tail.trimStart()];
+      expect(rouge.sentenceSegment(first + tail)).toEqual(expected);
+      expect(rouge.sentenceSegment(first + tail, { caseNeutral: true })).toEqual(expected);
+    },
+  );
+
+  test.each([
+    'The result was (“Stop?”[ᵃ] today).',
+    'He said “Inner ‘Stop?’[ᵃ] More.”',
+    'He said “Inner ‘Stop?’[ᵃ]. More.”',
+  ])('keeps a pending surrounding enclosure in %s', (first) => {
+    const input = `${first} Next.`;
+    expect(rouge.sentenceSegment(input)).toEqual([first, 'Next.']);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, 'Next.']);
+    expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+      first.toLowerCase(),
+      'next.',
+    ]);
+  });
+
+  test.each(['The result was (“Stop?”[ᵃ])', 'He said “Inner ‘Stop?’[ᵃ]”'])(
+    'releases a completed surrounding enclosure in %s',
+    (first) => {
+      const input = `${first} Next.`;
+      expect(rouge.sentenceSegment(input)).toEqual([first, 'Next.']);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, 'Next.']);
+    },
+  );
+
+  test.each(['[ᵃ]', '(ᵃ)', '[𐞥]', '(𐞥)', '[2]ᵃ', '(2)ᵃ'])(
+    'retains a scoped quoted question with marker %s',
+    (marker) => {
+      const first = 'She said “Use etc.';
+      const question = `Which answer was ‘What?’${marker}”`;
+      const input = `${first}\n${question}`;
+      expect(rouge.sentenceSegment(input)).toEqual([first, question]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, question]);
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        first.toLowerCase(),
+        question.toLowerCase(),
+      ]);
+    },
+  );
+
+  test.each(['[a]', '[ᵃword]', '[ᵃ)', '(ᵃ]', '[ᵃᵇ]', '{ᵃ}', '<ᵃ>'])(
+    'preserves the literal annotation policy for %s',
+    (literal) => {
+      const first = 'The result was “Stop?”';
+      const tail = `${literal} Next.`;
+      expect(rouge.sentenceSegment(first + tail)).toEqual([first + tail]);
+      expect(rouge.sentenceSegment(first + tail, { caseNeutral: true })).toEqual([first, tail]);
+    },
+  );
 });
