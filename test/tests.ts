@@ -1718,6 +1718,112 @@ describe('Utility Functions', () => {
       expect(segmentCaseNeutrally(`“It ended.” ${question}`)).toEqual(['“It ended.”', question]);
     }, 5000);
 
+    test.each([
+      "isn't",
+      'isn’t',
+      "aren't",
+      "wasn't",
+      'weren’t',
+      "hasn't",
+      "haven't",
+      "hadn't",
+      "can't",
+      'can’t',
+      'cannot',
+      "won't",
+      'won’t',
+      "wouldn't",
+      "couldn't",
+      "shouldn't",
+      "mustn't",
+    ])('keeps contracted auxiliary predicates with their quoted subject: %s', (auxiliary) => {
+      const sentence = `The word “No.” ${auxiliary} be used.`;
+      expect(ss(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`.toLowerCase())).toEqual([
+        sentence.toLowerCase(),
+        'next.',
+      ]);
+    });
+
+    test.each([
+      "Isn't it clear?",
+      "Isn't Alice there?",
+      "Wasn't “Dr.” Smith there?",
+      'Can’t it work?',
+      "Won't it work?",
+      'Isn’t (it?)',
+    ])('keeps genuine contracted questions separate: %s', (question) => {
+      expect(ss(`“It ended.” ${question}`)).toEqual(['“It ended.”', question]);
+      expect(segmentCaseNeutrally(`“It ended.” ${question}`)).toEqual(['“It ended.”', question]);
+    });
+
+    test.each(['(', '[', '{', '<'])('uses the full contracted auxiliary before %s', (open) => {
+      const close = { '(': ')', '[': ']', '{': '}', '<': '>' }[open];
+      const sentence = `The word “No.” wasn't used ${open}was it?${close} yesterday.`;
+      expect(ss(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      expect(segmentCaseNeutrally(`${sentence} Next.`)).toEqual([sentence, 'Next.']);
+      const question = `Isn’t ${open}it?${close}`;
+      expect(segmentCaseNeutrally(`“It ended.” ${question}`)).toEqual(['“It ended.”', question]);
+    });
+
+    test.each(['B.', 'B!', 'U.S.', 'B....'])(
+      'recognizes a completed quoted predicate before another auxiliary: %s',
+      (label) => {
+        const sentence = `The answer “A.” was “${label}”`;
+        const expected = [sentence, 'Was it?', 'Next.'];
+        expect(ss(`${sentence} Was it? Next.`)).toEqual(expected);
+        expect(segmentCaseNeutrally(`${sentence} Was it? Next.`)).toEqual(expected);
+        expect(segmentCaseNeutrally(`${sentence} Was it? Next.`.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+        expect(segmentCaseNeutrally(sentence)).toEqual([sentence]);
+      },
+    );
+
+    test.each(['B.', 'U.S.', 'Why!'])(
+      'retains the existing neutral label ambiguity inside a question: %s',
+      (label) => {
+        const question = `Was “${label}” valid?`;
+        expect(ss(`“It ended.” ${question} Next.`)).toEqual(['“It ended.”', question, 'Next.']);
+        // An arbitrary following word is not new evidence that the quote ends the predicate.
+        expect(segmentCaseNeutrally(`“It ended.” ${question} Next.`)).toEqual([
+          '“It ended.”',
+          `Was “${label}”`,
+          'valid?',
+          'Next.',
+        ]);
+      },
+    );
+
+    test.each(['B..', 'B...'])(
+      'does not promote a quoted short ellipsis to a declarative terminal: %s',
+      (label) => {
+        const sentence = `The answer “A.” was “${label}”`;
+        expect(ss(`${sentence} Was it? Next.`)).toEqual([sentence, 'Was it?', 'Next.']);
+        expect(segmentCaseNeutrally(`${sentence} Was it? Next.`)).toEqual([
+          'The answer “A.”',
+          `was “${label}”`,
+          'Was it?',
+          'Next.',
+        ]);
+      },
+    );
+
+    test('advances cached terminals across repeated quoted titles and completed predicates', () => {
+      const question = `Wasn't ${'“Dr.” '.repeat(8000)}Smith there?`;
+      expect(ss(`“It ended.” ${question} Next.`)).toEqual(['“It ended.”', question, 'Next.']);
+      expect(segmentCaseNeutrally(`“It ended.” ${question} Next.`)).toEqual([
+        '“It ended.”',
+        question,
+        'Next.',
+      ]);
+      const pair = 'The answer “A.” was “B.” Was it?';
+      expect(segmentCaseNeutrally(`${pair} `.repeat(2000))).toEqual(
+        Array.from({ length: 2000 }, () => ['The answer “A.” was “B.”', 'Was it?']).flat(),
+      );
+    }, 5000);
+
     test('recognizes astral digits before measurement apostrophes', () => {
       const input = "The answer 'Yes' worked. It was 𝟝' tall. Next.";
       const expected = ["The answer 'Yes' worked.", "It was 𝟝' tall.", 'Next.'];

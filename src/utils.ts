@@ -1268,6 +1268,9 @@ function sentenceEnd(
   return abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix) ? -1 : end;
 }
 
+const auxiliaryPrefixReg =
+  /^(?:(?:am|is|are|was|were|be|been|being|has|have|had|will|would|could|should|must)(?:n['’]t)?|can(?:not|['’]t)?|won['’]t)\b/i;
+
 function isDialogueAttribution(
   input: string,
   closesQuotation: boolean,
@@ -1275,13 +1278,11 @@ function isDialogueAttribution(
   start: number,
   leadingDelimiters: string,
 ): boolean {
+  const auxiliary = input.match(auxiliaryPrefixReg);
   if (
     !closesQuotation ||
     /["'“‘„«‹]|``/.test(leadingDelimiters) ||
-    (/^(?:am|is|are|was|were|be|been|being|has|have|had|will|would|can|could|should|must)\b/i.test(
-      input,
-    ) &&
-      questionTerminal(start))
+    (auxiliary !== null && questionTerminal(start))
   ) {
     return false;
   }
@@ -1290,9 +1291,11 @@ function isDialogueAttribution(
     return !aloud[0].includes(',') || isReportingAttribution(input.slice(aloud[0].length));
   }
   return (
-    /^(?:am|is|are|was|were|be|been|being|has|have|had|will|would|can|could|should|must)\s+(?!(?:i|we|he|she|they|you|it|this|that|these|those)\b)/i.test(
-      input,
-    ) || isReportingAttribution(input)
+    (auxiliary !== null &&
+      /^\s+(?!(?:i|we|he|she|they|you|it|this|that|these|those)\b)/i.test(
+        input.slice(auxiliary[0].length),
+      )) ||
+    isReportingAttribution(input)
   );
 }
 
@@ -1307,17 +1310,29 @@ function isReportingAttribution(input: string): boolean {
   );
 }
 
+interface SentenceTerminal extends RegExpExecArray {
+  enclosed?: boolean;
+}
+
 /** Advance enclosure context and terminal matches together, without rescanning source tails. */
 function unquotedTerminalScanner(
   input: string,
   pairs: Int32Array,
   caseNeutral: boolean,
-): (start: number, argumentStart: number) => RegExpExecArray | null {
+): (start: number, argumentStart: number) => SentenceTerminal | null {
   const terminals = /\.{2,}|[.!?]/g;
   let cursor = 0;
   let quotedThrough = -1;
   let bracketDepth = 0;
   let bracketStart = -1;
+  const matchEnclosedTerminal = (index: number): SentenceTerminal | null => {
+    terminals.lastIndex = index;
+    const match: SentenceTerminal | null = terminals.exec(input);
+    if (match !== null) {
+      match.enclosed = true;
+    }
+    return match;
+  };
   const advanceContext = (end: number, start: number, argumentStart: number): number => {
     while (cursor <= end) {
       const index = cursor++;
@@ -1341,14 +1356,14 @@ function unquotedTerminalScanner(
       if (bracketDepth > 0) {
         continue;
       }
-      const question = enclosedQuestionTerminal(
+      const enclosedIndex = enclosedTerminal(
         input,
         index,
         caseNeutral,
         bracketStart === argumentStart,
       );
-      if (question >= start) {
-        return question;
+      if (enclosedIndex >= start) {
+        return enclosedIndex;
       }
     }
     return -1;
@@ -1357,15 +1372,14 @@ function unquotedTerminalScanner(
     terminals.lastIndex = start;
     let terminal = terminals.exec(input);
     do {
-      // Scan through EOF as well: a final bracket can close the surrounding question.
-      const enclosedQuestion = advanceContext(
+      // Scan through EOF as well: a final bracket can supply the enclosing terminal.
+      const enclosedIndex = advanceContext(
         terminal?.index ?? input.length - 1,
         start,
         argumentStart,
       );
-      if (enclosedQuestion >= start) {
-        terminals.lastIndex = enclosedQuestion;
-        return terminals.exec(input);
+      if (enclosedIndex >= start) {
+        return matchEnclosedTerminal(enclosedIndex);
       }
       if (terminal === null) {
         return null;
@@ -1374,12 +1388,11 @@ function unquotedTerminalScanner(
         return terminal;
       }
       if (terminal.index < quotedThrough) {
-        const question =
-          bracketDepth === 0 ? enclosedQuestionTerminal(input, quotedThrough, caseNeutral) : -1;
+        const enclosedIndex =
+          bracketDepth === 0 ? enclosedTerminal(input, quotedThrough, caseNeutral) : -1;
         cursor = quotedThrough + 1;
-        if (question >= terminal.index) {
-          terminals.lastIndex = question;
-          return terminals.exec(input);
+        if (enclosedIndex >= terminal.index) {
+          return matchEnclosedTerminal(enclosedIndex);
         }
         terminals.lastIndex = quotedThrough + 1;
       }
@@ -1389,33 +1402,66 @@ function unquotedTerminalScanner(
   };
 }
 
-/** A question at the end of an enclosure can terminate its surrounding question. */
-function enclosedQuestionTerminal(
+/** A terminal at the end of an enclosure can terminate its surrounding predicate. */
+function enclosedTerminal(
   input: string,
-  quoteEnd: number,
+  enclosureEnd: number,
   caseNeutral: boolean,
   allowProseBoundary = true,
 ): number {
-  let terminal = quoteEnd - 1;
+  let terminal = enclosureEnd - 1;
   while (terminal >= 0 && /[\s"'”’“»›\])}>]/.test(input[terminal])) {
     terminal--;
   }
-  if (input[terminal] !== '?') {
+  if (!/[.!?]/.test(input[terminal] ?? '')) {
     return -1;
   }
-  let end = quoteEnd + 1;
+  while (input[terminal] === '.' && input[terminal - 1] === '.') {
+    terminal--;
+  }
+  let end = enclosureEnd + 1;
   while (end < input.length && /['”’“»›\])}>]/.test(input[end])) {
     end++;
   }
   const next = openingDelimiterEnd(input, end);
   const character = characterAt(input, next);
-  const boundary = allowProseBoundary || /[\r\n"'‘“„«‹]|``/.test(input.slice(end, next));
+  const explicitBreak = /[\r\n"'‘“„«‹]|``/.test(input.slice(end, next));
+  const boundary =
+    (allowProseBoundary || explicitBreak) &&
+    (input[terminal] === '?' || explicitBreak || auxiliaryPrefixReg.test(input.slice(next)));
   return next === input.length ||
     (boundary &&
       ((caseNeutral ? isNeutralSentenceStart(input, end, next) : charIsUpperCase(character)) ||
         isNumericSentenceStart(input, next, character, '?')))
     ? terminal
     : -1;
+}
+
+function auxiliaryArgumentStart(input: string, start: number): number {
+  let end = start + (input.slice(start).match(auxiliaryPrefixReg)?.[0].length ?? 0);
+  while (/\s/.test(input[end] ?? '')) {
+    end++;
+  }
+  return end;
+}
+
+function isQuestionAbbreviation(
+  input: string,
+  terminal: SentenceTerminal,
+  caseNeutral: boolean,
+): boolean {
+  if (terminal[0] !== '.') {
+    return false;
+  }
+  const suffix = input.slice(
+    Math.max(0, terminal.index + 1 - sentenceSuffixLength),
+    terminal.index + 1,
+  );
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  return terminal.enclosed
+    ? abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix)
+    : abbrvReg.test(gateSuffix) ||
+        matchesAcronymSuffix(suffix, suffix.match(/\S+$/)?.[0] ?? '', true);
 }
 
 /** Reuse the next real terminal across monotone quotation-boundary lookaheads. */
@@ -1438,7 +1484,7 @@ function questionTerminalChecker(
     question = false;
     // Callers already recognized an auxiliary; its bounded word and following
     // whitespace precede any later query start, so these prefix scans are disjoint.
-    const argumentStart = start + (input.slice(start).match(/^[a-z]{1,6}\b\s*/i)?.[0].length ?? 0);
+    const argumentStart = auxiliaryArgumentStart(input, start);
     let terminal = nextTerminal(start, argumentStart);
     while (terminal !== null) {
       if (
@@ -1464,16 +1510,7 @@ function questionTerminalChecker(
         terminal = nextTerminal(terminal.index + terminal[0].length, argumentStart);
         continue;
       }
-      const suffix = input.slice(
-        Math.max(0, terminal.index + 1 - sentenceSuffixLength),
-        terminal.index + 1,
-      );
-      const lastWord = suffix.match(/\S+$/)?.[0] ?? '';
-      const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
-      if (
-        terminal[0] !== '.' ||
-        !(abbrvReg.test(gateSuffix) || matchesAcronymSuffix(suffix, lastWord, true))
-      ) {
+      if (!isQuestionAbbreviation(input, terminal, caseNeutral)) {
         through = terminal.index;
         question = terminal[0] === '?';
         break;
