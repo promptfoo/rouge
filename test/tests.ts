@@ -13060,3 +13060,149 @@ describe('Scoped questions preserve accepted ellipsis boundaries', () => {
     ]);
   });
 });
+
+describe('Abbreviation-final parenthetical ownership', () => {
+  test.each([
+    ['\n', '\n\n'],
+    ['\r\n', '\r\n\r\n'],
+    ['\r', '\r\r'],
+    ['\n', '\n \t\n'],
+    ['\n\n', ' '],
+    ['\n', '\n'],
+    [' ', ' '],
+    ['', '\n\n'],
+  ])('retains independent sentences around separators %j and %j', (before, after) => {
+    for (const [open, close] of [
+      ['“', '”'],
+      ['‘', '’'],
+      ['"', '"'],
+    ]) {
+      const expected = [
+        `The company is ${open}Acme Co.${close}`,
+        '(It acquired Smith Inc.)',
+        'Next sentence.',
+      ];
+      const input = expected[0] + before + expected[1] + after + expected[2];
+      expect(rouge.sentenceSegment(input)).toEqual(expected);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual(expected);
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    }
+  });
+
+  test.each(['', ' Bob left.'])('retains a complete long aside before tail %j', (tail) => {
+    const first = 'The company is “Acme Co.”';
+    const aside = `(It acquired ${'a'.repeat(180)} Inc.)`;
+    const expected = [first, aside, ...(tail ? [tail.trim()] : [])];
+    const input = `${first} ${aside}${tail}`;
+    expect(rouge.sentenceSegment(input)).toEqual(expected);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual(expected);
+    expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual(
+      expected.map((sentence) => sentence.toLowerCase()),
+    );
+  });
+
+  test('retains a spaced abbreviation label and an outer continuation', () => {
+    for (const input of [
+      '“Acme Co.” ( Mr. ) Whose Mr.?',
+      'He joined “Acme Co.” (formerly Smith Inc.) with his brother.',
+      'He joined “Acme Co.” (formerly Smith Inc.) after the meeting.',
+    ]) {
+      expect(rouge.sentenceSegment(input)).toEqual([input]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
+    }
+  });
+
+  test.each(['(formerly Smith Inc.)', '(formerly Smith.)'])(
+    'preserves mode-specific terminal-fragment treatment for %s',
+    (aside) => {
+      const first = 'The company is “Acme Co.”';
+      const input = `${first} ${aside}`;
+      expect(rouge.sentenceSegment(input)).toEqual([input]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, aside]);
+    },
+  );
+});
+
+describe('Bracketed modifier footnote boundaries', () => {
+  test.each(['[ᵃ]', '(ᵃ)', '[𐞥]', '(𐞥)'])(
+    'attaches the supported marker %s before an independent sentence',
+    (marker) => {
+      for (const [open, close] of [
+        ['“', '”'],
+        ['‘', '’'],
+        ['"', '"'],
+      ]) {
+        for (const terminal of ['.', '?', '!']) {
+          const first = `The result was ${open}Stop${terminal}${close}${marker}`;
+          const input = `${first} Next.`;
+          expect(rouge.sentenceSegment(input)).toEqual([first, 'Next.']);
+          expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, 'Next.']);
+          expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+            first.toLowerCase(),
+            'next.',
+          ]);
+        }
+      }
+    },
+  );
+
+  test.each([' Next.', 'Next.', '“Next.”'])(
+    'keeps the next sentence opener after a marker and tail %j',
+    (tail) => {
+      const first = 'The result was “Stop?”[ᵃ]';
+      const expected = [first, tail.trimStart()];
+      expect(rouge.sentenceSegment(first + tail)).toEqual(expected);
+      expect(rouge.sentenceSegment(first + tail, { caseNeutral: true })).toEqual(expected);
+    },
+  );
+
+  test.each([
+    'The result was (“Stop?”[ᵃ] today).',
+    'He said “Inner ‘Stop?’[ᵃ] More.”',
+    'He said “Inner ‘Stop?’[ᵃ]. More.”',
+  ])('keeps a pending surrounding enclosure in %s', (first) => {
+    const input = `${first} Next.`;
+    expect(rouge.sentenceSegment(input)).toEqual([first, 'Next.']);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, 'Next.']);
+    expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+      first.toLowerCase(),
+      'next.',
+    ]);
+  });
+
+  test.each(['The result was (“Stop?”[ᵃ])', 'He said “Inner ‘Stop?’[ᵃ]”'])(
+    'releases a completed surrounding enclosure in %s',
+    (first) => {
+      const input = `${first} Next.`;
+      expect(rouge.sentenceSegment(input)).toEqual([first, 'Next.']);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, 'Next.']);
+    },
+  );
+
+  test.each(['[ᵃ]', '(ᵃ)', '[𐞥]', '(𐞥)', '[2]ᵃ', '(2)ᵃ'])(
+    'retains a scoped quoted question with marker %s',
+    (marker) => {
+      const first = 'She said “Use etc.';
+      const question = `Which answer was ‘What?’${marker}”`;
+      const input = `${first}\n${question}`;
+      expect(rouge.sentenceSegment(input)).toEqual([first, question]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, question]);
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        first.toLowerCase(),
+        question.toLowerCase(),
+      ]);
+    },
+  );
+
+  test.each(['[a]', '[ᵃword]', '[ᵃ)', '(ᵃ]', '[ᵃᵇ]', '{ᵃ}', '<ᵃ>'])(
+    'preserves the literal annotation policy for %s',
+    (literal) => {
+      const first = 'The result was “Stop?”';
+      const tail = `${literal} Next.`;
+      expect(rouge.sentenceSegment(first + tail)).toEqual([first + tail]);
+      expect(rouge.sentenceSegment(first + tail, { caseNeutral: true })).toEqual([first, tail]);
+    },
+  );
+});

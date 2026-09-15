@@ -624,14 +624,9 @@ function quotationModifierEnd(
   if (!consumedQuote) {
     return undefined;
   }
-  const bracket = input[delimiterEnd];
-  if (bracket === '[' || bracket === '(') {
-    const marker = characterAt(input, delimiterEnd + 1);
-    const close = delimiterEnd + 1 + marker.length;
-    return isAlphabeticFootnote(input, delimiterEnd) &&
-      input[close] === (bracket === '[' ? ']' : ')')
-      ? -1
-      : undefined;
+  const bracketed = bracketedModifierEnd(input, delimiterEnd);
+  if (bracketed !== undefined) {
+    return closingDelimiterEnd(input, bracketed - 1, pending, pairs, brackets);
   }
   let markerStart = delimiterEnd;
   while (/^\p{Number}$/u.test(characterAt(input, markerStart))) {
@@ -645,6 +640,16 @@ function quotationModifierEnd(
   }
   const end = markerStart + characterAt(input, markerStart).length;
   return closingDelimiterEnd(input, end - 1, pending, pairs, brackets);
+}
+
+/** Recognize only one supported modifier inside matching square or round brackets. */
+function bracketedModifierEnd(input: string, start: number): number | undefined {
+  const opening = input[start];
+  if ((opening !== '[' && opening !== '(') || !isAlphabeticFootnote(input, start)) {
+    return undefined;
+  }
+  const close = start + 1 + characterAt(input, start + 1).length;
+  return input[close] === (opening === '[' ? ']' : ')') ? close + 1 : undefined;
 }
 
 /** Consume the directly attached numeric run and optional supported modifier marker. */
@@ -874,7 +879,7 @@ function scopedQuotedQuestionEnd(
     return -1;
   }
   const grouped = /[[(]/.test(input[end] ?? '') ? numericCitationEnd(input, end) : undefined;
-  let next = grouped ?? quotationCitationTailEnd(input, end);
+  let next = grouped ?? bracketedModifierEnd(input, end) ?? quotationCitationTailEnd(input, end);
   while (next < scopeEnd && /[\s"'”’“»›\])}>]/.test(input[next])) {
     next++;
   }
@@ -5514,8 +5519,10 @@ function isInlineAbbreviationParenthetical(
   if (sentence === undefined || !sentence.endsWith(closing)) {
     return false;
   }
-  const suffix = sentence.slice(0, -1).trimEnd().slice(-sentenceSuffixLength);
-  if (!/[.!?]$/.test(suffix) || abbrvReg.test(suffix)) {
+  const content = sentence.slice(0, -1).trim();
+  const suffix = content.slice(-sentenceSuffixLength);
+  // A lone abbreviation is a label; a complete aside still needs an outer continuation.
+  if (!/[.!?]$/.test(suffix) || (abbrvReg.test(suffix) && !/\s/.test(content))) {
     return true;
   }
   const following = input.slice(start + 1 + sentence.length).trimStart();
@@ -5566,6 +5573,13 @@ function sentenceEnd(
   );
   context.closesQuotation ||= modifierEnd !== undefined;
   const { closedBrackets, endsDelimitedSentence, endsDelimitedVersus, closesQuotation } = context;
+  if (
+    modifierEnd !== undefined &&
+    /[[(]/.test(input[delimiterEnd]) &&
+    closedBrackets < brackets.depth
+  ) {
+    return -1;
+  }
   if (end > index + 1 && end <= brackets.bracketQuoteEnd && /\bv\.?s\.$/i.test(suffix)) {
     return -1;
   }
@@ -6026,6 +6040,11 @@ function closingDelimiterContext(
   let closesQuote = false;
   let pendingQuotes = closingQuotes;
   for (let index = start; index < end; index++) {
+    const modifierEnd = bracketedModifierEnd(input, index);
+    if (modifierEnd !== undefined && modifierEnd <= end) {
+      index = modifierEnd - 1;
+      continue;
+    }
     const closing = pairedClosingQuote(input, index, pairs);
     if (closing !== undefined) {
       pendingQuotes = pendingQuotes.replace(closing, '');
