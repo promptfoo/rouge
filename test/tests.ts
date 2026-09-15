@@ -1100,6 +1100,33 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each([
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Sept',
+      'Oct',
+      'Nov',
+      'Dec',
+    ])('preserves compact %s dates while retaining explicit citations', (month) => {
+      for (const number of ['1', '31', '2026']) {
+        const input = `The deadline is ${month}.${number} Next year.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      }
+      for (const citation of ['[1]', '(1)']) {
+        const first = `The deadline is ${month}.${citation}`;
+        expect(ss(`${first} Next year.`)).toEqual([first, 'Next year.']);
+        expect(segmentCaseNeutrally(`${first} Next year.`)).toEqual([first, 'Next year.']);
+      }
+    });
+
     test.each(['[1]', '(1)', '1'])(
       'retains the numeric continuation of a cited date abbreviation: %s',
       (citation) => {
@@ -1302,6 +1329,81 @@ describe('Utility Functions', () => {
       expect(ss(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input)).toEqual([input]);
       expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each([
+      'p < 0.05',
+      'p <0.05',
+      'p<0.05',
+      'p < .05',
+      'p<.05',
+      '𝔭 < 0.05',
+      '𝟎 < 𝟏',
+      'ṕ <0.05',
+      '12.5 <30',
+      '(count) <0.05',
+      '[count] <0.05',
+      '{count} <0.05',
+    ])('retains a citation boundary after numeric comparison %s', (expression) => {
+      for (const citation of ['[1]', '(1)', '1']) {
+        const first = `The result was significant (${expression}).${citation}`;
+        const input = `${first} Next sentence.`;
+        expect(ss(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Next sentence.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          'next sentence.',
+        ]);
+      }
+    });
+
+    test.each([
+      ['"', '"'],
+      ["'", "'"],
+      ['“', '”'],
+      ['``', "''"],
+      ['「', '」'],
+    ])('retains an angle enclosure after its inner %s%s quotation closes', (opening, closing) => {
+      const input = `<${opening}Alpha.[1]${closing} Beta.>`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each([
+      '<𝔘nicode Alpha.[1] Beta.>',
+      '<word Alpha.[1] Beta.>',
+      '<0.05 Alpha.[1] Beta.>',
+      '< 0.05 Alpha.[1] Beta.>',
+      'Literal <0.05 Alpha.[1] Beta.>',
+      '<(Alpha.[1]) Beta.>',
+      'The result was significant (p<0.05>.[1] Next sentence.',
+      'Outer (the result (p<0.05>).[1] Next sentence.)',
+      'The result was significant (p<0.05.>[1] Next sentence.',
+      '(<word.>[1]> Next sentence.',
+      'Outer (the result (p < 0.05).[1] Next sentence.)',
+      '(p < 0.05.[1] Next sentence.',
+      '<p<0.05.[1] Next sentence.>',
+      '(word> Alpha.[1] Beta.)',
+    ])('preserves citation enclosure depth around numeric and surplus angle marks: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test('keeps the bounded numeric-comparison ambiguity explicit', () => {
+      const input = 'x <0.05 Alpha.[1] Beta.>';
+      expect(ss(input)).toEqual(['x <0.05 Alpha.[1]', 'Beta.>']);
+      expect(segmentCaseNeutrally(input)).toEqual(['x <0.05 Alpha.[1]', 'Beta.>']);
+      for (const expression of ['p < x', '0 < p < 1', 'pvalue < 0.05', 'p < -0.05']) {
+        const retained = `(${expression}).[1] Next sentence.`;
+        expect(ss(retained)).toEqual([retained]);
+        expect(segmentCaseNeutrally(retained)).toEqual([retained]);
+      }
+      for (const incomplete of ['<', '< ', 'p<', 'p <   ']) {
+        expect(ss(incomplete)).toEqual([incomplete.trim()]);
+        expect(segmentCaseNeutrally(incomplete)).toEqual([incomplete.trim()]);
+      }
     });
 
     test.each([
@@ -4181,6 +4283,21 @@ test('retains numeric hostname components inside right-double quotation marks', 
 });
 
 describe('Citation line separators and numeric prerequisites', () => {
+  test.each([' ', '\t', '\n', '\r\n', '\u2028', '\u2029'])(
+    'omits leading citation separator %j from a final fragment',
+    (gap) => {
+      for (const caseNeutral of [false, true]) {
+        const input = `Alpha.[1]${gap}Beta`;
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual(['Alpha.[1]', 'Beta']);
+        const internal = `Alpha.[1]${gap}Beta\u2028gamma`;
+        expect(rouge.sentenceSegment(internal, { caseNeutral })).toEqual([
+          'Alpha.[1]',
+          'Beta\u2028gamma',
+        ]);
+      }
+    },
+  );
+
   test.each(['\n', '\r\n', '\u2028', '\u2029'])(
     'honors explicit line separator %j after a complete citation',
     (gap) => {

@@ -1,4 +1,5 @@
 import {
+  ABBR_DATES,
   ABBR_PLACES,
   GATE_EXCEPTIONS,
   GATE_SUBSTITUTIONS,
@@ -524,6 +525,43 @@ export interface SentenceSegmentOptions {
   caseNeutral?: boolean;
 }
 
+interface SentenceBracketState {
+  depth: number;
+  standalone: boolean;
+  citationDepth: number;
+  citationStandalone: boolean;
+  angles: number;
+}
+
+/** Preserve ordinary depth while reserving angle closers for citation inference. */
+function updateSentenceBrackets(
+  input: string,
+  index: number,
+  standalone: boolean,
+  brackets: SentenceBracketState,
+): void {
+  const char = input[index];
+  if (openingBracketReg.test(char)) {
+    if (brackets.depth === 0) {
+      brackets.standalone = standalone;
+    }
+    brackets.depth++;
+    if (char !== '<' || !isNumericComparisonAngle(input, index)) {
+      if (brackets.citationDepth === 0) {
+        brackets.citationStandalone = standalone;
+      }
+      brackets.citationDepth++;
+      brackets.angles += Number(char === '<');
+    }
+  } else if (closingBracketReg.test(char)) {
+    brackets.depth = Math.max(0, brackets.depth - 1);
+    if (char !== '>' || brackets.angles > 0) {
+      brackets.citationDepth = Math.max(0, brackets.citationDepth - 1);
+      brackets.angles -= Number(char === '>');
+    }
+  }
+}
+
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
 function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   const chunks: string[] = [];
@@ -532,7 +570,13 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
   let lastEnd = 0;
   let start = -1;
   let insideQuotes = false;
-  const brackets = { depth: 0, standalone: false };
+  const brackets = {
+    depth: 0,
+    standalone: false,
+    citationDepth: 0,
+    citationStandalone: false,
+    angles: 0,
+  };
   const citationQuotes = citationQuotationState(input);
   const isPathOrAddress = pathOrAddressTokenChecker(input, caseNeutral);
   const hasIdentifierEvidence = citationIdentifierEvidenceChecker(input);
@@ -551,14 +595,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       previousQuotes,
       insideQuotes,
     );
-    if (openingBracketReg.test(char)) {
-      if (brackets.depth === 0) {
-        brackets.standalone = start === -1;
-      }
-      brackets.depth++;
-    } else if (closingBracketReg.test(char)) {
-      brackets.depth = Math.max(0, brackets.depth - 1);
-    }
+    updateSentenceBrackets(input, index, start === -1, brackets);
     if (index < lastEnd || char === '\r' || char === '\n') {
       // Only closing-delimiter lookahead can cross CR/LF; other wraps reset the prefix.
       start = -1;
@@ -600,7 +637,9 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
     }
   }
 
-  chunks.push(input.slice(lastEnd));
+  const tail = input.slice(lastEnd);
+  // A final fragment has no later terminal to separate its leading citation whitespace.
+  chunks.push(citationThrough > 0 && lastEnd === citationThrough ? tail.trimStart() : tail);
   return chunks;
 }
 
@@ -1174,7 +1213,7 @@ function citationEnd(
   index: number,
   caseNeutral: boolean,
   legacyInsideQuotes: boolean,
-  brackets: { depth: number; standalone: boolean },
+  brackets: { citationDepth: number; citationStandalone: boolean; angles: number },
   quotationQuotes: CitationQuotationState | undefined,
   isPathOrAddress: (index: number) => boolean,
   isNumericContinuation: (index: number) => boolean,
@@ -1244,17 +1283,17 @@ function citationEnd(
   ) {
     return continuation;
   }
-  const closedBrackets =
-    countClosingBrackets(input, index + 1, delimiterEnd) +
-    countClosingBrackets(input, contentEnd, end);
+  const closedBrackets = countClosingBrackets(closing, 0, closing.length, brackets.angles);
   const closesQuotation = insideQuotes || quotationQuotes.closers.length > 0;
   if (
-    (closedBrackets > 0 && brackets.depth > 0 && !(brackets.standalone || closesQuotation)) ||
+    (closedBrackets > 0 &&
+      brackets.citationDepth > 0 &&
+      !(brackets.citationStandalone || closesQuotation)) ||
     !isCitationContext(
       input,
       index,
       characterAt(input, citationStart),
-      Math.max(0, brackets.depth - closedBrackets),
+      Math.max(0, brackets.citationDepth - closedBrackets),
       caseNeutral,
       hasIdentifierEvidence(index),
     )
@@ -1699,10 +1738,12 @@ function isCitationContext(
     (hasIdentifierEvidence ||
       (!caseNeutral && /^[\p{Lu}\p{Lt}\p{Mark}\p{Number}_-]{2,}$/u.test(precedingToken)));
   const labeledSection = isLabeledCitationIdentifier(input, tokenStart, precedingToken);
+  const compactDate = input[index] === '.' && ABBR_DATES.includes(precedingToken.toLowerCase());
   return (
     /^[\p{Letter}\p{Mark})\]}>!?]$/u.test(previous) &&
     !standaloneIdentifier &&
     !labeledSection &&
+    !compactDate &&
     !(
       input[index] === '.' &&
       /^\p{Letter}$/u.test(previous) &&
@@ -1711,11 +1752,48 @@ function isCitationContext(
   );
 }
 
-function countClosingBrackets(input: string, start: number, end: number): number {
+/** A numeric comparison needs operands; preserve literal and quoted angle wrappers. */
+function isNumericComparisonAngle(input: string, index: number): boolean {
+  let left = index - 1;
+  while (left >= 0 && /[^\S\r\n\u2028\u2029]/.test(input[left])) {
+    left--;
+  }
+  let right = index + 1;
+  while (right < input.length && /[^\S\r\n\u2028\u2029]/.test(input[right])) {
+    right++;
+  }
+  let operandStart = left;
+  while (
+    operandStart >= 0 &&
+    /[\p{Letter}\p{Mark}\p{Number}._\uD800-\uDFFF]/u.test(input[operandStart])
+  ) {
+    operandStart--;
+  }
+  const operand =
+    /[)\]}]/.test(input[left] ?? '') ||
+    /^(?:\p{Letter}\p{Mark}*|\p{Number}+(?:\.\p{Number}+)?)$/u.test(
+      input.slice(operandStart + 1, left + 1),
+    );
+  const following = characterAt(input, right);
+  return (
+    operand &&
+    (/^\p{Number}$/u.test(following) ||
+      (following === '.' && /^\p{Number}$/u.test(characterAt(input, right + 1))))
+  );
+}
+
+function countClosingBrackets(
+  input: string,
+  start: number,
+  end: number,
+  angles = Number.POSITIVE_INFINITY,
+): number {
   let count = 0;
+  let remainingAngles = angles;
   for (let index = start; index < end; index++) {
-    if (closingBracketReg.test(input[index])) {
+    if (closingBracketReg.test(input[index]) && (input[index] !== '>' || remainingAngles > 0)) {
       count++;
+      remainingAngles -= Number(input[index] === '>');
     }
   }
   return count;
