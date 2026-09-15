@@ -3775,3 +3775,109 @@ describe('Core Functions', () => {
     });
   });
 });
+
+describe('German citation quotations and structural continuation evidence', () => {
+  test.each([
+    'He said „Alpha.[1] Beta.“ aloud.',
+    'He said „“Alpha.[1] Beta.” aloud.“ Next.',
+    'He said “„Alpha.[1] Beta.“ aloud.” Next.',
+    'He said „“Alpha.[1]” Beta.“ aloud.',
+    'He said „Alpha.[1] “Beta.” aloud.“ Next.',
+    'He said „Alpha.[1]“ and continued.',
+  ])('retains the pending surrounding quotation in %s', (input) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test.each([
+    'He said „Alpha.[1]“',
+    'He said „Alpha.“[1]',
+    'He said „“Alpha.[1]”“',
+    'He said “„Alpha.[1]“”',
+    'He said „"Alpha.[1]"“',
+    "He said „'Alpha.[1]'“",
+    'He said „Alpha. [1] “',
+    'He said „Alpha. “ [1]',
+  ])('consumes the complete German citation closers in %s', (first) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+    }
+  });
+
+  test('keeps a following independent German or English quotation separate', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('Alpha.[1] „Next.“', { caseNeutral })).toEqual([
+        'Alpha.[1]',
+        '„Next.“',
+      ]);
+      expect(rouge.sentenceSegment('He said „Alpha.[1]“ “Next.[2]”', { caseNeutral })).toEqual([
+        'He said „Alpha.[1]“',
+        '“Next.[2]”',
+      ]);
+    }
+  });
+
+  test.each(['¿Qué pasó?', '¡Qué bien!', '• Item follows.', '⁃ Item follows.'])(
+    'allows the spaced structural start %s after an explicit citation',
+    (next) => {
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`Alpha.[1] ${next}`, { caseNeutral })).toEqual([
+          'Alpha.[1]',
+          next,
+        ]);
+        const attached = `Alpha.[1]${next}`;
+        expect(rouge.sentenceSegment(attached, { caseNeutral })).toEqual([attached]);
+      }
+      expect(
+        rouge.sentenceSegment(`Alpha.[1] ${next}`.toLowerCase(), { caseNeutral: true }),
+      ).toEqual(['alpha.[1]', next.toLowerCase()]);
+    },
+  );
+
+  test.each([', and continues.', '— an aside continues.', ': details follow.'])(
+    'retains continuation punctuation %s after a citation',
+    (next) => {
+      for (const caseNeutral of [false, true]) {
+        const input = `Alpha.[1] ${next}`;
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    },
+  );
+
+  test.each(['ABC2', 'ABC_', 'AB𐒠'])(
+    'retains digit or underscore evidence from earlier dotted component %s',
+    (prefix) => {
+      const input = `${prefix}.DEF.1 Introduction.`;
+      expect(rouge.sentenceSegment(input)).toEqual([input]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([
+        `${prefix}.`,
+        'DEF.1 Introduction.',
+      ]);
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        `${prefix.toLowerCase()}.`,
+        'def.1 introduction.',
+      ]);
+    },
+  );
+
+  test('resets identifier evidence at real punctuation and preserves letter-only ambiguity', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('2!Alpha.1 Next.', { caseNeutral })).toEqual([
+        '2!',
+        'Alpha.1',
+        'Next.',
+      ]);
+    }
+    expect(rouge.sentenceSegment('ABC.DEF.1 Introduction.', { caseNeutral: true })).toEqual([
+      'ABC.',
+      'DEF.1',
+      'Introduction.',
+    ]);
+  });
+
+  test('keeps repeated identifier candidates within a linear scan', () => {
+    const input = `${'A.1'.repeat(40_000)} Introduction.`;
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
+  }, 3000);
+});
