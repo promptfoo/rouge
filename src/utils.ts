@@ -591,7 +591,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
       input,
       index,
       citationQuotes,
-      index < citationThrough,
+      citationThrough,
       previousQuotes,
       insideQuotes,
     );
@@ -957,14 +957,21 @@ function updateCitationQuotationState(
   input: string,
   index: number,
   quotes: CitationQuotationState | undefined,
-  confirmedClosing: boolean,
+  citationThrough: number,
   previousQuotes: boolean,
   insideQuotes: boolean,
 ): void {
   if (
     quotes === undefined ||
     quotes.overflowed ||
-    updateCitationDoubleQuote(input, index, quotes, previousQuotes, insideQuotes, confirmedClosing)
+    updateCitationDoubleQuote(
+      input,
+      index,
+      quotes,
+      previousQuotes,
+      insideQuotes,
+      index < citationThrough,
+    )
   ) {
     return;
   }
@@ -986,7 +993,10 @@ function updateCitationQuotationState(
   if (/[”’»›」』]/.test(character)) {
     if (closers.at(-1) === character) {
       closers.pop();
-    } else if (character === '”' && isRightDoubleCitationOpening(input, index)) {
+    } else if (
+      character === '”' &&
+      isRightDoubleCitationOpening(input, index, index === citationThrough)
+    ) {
       pushCitationQuotation(quotes, character);
     }
     return;
@@ -999,7 +1009,7 @@ function updateCitationQuotationState(
   const following = characterAt(input, index + 1);
   if (closers.at(-1) === "'") {
     if (
-      confirmedClosing ||
+      index < citationThrough ||
       following.length === 0 ||
       /[.!?]/.test(previous) ||
       singleQuoteClosingContextReg.test(following) ||
@@ -1316,32 +1326,39 @@ function citationEnd(
     caseNeutral,
     isNumericContinuation,
     groupedCitation,
-    groupedCitation && end === contentEnd,
   )
     ? end
     : continuation;
 }
 
 /** A pending English closer takes precedence; otherwise this mark can open a quotation. */
-function isRightDoubleCitationOpening(input: string, index: number): boolean {
+function isRightDoubleCitationOpening(
+  input: string,
+  index: number,
+  afterCitation = false,
+): boolean {
   return (
-    (index === 0 || /^[\s([<{"'‘“«‹„‚「『]$/u.test(input[index - 1])) &&
+    (afterCitation ||
+      index === 0 ||
+      /[\s([<{"'‘“«‹„‚「『,:;\p{Pd}]$/u.test(input.slice(Math.max(0, index - 2), index))) &&
     /\S/.test(input[index + 1] ?? '')
   );
 }
 
-function isCitationOpeningQuote(input: string, index: number): boolean {
+function isCitationOpeningQuote(input: string, index: number, afterCitation = false): boolean {
   return (
     /["'“‘«‹„‚「『]/.test(input[index]) ||
-    (input[index] === '”' && isRightDoubleCitationOpening(input, index))
+    (input[index] === '”' && isRightDoubleCitationOpening(input, index, afterCitation))
   );
 }
 
 function isCitationSeparator(input: string, end: number, allowUnspaced: boolean): boolean {
   return (
     /[\s([{<]/.test(input[end]) ||
-    isCitationOpeningQuote(input, end) ||
-    (allowUnspaced && isCasedCharacter(characterAt(input, end)))
+    isCitationOpeningQuote(input, end, true) ||
+    (allowUnspaced &&
+      isCasedCharacter(characterAt(input, end)) &&
+      !(/['‘’]/.test(input[end - 1] ?? '') && isCitationElision(input, end - 1)))
   );
 }
 
@@ -1352,18 +1369,17 @@ function isCitationSentenceStart(
   caseNeutral: boolean,
   isNumericContinuation: (index: number) => boolean,
   groupedCitation: boolean,
-  allowUnspaced: boolean,
 ): boolean {
-  if (!isCitationSeparator(input, end, allowUnspaced)) {
+  if (!isCitationSeparator(input, end, groupedCitation)) {
     return false;
   }
   let next = end;
   let quotedStart = false;
   while (
     next < input.length &&
-    (/[\s([{<]/.test(input[next]) || isCitationOpeningQuote(input, next))
+    (/[\s([{<]/.test(input[next]) || isCitationOpeningQuote(input, next, next === end))
   ) {
-    quotedStart ||= isCitationOpeningQuote(input, next);
+    quotedStart ||= isCitationOpeningQuote(input, next, next === end);
     next++;
   }
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
@@ -1530,6 +1546,9 @@ function citationDelimiterEnd(
     ) {
       end = next;
       continue;
+    }
+    if (preserveOpeners && input[next] === '”' && pending.at(-1) !== '”') {
+      return end;
     }
     if (next > end && input[next] !== pending.at(-1)) {
       return end;

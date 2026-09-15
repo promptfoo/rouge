@@ -4348,6 +4348,110 @@ describe('Bare citation context after supported bracket closers', () => {
   );
 });
 
+describe('Citation boundaries around quotation openers and closers', () => {
+  const segmentCaseNeutrally = (input: string) =>
+    rouge.sentenceSegment(input, { caseNeutral: true });
+
+  test.each([':', ',', ';', '—', '–', '-', '\u{10ead}'])(
+    'retains right-double quotation context after punctuation %s',
+    (punctuation) => {
+      const pending = `Han sa${punctuation}”Alpha.[1] Beta.” högt.`;
+      const matchingCloser = `Han sa ”Alpha.[1] Beta${punctuation}” högt.`;
+      for (const input of [pending, matchingCloser]) {
+        expect(rouge.sentenceSegment(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      }
+      const first = `Han sa${punctuation}”Alpha.[1]”`;
+      expect(rouge.sentenceSegment(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+    },
+  );
+
+  test.each([
+    ...bracketPairs,
+    ['"', '"'],
+    ["'", "'"],
+    ['“', '”'],
+    ['”', '”'],
+    ['``', "''"],
+    ['「', '」'],
+  ] as const)(
+    'retains an unspaced boundary after completed %s%s citation context',
+    (opening, closing) => {
+      for (const marker of ['[1]', '(1)']) {
+        const first = `${opening}Alpha.${marker}${closing}`;
+        expect(rouge.sentenceSegment(`${first}Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first}Next.`)).toEqual([first, 'Next.']);
+        expect(rouge.sentenceSegment(`${first}next.`)).toEqual([`${first}next.`]);
+        expect(segmentCaseNeutrally(`${first}next.`)).toEqual([first, 'next.']);
+        const pending = `${opening}Alpha.${marker}Next.${closing}`;
+        expect(rouge.sentenceSegment(pending)).toEqual([pending]);
+        expect(segmentCaseNeutrally(pending)).toEqual([pending]);
+      }
+    },
+  );
+
+  test.each([
+    ['‘', '’'],
+    ['‚', '‘'],
+  ])('preserves an adjacent elision after the completed %s%s quotation', (opening, closing) => {
+    for (const word of ['Tis', 'Twas', 'Cause', 'Cos', 'Round', '90s']) {
+      const first = `She said ${opening}Alpha.[1]${closing}${word} true.`;
+      const input = `${first} Later Alpha.[2] Next.`;
+      const expected = [first, 'Later Alpha.[2]', 'Next.'];
+      expect(rouge.sentenceSegment(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }
+  });
+
+  test.each(['Alpha.[1]', 'Alpha.(1)', '(Alpha.[1])', '”Alpha.[1]”'])(
+    'opens an adjacent right-double quotation after accepted citation %s',
+    (first) => {
+      expect(rouge.sentenceSegment(`${first}”Next.”`)).toEqual([first, '”Next.”']);
+      expect(segmentCaseNeutrally(`${first}”Next.”`)).toEqual([first, '”Next.”']);
+      const citedTail = '”Next.[2] Later.[3]” Last.[4] Done.';
+      const expected = [first, '”Next.[2] Later.[3]”', 'Last.[4]', 'Done.'];
+      expect(rouge.sentenceSegment(first + citedTail)).toEqual(expected);
+      expect(segmentCaseNeutrally(first + citedTail)).toEqual(expected);
+      // The ordinary uncited terminal before a right-double closer keeps its earlier policy.
+      const ordinaryTail = '”Next.[2] Later.” Last.[3] Done.';
+      const retained = [first, '”Next.[2] Later.” Last.[3]', 'Done.'];
+      expect(rouge.sentenceSegment(first + ordinaryTail)).toEqual(retained);
+      expect(segmentCaseNeutrally(first + ordinaryTail)).toEqual(retained);
+    },
+  );
+
+  test('consumes a pending right-double closer before an unspaced sentence start', () => {
+    const first = 'Han sa ”Alpha.[1]”';
+    expect(rouge.sentenceSegment(`${first}Next.`)).toEqual([first, 'Next.']);
+    expect(segmentCaseNeutrally(`${first}Next.`)).toEqual([first, 'Next.']);
+  });
+
+  test('keeps the existing spacing requirement for a Treebank symbol start', () => {
+    expect(rouge.sentenceSegment("Alpha.[1] ``Next.''")).toEqual(['Alpha.[1]', "``Next.''"]);
+    expect(segmentCaseNeutrally("Alpha.[1] ``Next.''")).toEqual(['Alpha.[1]', "``Next.''"]);
+    expect(rouge.sentenceSegment("Alpha.[1]``Next.''")).toEqual(["Alpha.[1]``Next.''"]);
+    expect(segmentCaseNeutrally("Alpha.[1]``Next.''")).toEqual(["Alpha.[1]``Next.''"]);
+  });
+
+  test.each([
+    '(Alpha.1)Next.',
+    '"Alpha.1"Next.',
+    'He said (Alpha.[1])Next.',
+    'Outer ((Alpha.[1])Next.)',
+    '(Alpha.[1])12 people.',
+    '(Alpha.[1])_identifier.',
+    '(Alpha.[1])/path.',
+    'package/<foo>.1Next.',
+    'Alpha.[1]”',
+    'Alpha.[1]” Beta.',
+    'Han sa ”Alpha.[1]Next.”',
+  ])('retains competing bare, pending or identifier context in %s', (input) => {
+    expect(rouge.sentenceSegment(input)).toEqual([input]);
+    expect(segmentCaseNeutrally(input)).toEqual([input]);
+  });
+});
+
 describe('Right-double citation quotation roles', () => {
   test.each(['Han sa ”Alpha.[1] Beta.” högt.', 'Han sa ”Alpha.[1] Beta.'])(
     'retains the pending surrounding quotation in %s',
