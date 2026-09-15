@@ -11,43 +11,30 @@ on:
         required: false
         type: string
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_tag == '' }}
+    uses: ./.github/workflows/validate-commit.yml
     permissions:
       checks: read
-    steps:
-      - name: Wait for exact-commit CI and security checks
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          required=("build (18)" "build (20)" "build (22)" "build (24)" "Analyze (actions)" "Analyze (javascript-typescript)")
-          while true; do
-            runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100")"
-            pending=0
-            for name in "${required[@]}"; do
-              result="$(jq -r --arg name "$name" '[.check_runs[] | select(.app.slug == "github-actions" and .name == $name)][0] | "\(.status // "missing") \(.conclusion // "")"' <<< "$runs")"
-              case "$result" in
-                'completed success') ;;
-                completed*) echo "$name failed: $result"; exit 1 ;;
-                *) pending=1 ;;
-              esac
-            done
-            if [ "$pending" -eq 0 ]; then
-              break
-            fi
-            sleep 10
-          done
+    with:
+      sha: ${{ github.sha }}
 
   release-please:
     needs: validate
+    if: ${{ !cancelled() && (needs.validate.result == 'success' || needs.validate.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     outputs:
       publish: ${{ steps.publication.outputs.publish }}
+      sha: ${{ steps.publication.outputs.sha }}
+      tag: ${{ steps.publication.outputs.tag }}
     steps:
       # Use GitHub App token so the created PR triggers CI workflows
       # (PRs created with GITHUB_TOKEN don't trigger workflows to prevent loops)
@@ -73,21 +60,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          CREATED_TAG: ${{ steps.release.outputs.tag_name }}
         run: |
-          if [ -n "$RELEASE_TAG" ]; then
-            tag="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
-            target="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
-            if [ "$target" != "$GITHUB_SHA" ]; then
-              echo "Release $RELEASE_TAG points to $target, not $GITHUB_SHA"
-              exit 1
+          if [ -z "$RELEASE_TAG" ]; then
+            if [ "$RELEASE_CREATED" != 'true' ]; then
+              echo 'publish=false' >> "$GITHUB_OUTPUT"
+              exit 0
             fi
-            echo 'publish=true' >> "$GITHUB_OUTPUT"
-          else
-            echo "publish=${RELEASE_CREATED:-false}" >> "$GITHUB_OUTPUT"
+            RELEASE_TAG="$CREATED_TAG"
           fi
+          if [ -z "$RELEASE_TAG" ]; then
+            echo 'Release creation did not return a tag'
+            exit 1
+          fi
+          tag="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Release $RELEASE_TAG did not resolve to a commit"
+            exit 1
+          fi
+          printf 'publish=true\nsha=%s\ntag=%s\n' "$sha" "$tag" >> "$GITHUB_OUTPUT"
+
+  validate-release:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.publish == 'true' }}
+    uses: ./.github/workflows/validate-commit.yml
+    permissions:
+      checks: read
+    with:
+      sha: ${{ needs.release-please.outputs.sha }}
 
   build:
-    needs: release-please
+    needs: [release-please, validate-release]
     if: ${{ needs.release-please.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -96,11 +100,21 @@ jobs:
       # Pin to SHA for supply chain security
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout validated release commit
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          git checkout --detach "$RELEASE_SHA"
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
-          cache: 'npm'
+          package-manager-cache: false
       - run: npm ci
       - run: npm test
 
@@ -115,12 +129,22 @@ jobs:
       # Pin to SHA for supply chain security
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout validated release commit
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          git checkout --detach "$RELEASE_SHA"
       # Node 24 required for npm OIDC trusted publishing (npm 11.5.1+)
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: '24'
-          cache: 'npm'
+          package-manager-cache: false
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
       # Publishing uses npm's OIDC trusted publishers for authentication.
@@ -128,4 +152,9 @@ jobs:
       # must be configured on npmjs.com to trust this GitHub repository/workflow.
       # See: https://docs.npmjs.com/trusted-publishers/
       # The --provenance flag generates SLSA Build Level 3 attestation for supply chain security.
-      - run: npm publish --access public --provenance
+      - name: Publish the selected release
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
+        # npm reads these fields for the source recorded in its provenance.
+        run: GITHUB_SHA="$RELEASE_SHA" GITHUB_REF="refs/tags/$RELEASE_TAG" npm publish --access public --provenance
