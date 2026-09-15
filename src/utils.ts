@@ -721,11 +721,7 @@ class SentenceBuffer {
       const character = text[index];
       if (/["'`“”„‘’«»‹›]/.test(character)) {
         this.#trackQuote(character);
-      } else if (
-        !this.#insideQuotation &&
-        openingBracketReg.test(character) &&
-        (character !== '<' || /^\p{Letter}$/u.test(characterAt(text, index + 1)))
-      ) {
+      } else if (!this.#insideQuotation && isOpeningSentenceBracket(text, index)) {
         this.#openingDelimiters.push(character);
       } else if (!this.#insideQuotation && closingBracketReg.test(character)) {
         const opener = '([{<'[')]}>'.indexOf(character)];
@@ -1310,6 +1306,16 @@ function isReportingAttribution(input: string): boolean {
   );
 }
 
+/** A literal angle opener precedes a letter or an already-confirmed quoted span. */
+function isOpeningSentenceBracket(input: string, index: number, nextQuoteEnd = 0): boolean {
+  return (
+    openingBracketReg.test(input[index]) &&
+    (input[index] !== '<' ||
+      nextQuoteEnd > 0 ||
+      /^\p{Letter}$/u.test(characterAt(input, index + 1)))
+  );
+}
+
 interface SentenceTerminal extends RegExpExecArray {
   enclosed?: boolean;
 }
@@ -1342,7 +1348,7 @@ function unquotedTerminalScanner(
       if (index <= quotedThrough) {
         continue;
       }
-      if (openingBracketReg.test(input[index])) {
+      if (isOpeningSentenceBracket(input, index, pairs[index + 1])) {
         if (bracketDepth === 0) {
           bracketStart = index;
         }

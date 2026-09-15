@@ -4168,3 +4168,37 @@ describe('Core Functions', () => {
     });
   });
 });
+
+describe('Comparison operators in quotation question lookahead', () => {
+  test.each(['x <5', 'x < 5', 'x < y', 'x <\t5'])(
+    'keeps the preceding quotation separate before %s',
+    (comparison) => {
+      const input = `"It ended." Was ${comparison}? Next.`;
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([
+        '"It ended."',
+        `Was ${comparison}?`,
+        'Next.',
+      ]);
+      // The ordinary cased scanner keeps its existing spaced letter continuation.
+      expect(rouge.sentenceSegment(input)).toEqual(
+        comparison === 'x < y'
+          ? ['"It ended."', `Was ${comparison}? Next.`]
+          : ['"It ended."', `Was ${comparison}?`, 'Next.'],
+      );
+    },
+  );
+
+  test.each(['<team>', '<𐐀team>', '"< y"', '“<5”'])(
+    'retains literal angle and quoted contexts in %s',
+    (argument) => {
+      const input = `"It ended." Was ${argument} ready? Next.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          '"It ended."',
+          `Was ${argument} ready?`,
+          'Next.',
+        ]);
+      }
+    },
+  );
+});
