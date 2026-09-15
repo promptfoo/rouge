@@ -262,29 +262,47 @@ const independentSentenceReg =
 const hostnameLabelReg =
   /^(com|org|net|edu|gov|mil|io|dev|app|co|uk|us|ca|ai|info|biz|me|tv)(?=[/.!?\s"'“”‘’()[\]{}<>]|$)/i;
 
-function isIndependentSentence(input: string, question?: boolean): boolean {
+function isIndependentSentence(input: string, question?: boolean, caseNeutral = false): boolean {
   return (
     independentSentenceReg.test(input) &&
-    (!/^(?:who|which|whose|whom)\b/i.test(input) || (question ?? questionStartChecker([input])(0)))
+    (!/^(?:who|which|whose|whom)\b/i.test(input) ||
+      (question ?? questionStartChecker([input], caseNeutral)(0)))
   );
 }
 
 /** Share the next meaningful terminal across monotone provisional-chunk lookaheads. */
 function questionStartChecker(
   chunks: readonly string[],
+  caseNeutral: boolean,
 ): (index: number, offset?: number) => boolean {
   let through = -1;
   let throughOffset = -1;
   let question = false;
+  let protectedChunk = -1;
+  let protectedPeriods: SpacedEllipsisRange[] = [];
+  const ellipsisCursor = { index: 0 };
   return (index, offset = 0) => {
     if (index < through || (index === through && offset <= throughOffset)) {
       return question;
     }
     for (let chunkIndex = index; chunkIndex < chunks.length; chunkIndex++) {
+      if (protectedChunk !== chunkIndex) {
+        protectedPeriods = spacedEllipsisRanges(
+          chunks[chunkIndex],
+          caseNeutral,
+          questionFollowingCharacter(chunks, chunkIndex),
+        );
+        protectedChunk = chunkIndex;
+        ellipsisCursor.index = 0;
+      }
       const terminals = /[.!?]/g;
       terminals.lastIndex = chunkIndex === index ? offset : 0;
       for (const terminal of chunks[chunkIndex].matchAll(terminals)) {
-        if (terminal[0] === '.' && isProtectedQuestionPeriod(chunks, chunkIndex, terminal.index)) {
+        if (
+          terminal[0] === '.' &&
+          (isProtectedEllipsisPeriod(terminal.index, protectedPeriods, ellipsisCursor) ||
+            isProtectedQuestionPeriod(chunks, chunkIndex, terminal.index))
+        ) {
           continue;
         }
         through = chunkIndex;
@@ -322,6 +340,20 @@ function isProtectedQuestionPeriod(
     (/\p{Number}$/u.test(text.slice(Math.max(0, index - 2), index)) &&
       /^\p{Number}/u.test(following))
   );
+}
+
+function questionFollowingCharacter(chunks: readonly string[], chunk: number): string {
+  for (let next = chunk + 1; next < chunks.length; next++) {
+    const text = chunks[next];
+    let offset = 0;
+    while (offset < text.length && /[\s"'“”‘’([{<]/.test(text[offset])) {
+      offset++;
+    }
+    if (offset < text.length) {
+      return characterAt(text, offset);
+    }
+  }
+  return '';
 }
 
 /** Keep merged fragments separate; boundary rules only need a suffix and word casing. */
@@ -538,7 +570,7 @@ export function sentenceSegment(
     single: false,
   };
   const chunks = sentenceChunks(source, caseNeutral, quoteSource.apostrophes);
-  const startsQuestion = questionStartChecker(chunks);
+  const startsQuestion = questionStartChecker(chunks, caseNeutral);
 
   const acc: string[] = [];
   let pending: SentenceBuffer | undefined;
@@ -763,7 +795,7 @@ function updateBracketState(brackets: BracketState, character: string, standalon
 /** Scan sentence boundaries once, preserving the former captured-split layout. */
 function sentenceChunks(input: string, caseNeutral: boolean, apostrophes: Uint8Array): string[] {
   const chunks: string[] = [];
-  const questionInSource = questionStartChecker([input]);
+  const questionInSource = questionStartChecker([input], caseNeutral);
   const startsQuestion = (offset: number): boolean => questionInSource(0, offset);
   const protectedPeriods = spacedEllipsisRanges(input, caseNeutral);
   const ellipsisCursor = { index: 0 };
@@ -828,7 +860,11 @@ interface SpacedEllipsisRange {
   boundary: number;
 }
 
-function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllipsisRange[] {
+function spacedEllipsisRanges(
+  input: string,
+  caseNeutral: boolean,
+  followingCharacter = '',
+): SpacedEllipsisRange[] {
   const ranges: SpacedEllipsisRange[] = [];
   for (const match of input.matchAll(/(?:\.[^\S\r\n]+){2,}\./g)) {
     let periods = 0;
@@ -842,7 +878,7 @@ function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllips
     while (next < input.length && /[\s"'“”‘’([{<]/.test(input[next])) {
       next++;
     }
-    const following = characterAt(input, next);
+    const following = characterAt(input, next) || followingCharacter;
     const sentenceStart =
       /^\p{Number}$/u.test(following) ||
       (caseNeutral
@@ -1027,7 +1063,10 @@ function isIndependentParenthetical(
     return false;
   }
   const suffix = sentence.slice(0, -1).trimEnd().slice(-sentenceSuffixLength).toLowerCase();
-  return isIndependentSentence(sentence.slice(0, -1).trimStart()) || !abbrvReg.test(suffix);
+  return (
+    isIndependentSentence(sentence.slice(0, -1).trimStart(), undefined, caseNeutral) ||
+    !abbrvReg.test(suffix)
+  );
 }
 
 function sentenceEndAfterDelimiter(
@@ -1163,7 +1202,7 @@ function isNeutralSentenceStart(input: string, previousEnd: number, next: number
   const continuation = input.slice(next);
   return (
     !sentenceContinuationReg.test(continuation) ||
-    isIndependentSentence(continuation) ||
+    isIndependentSentence(continuation, undefined, true) ||
     /["'“‘]/.test(input.slice(previousEnd, next))
   );
 }

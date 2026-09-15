@@ -2307,6 +2307,60 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each(['Which one . . .?', 'Which one .\t. .?', 'Which one . . . .?'])(
+      'recognizes a question beyond protected spaced ellipses: %s',
+      (question) => {
+        const first = 'She said “Use etc.';
+        const second = `${question}”`;
+        const input = `${first}\n${second}`;
+        expect(ss(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          second.toLowerCase(),
+        ]);
+        const parenthetical = `He joined “Acme Co.” (It closed.) ${question}`;
+        expect(ss(parenthetical)).toEqual(['He joined “Acme Co.”', '(It closed.)', question]);
+        expect(segmentCaseNeutrally(parenthetical)).toEqual([
+          'He joined “Acme Co.”',
+          '(It closed.)',
+          question,
+        ]);
+      },
+    );
+
+    test.each(['whose office . . . remained.', 'Which one . . . indeed.'])(
+      'retains a non-question continuation across a spaced ellipsis: %s',
+      (clause) => {
+        const input = `She said “Use etc.\n${clause}”`;
+        const expected = input.replaceAll('\n', ' ');
+        expect(ss(input)).toEqual([expected]);
+        expect(segmentCaseNeutrally(input)).toEqual([expected]);
+      },
+    );
+
+    test('stops question lookahead at a genuine four-dot boundary in its casing mode', () => {
+      const input = 'She said “Use etc.\nWhich one . . . . Next?”';
+      const expected = ['She said “Use etc. Which one . . . .', 'Next?”'];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      const lowercase = input.replace('Next?', 'next?');
+      expect(ss(lowercase)).toEqual(['She said “Use etc.', 'Which one . . . . next?”']);
+      expect(segmentCaseNeutrally(lowercase)).toEqual([expected[0], 'next?”']);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test('shares spaced-ellipsis protection across many cached question ranges', () => {
+      const first = 'She said “Use etc.';
+      const second = 'Which one . . .?”';
+      const input = `${`${first}\n${second} `.repeat(5000)}`.trimEnd();
+      const expected = Array.from({ length: 5000 }, () => [first, second]).flat();
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+    }, 5000);
+
     test('requires a paired single quote before attaching a closing apostrophe', () => {
       const unmatched = 'He said Stop.’ Next.';
       const possessive = 'The U.S.’ Economy grew.';
