@@ -742,6 +742,106 @@ describe('Utility Functions', () => {
       },
     );
 
+    test.each([
+      'He said \'"Alpha.[1]"\'',
+      'He said "\'Alpha.[1]\'"',
+      'He said \'"Alpha."[1]\'',
+      'He said "\'Alpha.\'[1]"',
+      'He said \'"Alpha."\'[1]',
+      'He said \u2018"Alpha.[1]"\u2019',
+    ])('tracks adjacent mixed ASCII double/single quotation levels: %s', (first) => {
+      expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(`${first} Next.`.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        'next.',
+      ]);
+      expect(ss(first)).toEqual([first]);
+    });
+
+    test.each(['Alpha.[1], [2]', 'Alpha.[1]; [2]', 'Alpha.[1],[2];[3]', 'Alpha.(1), (2)'])(
+      'attaches punctuated complete citation groups: %s',
+      (first) => {
+        expect(ss(`${first} Beta.`)).toEqual([first, 'Beta.']);
+        expect(segmentCaseNeutrally(`${first} Beta.`)).toEqual([first, 'Beta.']);
+        expect(ss(first)).toEqual([first]);
+      },
+    );
+
+    test.each(['Alpha.[1], [word] Beta.', 'Alpha.[1]; [] Beta.', 'Alpha.[1], 2 people remained.'])(
+      'does not consume an incomplete citation separator: %s',
+      (input) => {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      },
+    );
+
+    test.each(['北京很好.', '東京です.', 'مرحبا.', 'สวัสดี.'])(
+      'recognizes uncased Unicode letters after an ordinary citation: %s',
+      (next) => {
+        expect(ss(`Alpha.[1] ${next}`)).toEqual(['Alpha.[1]', next]);
+        expect(segmentCaseNeutrally(`Alpha.[1] ${next}`)).toEqual(['Alpha.[1]', next]);
+        expect(segmentCaseNeutrally(`alpha.[1] ${next}`)).toEqual(['alpha.[1]', next]);
+      },
+    );
+
+    test('retains abbreviation and ellipsis continuation rules before uncased letters', () => {
+      for (const input of [
+        'Acme Co.[1] 北京很好.',
+        'Alpha...[1] 北京很好.',
+        'Alpha....[1] 北京很好.',
+      ]) {
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      }
+      expect(ss('Alpha.[1] beta.')).toEqual(['Alpha.[1] beta.']);
+      expect(segmentCaseNeutrally('Alpha.[1] beta.')).toEqual(['Alpha.[1]', 'beta.']);
+    });
+
+    test.each(['E', 'e'])(
+      'preserves existing default isolated-initial continuation for %s',
+      (initial) => {
+        const first = `My name is Jonas ${initial}.[1]`;
+        const input = `${first} Smith.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([first, 'Smith.']);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'smith.']);
+        expect(ss(input.replace('[1]', ''))).toEqual([input.replace('[1]', '')]);
+      },
+    );
+
+    test('requires existing name context for a cited uppercase initial', () => {
+      for (const [first, second] of [
+        ['The answer is E.[1]', 'Smith responded.'],
+        ['My name is Jonas\tE.[1]', 'Smith.'],
+        ['My name is Jonas E.[1]', '"Smith."'],
+      ]) {
+        expect(ss(`${first} ${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+      }
+      expect(ss('My name is Jonas\nE.[1] Smith.')).toEqual(['My name is Jonas E.[1] Smith.']);
+    });
+
+    test('retains full preceding-name evidence without a fixed prefix window', () => {
+      const input = `My name is J${'o'.repeat(10_000)} E.[1] Smith.`;
+      expect(ss(input)).toEqual([input]);
+    });
+
+    test('keeps unmatched s-ending quotation ambiguity distinct from confirmed possessives', () => {
+      const ambiguous = "She said 'The dogs' owners Alpha.[1] Next.";
+      const balanced = `${ambiguous}'`;
+      const first = "She chose 'Paris' and Alice agreed.";
+      for (const segment of [ss, segmentCaseNeutrally]) {
+        expect(segment(ambiguous)).toEqual(["She said 'The dogs' owners Alpha.[1]", 'Next.']);
+        expect(segment(balanced)).toEqual([balanced]);
+        expect(segment(`${first} Alpha.[1] Next.`)).toEqual([first, 'Alpha.[1]', 'Next.']);
+      }
+      expect(segmentCaseNeutrally(ambiguous.toLowerCase())).toEqual([
+        "she said 'the dogs' owners alpha.[1]",
+        'next.',
+      ]);
+    });
+
     test('makes the attached bare-citation ambiguity explicit across casing modes', () => {
       const input = 'Stop!2 people stayed.';
       expect(ss(input)).toEqual(['Stop!', '2 people stayed.']);

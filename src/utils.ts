@@ -884,7 +884,12 @@ function updateCitationDoubleQuote(
     return true;
   }
   if (input[index] === '"') {
-    quotes.doubleDepth = !previousQuotes && insideQuotes ? quotes.closers.length : -1;
+    const outerOpening = "'‘“«".indexOf(input[index - 1] ?? '');
+    const afterOuterOpening = outerOpening >= 0 && "'’”»"[outerOpening] === quotes.closers.at(-1);
+    quotes.doubleDepth =
+      quotes.doubleDepth < 0 && ((!previousQuotes && insideQuotes) || afterOuterOpening)
+        ? quotes.closers.length
+        : -1;
     return true;
   }
   if (
@@ -1059,12 +1064,13 @@ function citationEnd(
   input: string,
   index: number,
   caseNeutral: boolean,
-  insideQuotes: boolean,
+  legacyInsideQuotes: boolean,
   brackets: { depth: number; standalone: boolean },
   quotationQuotes: CitationQuotationState,
   isPathOrAddress: (index: number) => boolean,
   isNumericContinuation: (index: number) => boolean,
 ): number | undefined {
+  const insideQuotes = legacyInsideQuotes || quotationQuotes.doubleDepth >= 0;
   if (quotationQuotes.overflowed) {
     return undefined;
   }
@@ -1175,20 +1181,66 @@ function isCitationSentenceStart(
   ) {
     return false;
   }
+  if (!caseNeutral && isCitedInitialContinuation(input, index, end, next)) {
+    return false;
+  }
   if (!(ellipsis || abbrvReg.test(gateSuffix)) && breakReg.test(input.slice(end, next))) {
     return true;
   }
 
   const sentenceStart = characterAt(input, next);
-  const startsWithLetter = caseNeutral
-    ? isNeutralSentenceStart(input, end, next)
-    : sentenceStart.length > 0 && charIsUpperCase(sentenceStart);
+  const uncasedLetter =
+    !(ellipsis || abbrvReg.test(gateSuffix)) &&
+    /^\p{Letter}$/u.test(sentenceStart) &&
+    !isCasedCharacter(sentenceStart);
+  const startsWithLetter =
+    uncasedLetter ||
+    (caseNeutral
+      ? isNeutralSentenceStart(input, end, next)
+      : sentenceStart.length > 0 && charIsUpperCase(sentenceStart));
   const startsWithNumber =
     /^\p{Number}$/u.test(sentenceStart) &&
     !abbrvReg.test(gateSuffix) &&
     !ellipsis &&
     !isNumericContinuation(next);
   return startsWithLetter || startsWithNumber;
+}
+
+/** Isolated initial candidates keep these preceding-word scans disjoint. */
+function isCitedInitialContinuation(
+  input: string,
+  index: number,
+  end: number,
+  next: number,
+): boolean {
+  if (
+    input[index] !== '.' ||
+    index < 2 ||
+    !/[A-Za-z]/.test(input[index - 1]) ||
+    !/[ \r\n]/.test(input[index - 2])
+  ) {
+    return false;
+  }
+  if (input[index - 1] === input[index - 1].toLowerCase()) {
+    return true;
+  }
+  if (/\S/.test(input.slice(end, next))) {
+    return false;
+  }
+  let wordEnd = index - 2;
+  while (wordEnd > 0 && /\s/.test(input[wordEnd - 1])) {
+    wordEnd--;
+  }
+  let start = wordEnd;
+  while (start > 0 && !/\s/.test(input[start - 1])) {
+    start--;
+  }
+  return (
+    start < wordEnd &&
+    charIsUpperCase(characterAt(input, start)) &&
+    next < input.length &&
+    charIsUpperCase(characterAt(input, next))
+  );
 }
 
 /** Cache the shared token tail while numeric citation lookaheads advance through it. */
@@ -1230,7 +1282,14 @@ function numericCitationEnd(input: string, start: number): number | undefined {
     while (next < input.length && /[^\S\r\n]/.test(input[next])) {
       next++;
     }
-    if (!/[[(]/.test(input[next] ?? '') || (next > end && input[next] !== '[')) {
+    const punctuation = input[next] === ',' || input[next] === ';';
+    if (punctuation) {
+      next++;
+      while (next < input.length && /[^\S\r\n]/.test(input[next])) {
+        next++;
+      }
+    }
+    if (!/[[(]/.test(input[next] ?? '') || (!punctuation && next > end && input[next] !== '[')) {
       break;
     }
     expression.lastIndex = next;
