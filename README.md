@@ -117,6 +117,8 @@ The tokenizer treats spaces, tabs, line breaks, and other whitespace as word sep
 
 The default sentence segmenter handles LF, CRLF, and CR line endings and ignores blank separator chunks. Abbreviations such as `e.g.` are matched literally, and sentences ending in an initial or acronym are retained even when the following fragment has no punctuation. Spaces and line wraps after a mid-sentence ellipsis preserve word separation. Closing quotes and brackets stay with their sentence, including across line wraps and before numeric sentence starts. Inline parentheticals and numeric quantities remain inside the surrounding sentence, even before a capitalized continuation. Capitalized text after an abbreviation may start a new sentence.
 
+Embedded list detection preserves numeric Markdown prefixes (`-`, `*`, and `+`) and excludes singular/plural cross-references such as `sections 1) and 2)`. Quoted ranges protect apparent list markers; the ordinary sentence parser still governs punctuation and line breaks within each prefix or item body, including its existing assignment-quote and escape limitations. Author-initial heuristics inspect at most 96 UTF-16 code units on either side of the current initial, measured after JavaScript lowercasing in neutral mode. A longer name or author chain can fall back to ordinary sentence boundaries rather than receiving full author-list recognition.
+
 The scorers reject empty or whitespace-only candidate/reference summaries with `RangeError`. For nonempty summaries, built-in ROUGE-N returns `0` when either side has fewer than `n` tokens, and built-in ROUGE-S does so below two. The exported `nGram()` and `skipBigram()` utilities stay strict; custom gram generators define their own short-input behavior. The standalone `sentenceSegment` utility retains its single-sentence fallback for whitespace-only input.
 
 These preprocessing corrections can change scores for multi-sentence summaries, colons, numeric commas, Treebank quotes, repeated punctuation, and punctuation inside quotes or brackets. For example, `n("Alpha. Beta.", "Beta. Alpha.")` now returns `1` rather than `1/3`. Rerun affected baselines and keep the same tokenizer and segmenter configuration when comparing evaluation runs across versions.
@@ -149,6 +151,8 @@ Omitted options and fields explicitly set to `undefined` use the documented defa
 | `lcsIndices`    | function | `undefined`   | Position-aware LCS function          |
 
 `lcs` and `lcsIndices` are mutually exclusive. Specifying both throws `RangeError`.
+
+With the built-in sentence segmenter and LCS, `l()` throws `RangeError` when the candidate sentence count multiplied by the reference sentence count exceeds 100,000. This limit also applies with a custom tokenizer; comparisons with no tokens on either side return `0` first. Custom `segmenter`, `lcs`, or `lcsIndices` callbacks remain responsible for bounding their own work.
 
 ### ROUGE-S Options
 
