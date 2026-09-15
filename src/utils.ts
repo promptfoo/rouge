@@ -404,7 +404,7 @@ function trackTreebankQuotation(
     state.doubleInsideSingle = state.single;
     return true;
   }
-  if (!text.startsWith("''", index) || (flags & 2) !== 0) {
+  if (!text.startsWith("''", index)) {
     return false;
   }
   if (state.double) {
@@ -414,7 +414,7 @@ function trackTreebankQuotation(
     state.double = false;
     return true;
   }
-  if (quotationState(text, index, false)) {
+  if ((flags & 2) === 0 && quotationState(text, index, false)) {
     state.double = true;
     state.doubleInsideSingle = state.single;
     return true;
@@ -426,21 +426,14 @@ function trackSingleQuotation(
   text: string,
   index: number,
   previous: string,
-  caseNeutral: boolean,
   state: AsciiQuotationContext,
 ): void {
   const following = text[index + 1] ?? '';
   if (state.single) {
-    const possessive =
-      !caseNeutral &&
-      previous.toLowerCase() === 's' &&
-      /\s/.test(following) &&
-      /^(?:\p{Lu}|\p{Ll}+\s+\p{Lu})/u.test(text.slice(index + 1).trimStart());
     const beforeTreebankCloser =
       state.double && !state.doubleInsideSingle && text.startsWith("''", index + 1);
     state.single =
-      !beforeTreebankCloser &&
-      (possessive || (following.length > 0 && !/[\s.,!?;:)\]}\p{Pd}]/u.test(following)));
+      !beforeTreebankCloser && following.length > 0 && !/[\s.,!?;:)\]}\p{Pd}]/u.test(following);
     return;
   }
   state.single =
@@ -552,7 +545,7 @@ class SentenceBuffer {
           (previous.length === 0 || /^[\s\p{Punctuation}]$/u.test(previous));
         this.#asciiQuotes.doubleInsideSingle = this.#asciiQuotes.double && this.#asciiQuotes.single;
       } else if (character === "'" && (flags & 2) === 0) {
-        trackSingleQuotation(text, index, previous, this.#caseNeutral, this.#asciiQuotes);
+        trackSingleQuotation(text, index, previous, this.#asciiQuotes);
       } else {
         this.#trackBracket(text, index);
       }
@@ -781,11 +774,7 @@ export function sentenceSegment(
         // Catch mid-sentence ellipses (and their derivatives) and merge them
         const nextChunk = chunks[idx + 1];
         const nextSentence = nextChunk.trim() || chunks[idx + 2] || '';
-        const unmarkedStart = nextSentence.slice(openingDelimiterEnd(nextSentence, 0, true));
-        const sentenceStart =
-          unmarkedStart[0] === '’' && isLeadingElision(unmarkedStart, 0)
-            ? unmarkedStart.slice(1)
-            : unmarkedStart;
+        const sentenceStart = nextSentence.slice(openingDelimiterEnd(nextSentence, 0, true));
         const startsWithLetter = caseNeutral
           ? startsWithCasedCharacter(sentenceStart) &&
             (/\.{4}$/.test(suffix) ||
@@ -1049,7 +1038,6 @@ function trackSourceAsciiQuotation(
   flags: number,
   state: AsciiQuotationContext,
   through: number,
-  caseNeutral: boolean,
 ): number {
   if (index <= through) {
     return through;
@@ -1061,7 +1049,7 @@ function trackSourceAsciiQuotation(
     state.double = quotationState(input, index, state.double);
     state.doubleInsideSingle = state.double && state.single;
   } else if (input[index] === "'" && (flags & 2) === 0) {
-    trackSingleQuotation(input, index, input[index - 1] ?? '', caseNeutral, state);
+    trackSingleQuotation(input, index, input[index - 1] ?? '', state);
   }
   return through;
 }
@@ -1095,7 +1083,6 @@ function sentenceChunks(
       flags[index],
       asciiQuotes,
       quoteTokenThrough,
-      caseNeutral,
     );
     trackTypographicQuote(input, index, typographicQuoteClosers, flags[index]);
     if (openingBracketReg.test(char)) {
@@ -1166,10 +1153,7 @@ function spacedEllipsisRanges(input: string, caseNeutral: boolean): SpacedEllips
       }
     }
 
-    let next = match.index + match[0].length;
-    while (next < input.length && /[\s"'([{<“‘«„]/.test(input[next])) {
-      next++;
-    }
+    const next = openingDelimiterEnd(input, match.index + match[0].length, true);
     const following = characterAt(input, next);
     const sentenceStart =
       /^\p{Number}$/u.test(following) ||
@@ -1203,12 +1187,12 @@ function isProtectedEllipsisPeriod(
 function closingDelimiterEnd(
   input: string,
   index: number,
-  insideQuotes: boolean,
+  asciiQuotes: AsciiQuotationContext,
   typographicQuoteClosers: TypographicQuotationStack | undefined,
   flags: Uint8Array,
 ): number {
   let end = index + 1;
-  let quotePending = insideQuotes;
+  const pendingAscii = { ...asciiQuotes };
   let remaining = typographicQuoteClosers?.length ?? 0;
   let englishDepth = typographicQuoteClosers?.englishDepth ?? 0;
   while (end < input.length) {
@@ -1230,20 +1214,23 @@ function closingDelimiterEnd(
       continue;
     }
     if (
-      input[end] === '"' &&
-      !quotePending &&
+      isUnpendingAsciiQuote(input, end, pendingAscii) &&
       remaining === 0 &&
       (typographicQuoteClosers?.length ?? 0) > 0
     ) {
       break;
     }
-    if (quotePending && input.startsWith("''", end) && (flags[end] & 2) === 0) {
-      quotePending = false;
+    if (
+      pendingAscii.double &&
+      input.startsWith("''", end) &&
+      trackTreebankQuotation(input, end, flags[end], pendingAscii)
+    ) {
       end += 2;
       continue;
     }
     if (closingDelimiterReg.test(input[end])) {
-      quotePending &&= input[end] !== '"';
+      pendingAscii.double &&= input[end] !== '"';
+      pendingAscii.single &&= input[end] !== "'";
       end++;
       continue;
     }
@@ -1254,7 +1241,7 @@ function closingDelimiterEnd(
       next > end &&
       next < input.length &&
       (closingBracketReg.test(input[next]) ||
-        isPendingDoubleCloser(input, next, quotePending) ||
+        isPendingDoubleCloser(input, next, pendingAscii.double) ||
         (remaining > 0 &&
           isTypographicCloser(
             input[next],
@@ -1269,6 +1256,17 @@ function closingDelimiterEnd(
     break;
   }
   return end > index + 1 && remaining > 0 ? -1 : end;
+}
+
+function isUnpendingAsciiQuote(
+  input: string,
+  index: number,
+  pending: AsciiQuotationContext,
+): boolean {
+  return input[index] === '"'
+    ? !pending.double
+    : input[index] === "'" &&
+        !(pending.single || (pending.double && input.startsWith("''", index)));
 }
 
 function isPendingDoubleCloser(input: string, index: number, pending: boolean): boolean {
@@ -1329,7 +1327,7 @@ function sentenceEnd(
   const end = closingDelimiterEnd(
     input,
     index,
-    insideQuotes,
+    asciiQuotes,
     terminalEllipsis ? typographicQuoteClosers : undefined,
     flags,
   );
@@ -1448,6 +1446,12 @@ function openingDelimiterEnd(
       next++;
     } else if (ellipsis && input.startsWith('``', next)) {
       next += 2;
+    } else if (
+      ellipsis &&
+      input[next] === '’' &&
+      isLeadingElision(input.slice(next, next + 8), 0)
+    ) {
+      next++;
     } else {
       break;
     }

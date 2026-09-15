@@ -2047,6 +2047,88 @@ describe('Utility Functions', () => {
         expect(segmentCaseNeutrally(possessive)).toEqual([possessive]);
       });
 
+      test.each(['', 'and ', 'but ', 'or '])(
+        'uses source-confirmed apostrophes before a %j connective',
+        (connective) => {
+          const first = `She chose 'Paris' ${connective}Alice agreed...`;
+          const input = `${first} Beta followed.`;
+          expect(ss(input)).toEqual([first, 'Beta followed.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, 'Beta followed.']);
+          const possessive = "He said 'The students' Books mattered... Next.'";
+          expect(ss(possessive)).toEqual([possessive]);
+          expect(segmentCaseNeutrally(possessive)).toEqual([possessive]);
+        },
+      );
+
+      test.each(['``', "''"])('recognizes %s after a spaced terminal ellipsis', (opening) => {
+        const second = `${opening}Beta.''`;
+        const first = 'Omitted words . . . .';
+        expect(ss(`${first} ${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+        const omission = `Omitted words . . . ${second}`;
+        expect(ss(omission)).toEqual([omission]);
+        expect(segmentCaseNeutrally(omission)).toEqual([omission]);
+      });
+
+      test.each(['’90s fashion returned.', '’Twas hard.', '’Tis true.'])(
+        'recognizes the same leading elision with and without a separator: %s',
+        (second) => {
+          for (const gap of ['', ' ']) {
+            expect(ss(`Alpha...${gap}${second}`)).toEqual(['Alpha...', second]);
+            expect(segmentCaseNeutrally(`Alpha...${gap}${second}`)).toEqual(['Alpha...', second]);
+          }
+          const closed = 'He said ‘Alpha...’90s fashion returned.';
+          expect(ss(closed)).toEqual([closed]);
+          expect(segmentCaseNeutrally(closed)).toEqual([closed]);
+          const literal = 'Alpha...’90 people returned.';
+          expect(ss(literal)).toEqual([literal]);
+          expect(segmentCaseNeutrally(literal)).toEqual([literal]);
+        },
+      );
+
+      test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['„', '“'],
+        ['«', '»'],
+      ])('preserves adjacent ASCII opening tokens after %s%s', (opening, closing) => {
+        const first = `He said ${opening}Enough...${closing}`;
+        for (const [left, right] of [
+          ["'", "'"],
+          ["''", "''"],
+          ['``', "''"],
+        ]) {
+          const second = `${left}Next...${right}`;
+          const input = `${first}${second} Final.`;
+          expect(ss(input)).toEqual([first, second, 'Final.']);
+          expect(segmentCaseNeutrally(input)).toEqual([first, second, 'Final.']);
+        }
+        const outerSingle = `He said '${opening}Enough...${closing}'`;
+        expect(ss(`${outerSingle} Next... Final.`)).toEqual([outerSingle, 'Next...', 'Final.']);
+        const outerTreebank = `He said \`\`${opening}Enough...${closing}''`;
+        expect(segmentCaseNeutrally(`${outerTreebank} Next... Final.`)).toEqual([
+          outerTreebank,
+          'Next...',
+          'Final.',
+        ]);
+      });
+
+      test.each(["``dogs''", "``the dogs' owners''", "``'dogs'''", "'``dogs'''"])(
+        'releases an active Treebank pair after the s-ending content %s',
+        (quoted) => {
+          const first = `He said ${quoted} Next...`;
+          expect(ss(`${first} Final.`)).toEqual([first, 'Final.']);
+          expect(segmentCaseNeutrally(`${first} Final.`)).toEqual([first, 'Final.']);
+          expect(ss(`He said ${quoted} Next.`)).toEqual([`He said ${quoted} Next.`]);
+        },
+      );
+
+      test('retains complete currency quantities before an adjacent closing quotation', () => {
+        const input = 'Alpha...“$100 points.”';
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+      });
+
       test.each([
         ['(', ')'],
         ['[', ']'],
