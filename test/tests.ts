@@ -1692,6 +1692,19 @@ describe('Utility Functions', () => {
       expect(rouge.l(first, second)).toBeLessThan(1);
     });
 
+    test('recognizes list markers without depending on item capitalization', () => {
+      const input = '1. The first item 2. The second item';
+      const expected = ['1. The first item', '2. The second item'];
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+      expect(ss('The standard abbreviation is vs. This is clearer.')).toEqual([
+        'The standard abbreviation is vs.',
+        'This is clearer.',
+      ]);
+    });
+
     test('confirms long parenthetical label ranges without repeated lookahead', () => {
       const input = `This note (uses labels ${'a) Alpha b) Beta '.repeat(10_000)}and ends.)`;
       expect(ss(input)).toEqual([input]);
@@ -2428,6 +2441,503 @@ describe('Utility Functions', () => {
       ]);
     });
 
+    test.each([
+      'The Giants vs. the Tigers won.',
+      'The Giants vs. Tigers won.',
+      'The Giants VS. Tigers won.',
+      'The Giants vs. Boston Celtics, which was televised.',
+      'Android vs. Windows is common.',
+    ])('keeps the standard versus abbreviation inside %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test('preserves independent sentences after a terminal versus abbreviation', () => {
+      const input = 'The standard abbreviation is vs. Today we compare, the full word is clearer.';
+      const expected = [
+        'The standard abbreviation is vs.',
+        'Today we compare, the full word is clearer.',
+      ];
+      expect(ss(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input)).toEqual(expected);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+        expected.map((sentence) => sentence.toLowerCase()),
+      );
+    });
+
+    test.each(['Tomorrow is clearer.', 'Alice explained the term.'])(
+      'preserves ordinary sentence starts after a terminal versus abbreviation: %s',
+      (continuation) => {
+        const input = `The standard abbreviation is vs. ${continuation}`;
+        const expected = ['The standard abbreviation is vs.', continuation];
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+      },
+    );
+
+    test.each(['"This is clearer."', '(This is clearer.)'])(
+      'preserves delimited sentences after a terminal versus abbreviation: %s',
+      (continuation) => {
+        const first = 'The abbreviation is vs.';
+        expect(ss(`${first} ${continuation}`)).toEqual([first, continuation]);
+        expect(segmentCaseNeutrally(`${first} ${continuation}`)).toEqual([first, continuation]);
+      },
+    );
+
+    test.each(['\n\n', '\r\n\r\n', '\r\r', '\n            \n'])(
+      'preserves paragraph boundaries after versus across %j',
+      (separator) => {
+        const first = 'The Giants vs.';
+        const next = 'Boston Celtics, which was televised.';
+        expect(ss(`${first}${separator}${next}`)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(`${first}${separator}${next}`)).toEqual([first, next]);
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'preserves wrapped lowercase comparisons with %s',
+      (abbreviation) => {
+        for (const separator of ['\n', '\r\n', '\r']) {
+          const first = `android ${abbreviation}`;
+          const next = 'Windows is common.';
+          for (const segment of [ss, segmentCaseNeutrally]) {
+            expect(segment(`${first}${separator}${next}`)).toEqual([`${first} ${next}`]);
+            expect(segment(`${first}${separator}${separator}${next}`)).toEqual([first, next]);
+          }
+        }
+        for (const segment of [ss, segmentCaseNeutrally]) {
+          expect(segment(`Intro line\nThe Giants ${abbreviation}\n\nBoston Celtics won.`)).toEqual([
+            `Intro line The Giants ${abbreviation}`,
+            'Boston Celtics won.',
+          ]);
+        }
+      },
+    );
+
+    test.each(['vs', 'v.s.'])(
+      'keeps question and exclamation terminals after %s distinct from abbreviation periods',
+      (abbreviation) => {
+        for (const terminal of ['?', '!']) {
+          const first = `He asked "${abbreviation}${terminal}"`;
+          for (const next of ['Alice replied.', '123 people replied.']) {
+            for (const segment of [ss, segmentCaseNeutrally]) {
+              expect(segment(`${first} ${next}`)).toEqual([first, next]);
+            }
+          }
+        }
+      },
+    );
+
+    test('releases legacy dotted versus question and exclamation suffixes', () => {
+      for (const terminal of ['?', '!']) {
+        const first = `He asked "v.s${terminal}"`;
+        const next = 'Alice replied.';
+        expect(ss(`${first} ${next}`)).toEqual([first, next]);
+      }
+    });
+
+    test.each(['Senate', 'Commission', 'Government'])(
+      'preserves wrapped geographic continuation %s after non-titlecase starts',
+      (continuation) => {
+        for (const prefix of ['2026', 'recent']) {
+          const first = `${prefix} U.S.`;
+          const next = `${continuation} elections begin.`;
+          for (const separator of ['\n', '\r\n', '\r']) {
+            for (const segment of [ss, segmentCaseNeutrally]) {
+              expect(segment(`${first}${separator}${next}`)).toEqual([`${first} ${next}`]);
+              expect(segment(`${first}${separator}${separator}${next}`)).toEqual([first, next]);
+            }
+          }
+        }
+      },
+    );
+
+    test('retains parenthetical company-name continuations', () => {
+      const input = 'We invested in Acme Co. (International Holdings) last year.';
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each([' ', '\n\n', ''])(
+      'preserves a completed quotation containing versus before %j',
+      (separator) => {
+        const first = 'He wrote "vs."';
+        const next = 'Alice explained the term.';
+        expect(ss(`${first}${separator}${next}`)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(`${first}${separator}${next}`)).toEqual([first, next]);
+      },
+    );
+
+    test('preserves terminal versus in an ASCII single quotation', () => {
+      const first = "He wrote 'vs.'";
+      const next = 'Alice explained the term.';
+      for (const separator of [' ', '\n\n']) {
+        expect(ss(`${first}${separator}${next}`)).toEqual([first, next]);
+        expect(segmentCaseNeutrally(`${first}${separator}${next}`)).toEqual([first, next]);
+      }
+    });
+
+    test.each(['vs.', 'v.s.'])(
+      'preserves numeric sentence starts after a completed %s quotation',
+      (abbreviation) => {
+        for (const quote of ['"', "'"]) {
+          const first = `He wrote ${quote}${abbreviation}${quote}`;
+          const next = '123 started.';
+          for (const segment of [ss, segmentCaseNeutrally]) {
+            for (const separator of [' ', '\n\n']) {
+              expect(segment(`${first}${separator}${next}`)).toEqual([first, next]);
+            }
+            expect(segment(`${first} 2 days passed.`)).toEqual([first, '2 days passed.']);
+            for (const continuation of ['100 times correctly.', '100% correctly.']) {
+              const input = `${first} ${continuation}`;
+              expect(segment(input)).toEqual([input]);
+            }
+          }
+        }
+      },
+    );
+
+    test('preserves pronoun sentence starts that share spelling with acronyms', () => {
+      const first = 'The abbreviation vs.';
+      const next = 'It is clearer.';
+      expect(ss(`${first} ${next}`)).toEqual([first, next]);
+      expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual([first, next]);
+      expect(segmentCaseNeutrally(`${first} ${next}`.toLowerCase())).toEqual([
+        first.toLowerCase(),
+        next.toLowerCase(),
+      ]);
+    });
+
+    test.each(['vs.', 'v.s.'])(
+      'keeps quoted %s inside its still-open surrounding bracket',
+      (abbreviation) => {
+        for (const [opening, closing] of [
+          ['(', ')'],
+          ['[(', ')]'],
+        ]) {
+          for (const next of ['Examples followed', '123 followed', 'This happened']) {
+            const input = `He noted ${opening}"${abbreviation}" ${next}${closing} today.`;
+            expect(ss(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input)).toEqual([input]);
+            const singleQuoted = input.replaceAll('"', "'");
+            expect(ss(singleQuoted)).toEqual([singleQuoted]);
+            expect(segmentCaseNeutrally(singleQuoted)).toEqual([singleQuoted]);
+          }
+          const first = `${opening}He wrote "${abbreviation}"${closing}`;
+          const next = 'Examples followed.';
+          expect(ss(`${first} ${next}`)).toEqual([first, next]);
+          expect(segmentCaseNeutrally(`${first} ${next}`)).toEqual([first, next]);
+          const embedded = `He wrote ${opening}"${abbreviation}"${closing}`;
+          expect(ss(`${embedded} ${next}`)).toEqual([embedded, next]);
+          expect(segmentCaseNeutrally(`${embedded} ${next}`)).toEqual([embedded, next]);
+          const singleQuoted = embedded.replaceAll('"', "'");
+          expect(ss(`${singleQuoted} ${next}`)).toEqual([singleQuoted, next]);
+          expect(segmentCaseNeutrally(`${singleQuoted} ${next}`)).toEqual([singleQuoted, next]);
+        }
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'resets standalone bracket context after a terminal versus statement: %s',
+      (abbreviation) => {
+        const first = `The abbreviation is ${abbreviation}`;
+        for (const [open, close] of bracketPairs) {
+          const second = `${open}This is clearer.${close}`;
+          expect(ss(`${first} ${second} Alice replied.`)).toEqual([
+            first,
+            second,
+            'Alice replied.',
+          ]);
+          expect(segmentCaseNeutrally(`${first} ${second} Alice replied.`)).toEqual([
+            first,
+            second,
+            'Alice replied.',
+          ]);
+          expect(segmentCaseNeutrally(`${first} ${second} Alice replied.`.toLowerCase())).toEqual([
+            first.toLowerCase(),
+            second.toLowerCase(),
+            'alice replied.',
+          ]);
+        }
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'keeps paragraph-separated comparisons inside an open bracket: %s',
+      (abbreviation) => {
+        for (const [open, close] of bracketPairs) {
+          for (const separator of ['\n\n', '\r\n\r\n', '\n \n']) {
+            const input = `He noted ${open}Linux ${abbreviation}${separator}Windows${close} today.`;
+            const expected = `He noted ${open}Linux ${abbreviation} Windows${close} today.`;
+            expect(ss(input)).toEqual([expected]);
+            expect(segmentCaseNeutrally(input)).toEqual([expected]);
+          }
+        }
+        expect(ss(`He wrote ${abbreviation}\n\nWindows changed.`)).toEqual([
+          `He wrote ${abbreviation}`,
+          'Windows changed.',
+        ]);
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'ignores quoted bracket characters when releasing a versus boundary: %s',
+      (abbreviation) => {
+        for (const [open, close] of bracketPairs) {
+          const input = `He noted ${open}"${abbreviation}${close}" Examples followed${close} today.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          const first = `He wrote ${open}"${abbreviation}"${close}`;
+          expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+        }
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'keeps quoted literal brackets inside a plain-single versus phrase: %s',
+      (abbreviation) => {
+        for (const [open, close] of bracketPairs) {
+          const input = `He noted ${open}'${abbreviation}${close}' Examples followed${close} today.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+          const first = `He wrote ${open}'${abbreviation}'${close}`;
+          expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+          expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+        }
+        const first = `He wrote '${abbreviation}'`;
+        expect(ss(`${first} Next.`)).toEqual([first, 'Next.']);
+        expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+      },
+    );
+
+    test.each([
+      "The authors' notes (vs.) stayed together.",
+      "She said 'can't (vs.) stay' today.",
+      "She said 'The students' notes (vs.) stayed' today.",
+      'He said "The value [...]" Next sentence.',
+    ])('preserves apostrophe and omission context beside plain-single brackets: %s', (input) => {
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+    });
+
+    test.each(["The '90s (vs.) remained.", "'Tis (vs.) today."])(
+      'keeps an unpaired leading elision separate from a later independent quote: %s',
+      (first) => {
+        const second = "He said 'No.'";
+        expect(ss(`${first} ${second}`)).toEqual([first, second]);
+        expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual([first, second]);
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'keeps provisional geographic abbreviation and bracket attachment conservative: %s',
+      (abbreviation) => {
+        const input = `I live in the U.S. (He wrote ${abbreviation}) Alice replied.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'retains embedded brackets after provisional abbreviation boundaries: %s',
+      (abbreviation) => {
+        for (const separator of [' ', '\n']) {
+          for (const [open, close] of bracketPairs) {
+            for (const input of [
+              `The guide says e.g.${separator}${open}use ${abbreviation}${close} Examples follow.`,
+              `We use Acme Co.${separator}${open}printed ${abbreviation}${close} rather than versus.`,
+            ]) {
+              const expected = input.replaceAll('\n', ' ');
+              expect(ss(input)).toEqual([expected]);
+              // Preserve the existing neutral line-wrap boundary after ordinary abbreviations.
+              const neutral =
+                input.startsWith('We use') && separator === '\n' ? input.split('\n') : [expected];
+              expect(segmentCaseNeutrally(input)).toEqual(neutral);
+              expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+                neutral.map((sentence) => sentence.toLowerCase()),
+              );
+            }
+            const first = 'He wrote it.';
+            const second = `${open}He wrote ${abbreviation}${close}`;
+            expect(ss(`${first} ${second} Alice explained.`)).toEqual([
+              first,
+              second,
+              'Alice explained.',
+            ]);
+            expect(segmentCaseNeutrally(`${first} ${second} Alice explained.`)).toEqual([
+              first,
+              second,
+              'Alice explained.',
+            ]);
+          }
+        }
+      },
+    );
+
+    test('folds Unicode abbreviations when retaining embedded bracket context', () => {
+      for (const name of ['Kan', 'Kan', 'kan']) {
+        const input = `We use ${name}. (printed v.s.) rather than versus.`;
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      }
+    });
+
+    test.each([1, 3])('ignores an angle quotation closer after %i backslashes', (count) => {
+      const input = `He noted <"literal ${'\\'.repeat(count)}" > sign" and "v.s." Examples followed> today.`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each([2, 4])('accepts an angle quotation closer after %i backslashes', (count) => {
+      const first = `He noted <"literal ${'\\'.repeat(count)}" >.`;
+      const second = 'He wrote "v.s."';
+      const third = 'Examples followed.';
+      expect(ss(`${first} ${second} ${third}`)).toEqual([first, second, third]);
+      expect(segmentCaseNeutrally(`${first} ${second} ${third}`)).toEqual([first, second, third]);
+    });
+
+    test.each(['vs.', 'v.s.'])(
+      'attaches spaced Treebank quotation closure after %s',
+      (abbreviation) => {
+        for (const separator of [' ', '\n']) {
+          const first = `He wrote \`\`${abbreviation}${separator}''`;
+          for (const second of ['Alice explained.', '"Alice explained."']) {
+            const input = `${first} ${second}`;
+            const expected = [first.replaceAll('\n', ' '), second];
+            expect(ss(input)).toEqual(expected);
+            expect(segmentCaseNeutrally(input)).toEqual(expected);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+              expected.map((sentence) => sentence.toLowerCase()),
+            );
+          }
+        }
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'releases terminal %s after a completed standalone bracket',
+      (abbreviation) => {
+        for (const [opening, closing] of [
+          ['(', ')'],
+          ['[', ']'],
+          ['{', '}'],
+          ['<', '>'],
+        ]) {
+          const first = `${opening}He wrote ${abbreviation}${closing}`;
+          for (const next of ['Alice replied.', '123 people replied.']) {
+            for (const segment of [ss, segmentCaseNeutrally]) {
+              expect(segment(`${first} ${next}`)).toEqual([first, next]);
+            }
+          }
+        }
+      },
+    );
+
+    test.each(['vs.', 'v.s.'])(
+      'distinguishes angle delimiters from comparisons before quoted %s',
+      (abbreviation) => {
+        for (const comparison of ['x < 5', 'x<5', 'x<y']) {
+          const first = `The score was ${comparison}.`;
+          const second = `He wrote "${abbreviation}"`;
+          for (const segment of [ss, segmentCaseNeutrally]) {
+            expect(segment(`${first} ${second} Alice replied.`)).toEqual([
+              first,
+              second,
+              'Alice replied.',
+            ]);
+            expect(segment(`${first} He showed ">". ${second} Alice replied.`)).toEqual([
+              first,
+              'He showed ">".',
+              second,
+              'Alice replied.',
+            ]);
+          }
+        }
+        for (const [opening, closing] of [
+          ['<', '>'],
+          ['< ', ' >'],
+          ['<[(', ')]>'],
+        ]) {
+          const input = `He noted ${opening}"${abbreviation}" Examples followed${closing} today.`;
+          expect(ss(input)).toEqual([input]);
+          expect(segmentCaseNeutrally(input)).toEqual([input]);
+        }
+      },
+    );
+
+    test.each([
+      ['"', '"'],
+      ["'", "'"],
+      ['“', '”'],
+      ['‘', '’'],
+      ['«', '»'],
+      ['``', "''"],
+      ["''", "''"],
+    ])('ignores quoted angle marks inside %s%s', (opening, closing) => {
+      const first = `${opening}literal < > sign${closing}.`;
+      const second = 'He wrote "vs."';
+      for (const segment of [ss, segmentCaseNeutrally]) {
+        expect(segment(`${first} ${second} Alice replied.`)).toEqual([
+          first,
+          second,
+          'Alice replied.',
+        ]);
+        const input = `He noted <${opening}literal > sign${closing} and "vs." Examples followed> today.`;
+        expect(segment(input)).toEqual([input]);
+      }
+    });
+
+    test.each(['Rock‘n', 'Rock’n', "Rock'n", 'Café’s'])(
+      'keeps word-internal apostrophes outside angle quotation state: %s',
+      (word) => {
+        const input = `${word} sign <"vs." Examples followed> today.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        const quoted = `He noted <"${word} > sign" and "vs." Examples followed> today.`;
+        expect(ss(quoted)).toEqual([quoted]);
+        expect(segmentCaseNeutrally(quoted)).toEqual([quoted]);
+      },
+    );
+
+    test('retains Unicode-folded abbreviations before numeric quote continuations', () => {
+      const input = 'He said "Kan." 2 people remained.';
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each(['vs.', 'v.s.'])(
+      'applies the same terminal and comparison rules to %s',
+      (abbreviation) => {
+        const first = `The abbreviation is ${abbreviation}`;
+        const next = 'Today is clearer.';
+        const comparison = `The Giants ${abbreviation} Boston Celtics, which was televised.`;
+        const quoted = `He wrote "${abbreviation}"`;
+        const paragraph = `The Giants ${abbreviation}`;
+        for (const segment of [ss, segmentCaseNeutrally]) {
+          expect(segment(`${first} ${next}`)).toEqual([first, next]);
+          expect(segment(comparison)).toEqual([comparison]);
+          expect(segment(`${quoted} Alice explained.`)).toEqual([quoted, 'Alice explained.']);
+          expect(segment(`${paragraph}\n\nBoston Celtics won.`)).toEqual([
+            paragraph,
+            'Boston Celtics won.',
+          ]);
+        }
+      },
+    );
+
+    test.each(['Government', 'Army', 'Navy', 'Military', 'Congress'])(
+      'retains the existing unspaced geographic continuation %s',
+      (continuation) => {
+        const input = `The U.S.${continuation} acted.`;
+        expect(ss(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input)).toEqual([input]);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      },
+    );
+
     test('should not split possessive two letter abbreviations', () => {
       expect(ss("That is JFK Jr.'s book.")).toEqual(["That is JFK Jr.'s book."]);
     });
@@ -2464,6 +2974,47 @@ describe('Utility Functions', () => {
       expect(ss('I have lived in the U.S. for 20 years.')).toEqual([
         'I have lived in the U.S. for 20 years.',
       ]);
+    });
+
+    test.each(['Senate', 'Commission'])('keeps U.S. %s inside its sentence', (continuation) => {
+      const input = `The U.S. ${continuation} voted.`;
+      expect(ss(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input)).toEqual([input]);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+    });
+
+    test.each(['Senate', 'Commission'])(
+      'preserves wrapped and unspaced boundaries around U.S. %s',
+      (continuation) => {
+        for (const separator of ['\n', '\r\n', '\r']) {
+          const wrapped = `The U.S.${separator}${continuation} voted.`;
+          const normalized = `The U.S. ${continuation} voted.`;
+          expect(ss(wrapped)).toEqual([normalized]);
+          expect(segmentCaseNeutrally(wrapped)).toEqual([normalized]);
+        }
+
+        const unspaced = `I live in the U.S.${continuation} meets tomorrow.`;
+        expect(ss(unspaced)).toEqual(['I live in the U.S.', `${continuation} meets tomorrow.`]);
+        expect(segmentCaseNeutrally(unspaced)).toEqual([
+          'I live in the U.S.',
+          `${continuation} meets tomorrow.`,
+        ]);
+
+        const quoted = `The U.S.\n"${continuation} reconvenes."`;
+        expect(ss(quoted)).toEqual(['The U.S.', `"${continuation} reconvenes."`]);
+        expect(segmentCaseNeutrally(quoted)).toEqual(['The U.S.', `"${continuation} reconvenes."`]);
+
+        for (const paragraph of ['\n\n', '\r\n\r\n', '\r\r']) {
+          const input = `I live in the U.S.${paragraph}${continuation} meets tomorrow.`;
+          const expected = ['I live in the U.S.', `${continuation} meets tomorrow.`];
+          expect(ss(input)).toEqual(expected);
+          expect(segmentCaseNeutrally(input)).toEqual(expected);
+        }
+      },
+    );
+
+    test('does not inflate ROUGE-L by splitting geographic noun phrases', () => {
+      expect(rouge.l('The U.S. Senate voted.', 'Senate voted The U.S.')).toBeCloseTo(4 / 9);
     });
 
     test.each([
@@ -4641,6 +5192,649 @@ describe('Core Functions', () => {
       expect(score).toBeGreaterThan(0);
       expect(score).toBeLessThan(1);
     });
+  });
+});
+
+describe('versus delimiters across wrapped prose', () => {
+  test.each(['vs.', 'v.s.'])('keeps an embedded %s parenthesis across wraps', (abbreviation) => {
+    for (const separator of [' ', '\n', '\r\n', '\r']) {
+      const input = `The label is${separator}(${abbreviation}) not versus.`;
+      const expected = [`The label is (${abbreviation}) not versus.`];
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual(expected);
+        expect(
+          rouge.sentenceSegment(`First sentence.\n(He wrote ${abbreviation}) Alice replied.`, {
+            caseNeutral,
+          }),
+        ).toEqual(['First sentence.', `(He wrote ${abbreviation})`, 'Alice replied.']);
+      }
+    }
+  });
+
+  test.each(['\n\n', '\r\n\r\n', '\r\r', '\n \t\n'])(
+    'retains standalone parentheses after a blank paragraph: %j',
+    (separator) => {
+      const input = `Preface${separator}(He wrote vs.) Alice replied.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          'Preface (He wrote vs.)',
+          'Alice replied.',
+        ]);
+      }
+    },
+  );
+
+  test.each(["'Tis", "'Twas", "'90s", '‘Tis', '‘Twas'])(
+    'retains angle context after an unpaired apostrophe in %s',
+    (prefix) => {
+      const input = `${prefix} a note: <"v.s." Examples followed> today.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    },
+  );
+
+  test.each([
+    ["'Tis", "'No.'"],
+    ["'Twas", "'No.'"],
+    ["'99", "'No.'"],
+    ['‘Tis', '‘No.’'],
+    ['‘Twas', '‘No.’'],
+    ['‘99', '‘No.’'],
+  ])('does not pair %s with a later independent quotation', (prefix, quotation) => {
+    const input = `${prefix} <team "vs." Examples followed> He said ${quotation}`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test.each([
+    "'Tis > odd'",
+    "'99 > odd'",
+    '‘Tis > odd’',
+    '‘𝒜’s > value’',
+    "``literal > sign''",
+    "''literal > sign''",
+  ])('keeps matched quotation spans inside an angle literal: %s', (quote) => {
+    const input = `He noted <${quote} and "vs." Examples followed> today.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test('retains the existing paired-angle interpretation across prose', () => {
+    const input = 'The score was x < 5. He wrote "vs." Alice replied > 3.';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+        'The score was x < 5.',
+        'He wrote "vs." Alice replied > 3.',
+      ]);
+    }
+  });
+
+  test('preserves a padded matched elision quotation at end of input', () => {
+    const input = "'Tis < a note > '";
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test('preserves deeply nested angle literals through position-stack growth', () => {
+    const input = `${'<'.repeat(80)}"vs." Examples followed${'>'.repeat(80)} today.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test('bounds searches for repeated unmatched quotation openers', () => {
+    expectBundledScriptToPass(
+      `
+        const summary = '‘'.repeat(250000) + '<"vs." Examples followed> today.';
+        const sentences = module.exports.sentenceSegment(summary);
+        if (sentences.length !== 1 || sentences[0] !== summary) {
+          throw new Error('Unmatched quotation content changed');
+        }
+        process.stdout.write('ok');
+      `,
+      3000,
+    );
+  }, 10_000);
+});
+
+describe('versus quote context and cached escape validation', () => {
+  test.each(['‘literal )’', '“literal )”', '«literal )»'])(
+    'ignores brackets in the existing smart quotation forms: %s',
+    (quoted) => {
+      for (const abbreviation of ['vs.', 'v.s.']) {
+        const input = `He noted <${quoted} and "${abbreviation}" Examples followed> today.`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        }
+      }
+    },
+  );
+
+  test.each(['vs.', 'v.s.'])(
+    'keeps an inner single-quoted label inside the pending double quotation: %s',
+    (abbreviation) => {
+      const input = `He noted "He wrote '${abbreviation}' Examples followed" today.`;
+      const closed = `He noted "He wrote '${abbreviation}'"`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        expect(rouge.sentenceSegment(`${closed} Examples followed.`, { caseNeutral })).toEqual([
+          closed,
+          'Examples followed.',
+        ]);
+      }
+    },
+  );
+
+  test('reuses escape validation for a closer shared by leading elision candidates', () => {
+    expectBundledScriptToPass(
+      `
+        const input = '<' + '‘1 '.repeat(50000) + String.fromCharCode(92).repeat(100000) + '’>';
+        const actual = module.exports.sentenceSegment(input);
+        if (actual.length !== 1 || actual[0] !== input) throw new Error('Shared closer changed content');
+        process.stdout.write('ok');
+      `,
+      3000,
+    );
+  }, 10_000);
+});
+
+describe('versus inside paired outer quotes and leading elisions', () => {
+  test.each(['vs.', 'v.s.'])(
+    'keeps inner double-quoted labels inside a pending outer single quotation: %s',
+    (abbreviation) => {
+      const input = `He noted 'He wrote "${abbreviation}" Examples followed' today.`;
+      const completed = `He noted 'He wrote "${abbreviation}"'`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        expect(rouge.sentenceSegment(`${completed} Examples followed.`, { caseNeutral })).toEqual([
+          completed,
+          'Examples followed.',
+        ]);
+      }
+    },
+  );
+
+  test.each(['Cause', 'em', 'til', 'till'])(
+    'keeps leading %s elisions from borrowing a later independent quote',
+    (elision) => {
+      for (const abbreviation of ['vs.', 'v.s.']) {
+        const input = `'${elision} a note: <"${abbreviation}" Examples followed> He said 'No.'`;
+        const paired = `'${elision} > odd' <"${abbreviation}" Examples followed> today.`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+          expect(rouge.sentenceSegment(paired, { caseNeutral })).toEqual([paired]);
+        }
+      }
+    },
+  );
+});
+
+describe('escape parity in later quotation openers', () => {
+  test.each([0, 1, 2, 3, 4])(
+    'distinguishes independent ASCII and curly openers after %i backslashes',
+    (count) => {
+      const slashes = '\\'.repeat(count);
+      for (const abbreviation of ['vs.', 'v.s.']) {
+        for (const prefix of [
+          `'90s <team He said ${slashes}'No.' and "${abbreviation}"`,
+          `‘Tis < ${slashes}‘note’ and "${abbreviation}"`,
+        ]) {
+          const continuation = 'Examples followed> today.';
+          const input = `${prefix} ${continuation}`;
+          for (const caseNeutral of [false, true]) {
+            expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual(
+              count % 2 === 0 ? [input] : [prefix, continuation],
+            );
+          }
+        }
+      }
+    },
+  );
+
+  test('does not reinterpret a terminal-adjacent real closer as another opener', () => {
+    const first = "'Tis > odd.'";
+    const second = '<"v.s." Examples followed> today.';
+    const input = `${first} ${second}`;
+    expect(rouge.sentenceSegment(input)).toEqual([input]);
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([first, second]);
+  });
+});
+
+describe('confirmed delimiter boundaries and wrapped final brackets', () => {
+  test.each(['vs.', 'v.s.', 'etc.'])(
+    'normalizes a wrapped final embedded %s clause',
+    (abbreviation) => {
+      for (const [opening, closing] of [
+        ['(', ')'],
+        ['[', ']'],
+        ['{', '}'],
+        ['<', '>'],
+      ]) {
+        for (const ending of ['', '   ', '\n']) {
+          const input = `The label is\n${opening}${abbreviation}${closing}${ending}`;
+          const expected = `The label is ${opening}${abbreviation}${closing}`;
+          for (const caseNeutral of [false, true]) {
+            expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([expected]);
+          }
+        }
+      }
+    },
+  );
+
+  test('retains the prior line-break behavior when an outer bracket stays incomplete', () => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment('The label is\n((v.s.)', { caseNeutral })).toEqual([
+        'The label is',
+        '((v.s.)',
+      ]);
+      expect(rouge.sentenceSegment('The label is\n(v.s.) next.', { caseNeutral })).toEqual([
+        'The label is (v.s.) next.',
+      ]);
+    }
+  });
+
+  test.each(['\n', '\r\n', ' '])(
+    'keeps unmatched greater-than markers after the %j boundary',
+    (separator) => {
+      const input = `First sentence.${separator}> Quoted text.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          'First sentence.',
+          '> Quoted text.',
+        ]);
+        expect(rouge.sentenceSegment('First sentence.<Quoted text.>', { caseNeutral })).toEqual([
+          'First sentence.',
+          '<Quoted text.>',
+        ]);
+      }
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        'first sentence.',
+        '> quoted text.',
+      ]);
+    },
+  );
+
+  test.each(['vs.', 'v.s.', 'etc.', 'Jan.', 'U.S.'])(
+    'preserves confirmed unspaced delimited boundaries after %s',
+    (abbreviation) => {
+      const first = `Use ${abbreviation}`;
+      const second = '(Alice replied.)';
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(first + second, { caseNeutral })).toEqual([first, second]);
+        expect(rouge.sentenceSegment(`${first} ${second}`, { caseNeutral })).toEqual([
+          `${first} ${second}`,
+        ]);
+      }
+    },
+  );
+});
+
+test('preserves literal greater-than marks inside pending quotation spans', () => {
+  for (const first of [
+    'He said "vs.>"',
+    "He said 'v.s.>'",
+    'He noted <"v.s.>">',
+    'He said "Value.>"',
+  ]) {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} Next.`, { caseNeutral })).toEqual([first, 'Next.']);
+    }
+  }
+});
+
+test.each(['vs.', 'v.s.', 'etc.', 'Jan.', 'U.S.', 'Value.'])(
+  'keeps the paired closing apostrophe after %s before an unspaced opener',
+  (abbreviation) => {
+    for (const caseNeutral of [false, true]) {
+      const first = `He wrote '${abbreviation}'`;
+      for (const second of ['(Alice replied.)', '[Alice replied.]', '{Alice replied.}']) {
+        expect(rouge.sentenceSegment(first + second, { caseNeutral })).toEqual([first + second]);
+        expect(rouge.sentenceSegment(`${first} ${second}`, { caseNeutral })).toEqual([
+          first,
+          second,
+        ]);
+      }
+      const unpaired = `Use ${abbreviation}(Alice replied.)`;
+      expect(rouge.sentenceSegment(unpaired, { caseNeutral })).toEqual([
+        `Use ${abbreviation}`,
+        '(Alice replied.)',
+      ]);
+    }
+  },
+);
+
+describe('literal backticks and normalized versus context', () => {
+  test.each(['vs.', 'v.s.'])(
+    'keeps angle operators inside single-backtick literals around %s',
+    (vs) => {
+      for (const caseNeutral of [false, true]) {
+        const input = `Use \`a < b\`. He wrote "${vs}" Alice replied > 3.`;
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+          'Use `a < b`.',
+          `He wrote "${vs}"`,
+          'Alice replied > 3.',
+        ]);
+        const bracketed = `He noted <\`literal >\` and "${vs}" Examples followed> today.`;
+        expect(rouge.sentenceSegment(bracketed, { caseNeutral })).toEqual([bracketed]);
+      }
+    },
+  );
+
+  test.each([
+    'He noted <`literal `` >`` code` and "vs." Examples followed> today.',
+    'He noted <``literal >\'\' and "vs." Examples followed> today.',
+    'He noted <`literal `` >\'\' and "vs." Examples followed> today.',
+  ])('distinguishes isolated backticks from the existing Treebank pair in %s', (input) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test.each(['vs.', 'v.s.'])('uses the same normalized following context after %s', (vs) => {
+    for (const second of ['(It is clearer.)', '[It is clearer.]', '{It is clearer.}']) {
+      const first = `The abbreviation ${vs}`;
+      const third = 'Alice replied.';
+      const input = `${first} ${second} ${third}`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([first, second, third]);
+      }
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        first.toLowerCase(),
+        second.toLowerCase(),
+        third.toLowerCase(),
+      ]);
+    }
+    const comparison = `Android ${vs} (Windows is common.) mattered.`;
+    expect(rouge.sentenceSegment(comparison)).toEqual([comparison]);
+    expect(rouge.sentenceSegment(comparison, { caseNeutral: true })).toEqual([comparison]);
+  });
+
+  test('scans repeated backtick literals without reusing literal angle operators', () => {
+    const first = `Use ${'`a < b` '.repeat(10_000).trimEnd()}.`;
+    const input = `${first} He wrote "vs." Alice replied > 3.`;
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([
+      first,
+      'He wrote "vs."',
+      'Alice replied > 3.',
+    ]);
+  }, 3000);
+});
+
+describe('Paired outer quotation context for versus boundaries', () => {
+  test.each(['vs.', 'v.s.'])('retains escaped literal brackets around %s', (versus) => {
+    for (const slashCount of [1, 3]) {
+      const input = `He noted ("literal ${'\\'.repeat(slashCount)}" ) sign" and "${versus}" Examples followed) today.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    }
+  });
+
+  test.each(['vs.', 'v.s.'])(
+    'preserves the pending ASCII/Treebank outer quote for %s',
+    (versus) => {
+      const inputs = [
+        `He said "The abbreviation is \`\`${versus} '' Examples" today.`,
+        `He said \`\`The abbreviation is "${versus}" Examples'' today.`,
+      ];
+      for (const input of inputs) {
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        }
+      }
+    },
+  );
+
+  test.each(['vs.', 'v.s.'])(
+    'keeps real copular terminal %s inside a multi-sentence quotation',
+    (versus) => {
+      for (const closing of ['"', '']) {
+        const first = `He said "The abbreviation is ${versus}`;
+        const next = `Alice replied.${closing}`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(`${first} ${next}`, { caseNeutral })).toEqual([first, next]);
+        }
+      }
+    },
+  );
+
+  test.each([
+    ['"', '"'],
+    ["'", "'"],
+    ['``', "''"],
+    ['‘', '’'],
+    ['“', '”'],
+    ['«', '»'],
+  ])('preserves a paragraph inside paired %s%s versus text', (opening, closing) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const input = `He said ${opening}Linux ${versus}\n\nWindows${closing} today.`;
+      const expected = input.replace(/\s+/g, ' ');
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([expected]);
+      }
+    }
+  });
+
+  test('preserves an unquoted paragraph after versus', () => {
+    const first = 'He said Linux vs.';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first}\n\nWindows today.`, { caseNeutral })).toEqual([
+        first,
+        'Windows today.',
+      ]);
+    }
+  });
+
+  test('keeps quote endpoint metadata aligned across many candidate boundaries', () => {
+    const first = 'He said “Linux vs. Windows” today.';
+    const input = `${'He said “Linux vs.\n\nWindows” today. '.repeat(5000)}Next.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([
+        ...new Array(5000).fill(first),
+        'Next.',
+      ]);
+    }
+  });
+});
+
+describe('Standalone versus pronoun continuations', () => {
+  test.each([
+    'He-Man',
+    'She-Hulk',
+    'He‐Man',
+    'She–Hulk',
+    'Héctor',
+    'Héctor',
+    'He\u200cMan',
+    'ſhe-Hulk',
+    'ſhe',
+  ])('retains comparison opponent %s', (opponent) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const input = `Batman ${versus} ${opponent} won.`;
+      expect(rouge.sentenceSegment(input)).toEqual([input]);
+      expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
+      expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+        input.toLowerCase(),
+      ]);
+    }
+  });
+
+  test.each(['He won.', "He'll win.", 'He’s ready.', 'They agreed.', 'This is clearer.'])(
+    'retains the genuine pronoun continuation %s',
+    (next) => {
+      for (const versus of ['vs.', 'v.s.']) {
+        const first = `Batman ${versus}`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(`${first} ${next}`, { caseNeutral })).toEqual([first, next]);
+        }
+      }
+    },
+  );
+});
+
+describe('Paired single-backtick literals inside versus brackets', () => {
+  test.each([
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+  ])('keeps literal %s%s marks inside the surrounding enclosure', (opening, closing) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      for (const literal of [opening, closing]) {
+        const input = `He noted ${opening}\`literal ${literal}\` and "${versus}" Examples followed${closing} today.`;
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        }
+      }
+    }
+  });
+
+  test('releases a completed surrounding bracket after a paired literal', () => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const first = `He noted (\`literal )\` and "${versus}")`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`${first} Examples followed.`, { caseNeutral })).toEqual([
+          first,
+          'Examples followed.',
+        ]);
+      }
+    }
+  });
+
+  test('keeps unmatched single backticks under the existing delimiter rules', () => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const first = `He noted (\`literal ) and "${versus}"`;
+      for (const caseNeutral of [false, true]) {
+        expect(
+          rouge.sentenceSegment(`${first} Examples followed) today.`, { caseNeutral }),
+        ).toEqual([first, 'Examples followed) today.']);
+      }
+    }
+  });
+});
+
+describe('Single guillemets inside versus brackets', () => {
+  test.each([
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+  ])('keeps quoted %s%s marks separate from the surrounding enclosure', (opening, closing) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      for (const caseNeutral of [false, true]) {
+        for (const literal of [opening, closing]) {
+          const input = `He noted ${opening}‹literal ${literal}› and "${versus}" Examples followed${closing} today.`;
+          expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+        }
+        const first = `He noted ${opening}‹literal ${closing}› and "${versus}"${closing}`;
+        expect(rouge.sentenceSegment(`${first} Examples followed.`, { caseNeutral })).toEqual([
+          first,
+          'Examples followed.',
+        ]);
+      }
+    }
+  });
+
+  test('keeps unmatched guillemets under the existing delimiter rules', () => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const first = `He noted (‹literal ) and "${versus}"`;
+      for (const caseNeutral of [false, true]) {
+        expect(
+          rouge.sentenceSegment(`${first} Examples followed) today.`, { caseNeutral }),
+        ).toEqual([first, 'Examples followed) today.']);
+      }
+    }
+  });
+
+  test.each([0, 1, 2, 3, 4])(
+    'preserves opener and closer escape parity with %i backslashes',
+    (count) => {
+      for (const versus of ['vs.', 'v.s.']) {
+        const escaped = '\\'.repeat(count);
+        const opening = `He noted (${escaped}‹literal )› and "${versus}"`;
+        const closing = `He noted (‹literal ${escaped}› ) remains› and "${versus}"`;
+        const tail = 'Examples followed) today.';
+        for (const caseNeutral of [false, true]) {
+          expect(rouge.sentenceSegment(`${opening} ${tail}`, { caseNeutral })).toEqual(
+            count % 2 === 0 ? [`${opening} ${tail}`] : [opening, tail],
+          );
+          expect(rouge.sentenceSegment(`${closing} ${tail}`, { caseNeutral })).toEqual(
+            count % 2 === 0 ? [closing, tail] : [`${closing} ${tail}`],
+          );
+        }
+      }
+    },
+  );
+});
+
+describe('Escaped bracket context before versus boundaries', () => {
+  test.each([
+    ['(', ')'],
+    ['[', ']'],
+    ['{', '}'],
+    ['<', '>'],
+  ])('preserves odd/even escape parity for %s%s', (opening, closing) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      for (const caseNeutral of [false, true]) {
+        const odd = `He noted ${opening}literal \\${closing} and "${versus}" Examples followed${closing} today.`;
+        expect(rouge.sentenceSegment(odd, { caseNeutral })).toEqual([odd]);
+        const first = `He noted ${opening}literal \\\\${closing} and "${versus}"`;
+        expect(
+          rouge.sentenceSegment(`${first} Examples followed${closing} today.`, { caseNeutral }),
+        ).toEqual([first, `Examples followed${closing} today.`]);
+      }
+    }
+  });
+
+  test('bounds escape scans to actual bracket marks', () => {
+    const input = `He noted (literal ${'\\'.repeat(40_001)}) and "v.s." Examples followed) today.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+});
+
+describe('German quotation pairs in versus bracket context', () => {
+  test.each([
+    '„literal )“',
+    '‚literal )‘',
+    '„“literal )” remains“',
+    '‚‘literal )’ remains‘',
+    '„“inner” literal )“',
+    '‚‘inner’ literal )‘',
+    '“„literal )“ and more”',
+    '‘‚literal )‘ and more’',
+  ])('preserves the surrounding bracket around %s', (quoted) => {
+    for (const versus of ['vs.', 'v.s.']) {
+      const input = `He noted (${quoted} and "${versus}" Examples followed) today.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+      }
+    }
+  });
+
+  test.each(['„literal )“', '‚literal )‘'])(
+    'releases completed brackets after %s without borrowing later independent quotes',
+    (quoted) => {
+      const first = `He noted (${quoted} and "v.s.")`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(`${first} He said “Done.”`, { caseNeutral })).toEqual([
+          first,
+          'He said “Done.”',
+        ]);
+      }
+    },
+  );
+
+  test('uses the same quote endpoints in the paired-angle prepass', () => {
+    for (const caseNeutral of [false, true]) {
+      const input = 'He noted <„“inner” literal >“ and "v.s." Examples followed> today.';
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
   });
 });
 
