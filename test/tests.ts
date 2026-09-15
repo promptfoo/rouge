@@ -3841,3 +3841,24 @@ test('preserves literal greater-than marks inside pending quotation spans', () =
     }
   }
 });
+
+test.each(['vs.', 'v.s.', 'etc.', 'Jan.', 'U.S.', 'Value.'])(
+  'keeps the paired closing apostrophe after %s before an unspaced opener',
+  (abbreviation) => {
+    for (const caseNeutral of [false, true]) {
+      const first = `He wrote '${abbreviation}'`;
+      for (const second of ['(Alice replied.)', '[Alice replied.]', '{Alice replied.}']) {
+        expect(rouge.sentenceSegment(first + second, { caseNeutral })).toEqual([first + second]);
+        expect(rouge.sentenceSegment(`${first} ${second}`, { caseNeutral })).toEqual([
+          first,
+          second,
+        ]);
+      }
+      const unpaired = `Use ${abbreviation}(Alice replied.)`;
+      expect(rouge.sentenceSegment(unpaired, { caseNeutral })).toEqual([
+        `Use ${abbreviation}`,
+        '(Alice replied.)',
+      ]);
+    }
+  },
+);

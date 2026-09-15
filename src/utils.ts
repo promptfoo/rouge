@@ -809,7 +809,7 @@ function sentenceChunks(input: string, caseNeutral: boolean): string[] {
         index,
         caseNeutral,
         insideQuotes,
-        brackets.depth,
+        brackets,
       );
       const end = unspacedDelimitedBoundary
         ? index + 1
@@ -1082,10 +1082,15 @@ function isUnspacedDelimitedSentenceStart(
   index: number,
   caseNeutral: boolean,
   insideQuotes: boolean,
-  bracketDepth: number,
+  brackets: BracketContext,
 ): boolean {
   let next = index + 1;
-  if (insideQuotes || bracketDepth > 0 || !/["'([{<]/.test(input[next] ?? '')) {
+  if (
+    insideQuotes ||
+    index < brackets.bracketQuoteEnd ||
+    brackets.depth > 0 ||
+    !/["'([{<]/.test(input[next] ?? '')
+  ) {
     return false;
   }
   if (/^(?:\[\p{Number}+\]|\(\p{Number}+\))/u.test(input.slice(next))) {
