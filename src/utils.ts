@@ -945,7 +945,10 @@ function indexAsciiAsideMatch(
     starts[2] = index;
     return 2;
   }
-  if (input.startsWith("''", index)) {
+  if (
+    input.startsWith("''", index) &&
+    !(starts[2] !== -1 && starts[1] > starts[2] && input[index + 2] === "'")
+  ) {
     const opening = starts[2];
     if (opening === -1 && quotationState(input, index, false)) {
       starts[2] = index;
@@ -1255,6 +1258,7 @@ function closingDelimiterEnd(
   pendingAscii: AsciiQuotationContext & { closedBrackets: number },
   typographicQuoteClosers: TypographicQuotationStack | undefined,
   flags: Uint8Array,
+  protectQuotedBrackets: boolean,
 ): number {
   let end = index + 1;
   let remaining = typographicQuoteClosers?.length ?? 0;
@@ -1294,12 +1298,7 @@ function closingDelimiterEnd(
     }
     if (closingDelimiterReg.test(input[end])) {
       pendingAscii.closedBrackets += Number(
-        isOuterClosingBracket(
-          input[end],
-          pendingAscii,
-          remaining,
-          typographicQuoteClosers !== undefined,
-        ),
+        isOuterClosingBracket(input[end], pendingAscii, remaining, protectQuotedBrackets),
       );
       pendingAscii.double &&= input[end] !== '"';
       pendingAscii.single &&= input[end] !== "'";
@@ -1336,7 +1335,7 @@ function isOuterClosingBracket(
   typographicDepth: number,
   protectQuotedBrackets: boolean,
 ): boolean {
-  // Ordinary punctuation retains its existing lexical bracket count.
+  // Ordinary punctuation and four-dot ellipses retain their lexical bracket count.
   return (
     closingBracketReg.test(character) &&
     (!protectQuotedBrackets || (typographicDepth === 0 && !hasOpenAsciiQuotation(asciiQuotes)))
@@ -1382,6 +1381,21 @@ function closesAsciiQuotation(
     : before.double && /(?:"|'')$/.test(input.slice(end - 2, end));
 }
 
+function blocksUnspacedQuotationStart(
+  input: string,
+  index: number,
+  asciiQuotes: AsciiQuotationContext,
+  threeDotEllipsis: boolean,
+): boolean {
+  return (
+    asciiQuotes.double ||
+    (threeDotEllipsis &&
+      asciiQuotes.single &&
+      input[index] === "'" &&
+      (/[“‘«„]/.test(input[index + 1] ?? '') || input.startsWith('``', index + 1)))
+  );
+}
+
 /** Include closing delimiters, or return -1 when the sentence continues. */
 function sentenceEnd(
   input: string,
@@ -1394,11 +1408,10 @@ function sentenceEnd(
   terminalEllipsis: boolean,
   asideMatches: InlineAsideMatches,
 ): number {
-  const insideQuotes = asciiQuotes.double;
   const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
   const threeDotEllipsis = /(?<!\.)\.{3}$/.test(suffix);
   if (
-    !insideQuotes &&
+    !blocksUnspacedQuotationStart(input, index + 1, asciiQuotes, threeDotEllipsis) &&
     brackets.depth === 0 &&
     !isTypographicCloser(
       input[index + 1] ?? '',
@@ -1417,6 +1430,7 @@ function sentenceEnd(
     pendingAscii,
     terminalEllipsis ? typographicQuoteClosers : undefined,
     flags,
+    threeDotEllipsis,
   );
   if (end === -1) {
     return -1;

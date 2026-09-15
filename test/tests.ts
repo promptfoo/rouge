@@ -2184,6 +2184,27 @@ describe('Utility Functions', () => {
         ['‘', '’'],
         ['„', '“'],
         ['«', '»'],
+        ['``', "''"],
+      ])('consumes a single closer before an adjacent %s%s quotation', (open, close) => {
+        const expected = ["He said 'Enough...'", `${open}Next sentence.${close}`];
+        const input = expected.join('');
+        expect(ss(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input)).toEqual(expected);
+        expect(segmentCaseNeutrally(input.toLowerCase())).toEqual(
+          expected.map((part) => part.toLowerCase()),
+        );
+        for (const continuation of ['and then continued.', 'before leaving.']) {
+          const continued = `${expected[0]}${open}${continuation}${close}`;
+          expect(ss(continued)).toEqual([continued]);
+          expect(segmentCaseNeutrally(continued)).toEqual([continued]);
+        }
+      });
+
+      test.each([
+        ['“', '”'],
+        ['‘', '’'],
+        ['„', '“'],
+        ['«', '»'],
       ])('ignores bracket literals inside %s%s quotation context', (open, close) => {
         const first = `He said ${open}Alpha... [Beta...${close} and left...`;
         const input = `${first} Next.`;
@@ -2458,6 +2479,32 @@ describe('Utility Functions', () => {
         }
       });
 
+      test.each([
+        ['"', '"'],
+        ["'", "'"],
+        ['``', "''"],
+        ["''", "''"],
+        ['“', '”'],
+        ['‘', '’'],
+        ['«', '»'],
+        ['„', '“'],
+      ])(
+        'preserves four-dot counting within partially closed brackets around %s%s',
+        (open, close) => {
+          for (const bracket of ['', ']']) {
+            const first = `The choices were ([${open}Maybe....)${close}${bracket}`;
+            const next = bracket ? 'Next.)' : 'Next.])';
+            const input = `${first} ${next}`;
+            const expected = bracket ? [first, next] : [input];
+            expect(ss(input)).toEqual(expected);
+            expect(segmentCaseNeutrally(input)).toEqual(expected);
+            const threeDots = input.replace('....', '...');
+            expect(ss(threeDots)).toEqual([threeDots]);
+            expect(segmentCaseNeutrally(threeDots)).toEqual([threeDots]);
+          }
+        },
+      );
+
       test.each(['\n', '\r\n', '\u2028', '\u2029'])(
         'uses complete source offsets for a punctuated aside wrapped with %j',
         (wrap) => {
@@ -2529,6 +2576,31 @@ describe('Utility Functions', () => {
           const expected = [first, second.replaceAll('\n', ' ')];
           expect(ss(`${first} ${second}`)).toEqual(expected);
           expect(segmentCaseNeutrally(`${first} ${second}`)).toEqual(expected);
+        },
+      );
+
+      test.each(['``', "''"])(
+        'closes the inner single quotation before a %s aside ends',
+        (opening) => {
+          for (const content of ['really', "can't"]) {
+            const first = `He paused... ${opening}Perhaps '${content}''' before leaving.`;
+            const input = `${first} Next.`;
+            expect(ss(input)).toEqual([first, 'Next.']);
+            expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+            expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([
+              first.toLowerCase(),
+              'next.',
+            ]);
+          }
+          for (const aside of [
+            `${opening}Perhaps 'really''`,
+            `${opening}Perhaps 'really' ''`,
+            `'Perhaps ${opening}really'''`,
+          ]) {
+            const input = `He paused... ${aside} before leaving.`;
+            expect(ss(input)).toEqual([input]);
+            expect(segmentCaseNeutrally(input)).toEqual([input]);
+          }
         },
       );
 
