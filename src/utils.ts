@@ -145,7 +145,7 @@ function isAlphabeticFootnote(input: string, index: number): boolean {
   const following = characterAt(input, index + 1);
   return (
     following !== following.normalize('NFKC') &&
-    /^\p{Lm}(?:[\s.,;:!?"'”’\])}>]|$)/u.test(input.slice(index + 1, index + 5))
+    /^\p{Lm}(?:[\s.,;:!?"'“‘”’\])}>]|$)/u.test(input.slice(index + 1, index + 5))
   );
 }
 
@@ -173,7 +173,7 @@ function isRightSmartApostrophe(input: string, index: number, leadingElision: bo
   );
 }
 
-function followsQuotedNumericCitation(
+function followsQuotedCitation(
   input: string,
   index: number,
   candidate: number | undefined,
@@ -182,6 +182,10 @@ function followsQuotedNumericCitation(
     return false;
   }
   let start = index;
+  const modifier = input.slice(Math.max(0, start - 2), start).match(/\p{Lm}$/u)?.[0];
+  if (modifier !== undefined && isAlphabeticFootnote(input, start - modifier.length - 1)) {
+    start -= modifier.length;
+  }
   while (start > 0) {
     const number = input.slice(Math.max(0, start - 2), start).match(/\p{Number}$/u)?.[0];
     if (number === undefined) {
@@ -211,7 +215,7 @@ function smartApostrophes(input: string): Uint8Array {
         input.slice(Math.max(0, index - 2), index + 3),
       );
       if (
-        followsQuotedNumericCitation(input, index, candidateStart) ||
+        followsQuotedCitation(input, index, candidateStart) ||
         !(wordInternal || leadingElision)
       ) {
         opening = index;
@@ -314,19 +318,37 @@ function questionStartChecker(
   };
 }
 
+function questionContentStart(input: string, start: number): number {
+  let offset = start;
+  while (offset < input.length) {
+    if (/[\s"'“‘’([{<]/.test(input[offset])) {
+      offset++;
+    } else if (input.startsWith('``', offset)) {
+      offset += 2;
+    } else {
+      break;
+    }
+  }
+  return offset;
+}
+
 function quotedQuestionChecker(source: QuestionSource, caseNeutral: boolean) {
   let checker: QuestionTerminalChecker | undefined;
   let through = 0;
+  let chunkStart = -1;
+  let contentStart = 0;
+  let scoped = false;
   return (start: number, index: number): boolean => {
-    if (
-      index >= through &&
-      /["'‘“`]/.test(source.input[index]) &&
-      scopedQuestionStartReg.test(source.input.slice(start, start + 6))
-    ) {
+    if (start !== chunkStart) {
+      chunkStart = start;
+      contentStart = questionContentStart(source.input, start);
+      scoped = scopedQuestionStartReg.test(source.input.slice(contentStart, contentStart + 6));
+    }
+    if (index >= through && /["'‘“`]/.test(source.input[index]) && scoped) {
       const end = questionQuotationPairs(source, caseNeutral)[index];
       if (end > index) {
         checker ??= new QuestionTerminalChecker(source, caseNeutral);
-        const terminal = checker.questionTerminal(start);
+        const terminal = checker.questionTerminal(contentStart);
         if (terminal >= 0) {
           through = Math.min(end, terminal);
         }
@@ -363,10 +385,7 @@ class QuestionTerminalChecker {
 
   questionTerminal(start: number): number {
     const { input, apostrophes } = this.#source;
-    let offset = start;
-    while (offset < input.length && /[\s"'“‘’([{<]/.test(input[offset])) {
-      offset++;
-    }
+    const offset = questionContentStart(input, start);
     const scope = this.#scope(offset);
     if (offset <= scope.through) {
       return scope.question ? scope.through : -1;

@@ -2254,6 +2254,26 @@ describe('Utility Functions', () => {
       );
     });
 
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+      ['"', '"'],
+      ["'", "'"],
+      ['``', "''"],
+    ])('recognizes a scoped question behind leading %s%s', (open, close) => {
+      const inner = open === '‘' ? '“what?”' : '‘what?’';
+      const first = `${open}Which ${inner} did she quote?${close}`;
+      const input = `${first} Next.`;
+      expect(ss(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input)).toEqual([first, 'Next.']);
+      expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([first.toLowerCase(), 'next.']);
+    });
+
+    test('scans a long leading delimiter run once before checking a question starter', () => {
+      const first = `${'('.repeat(100_000)}Which ‘Stop.’ did she quote?${')'.repeat(100_000)}`;
+      expect(segmentCaseNeutrally(`${first} Next.`)).toEqual([first, 'Next.']);
+    }, 5000);
+
     test.each(['whose headquarters are in the U.S.', 'whose advisor is Mr. Smith.'])(
       'stops question lookahead at the outer closer after %s',
       (relative) => {
@@ -2654,6 +2674,46 @@ describe('Utility Functions', () => {
         expect(ss(input)).toEqual([input]);
         expect(segmentCaseNeutrally(input)).toEqual([input]);
         expect(segmentCaseNeutrally(input.toLowerCase())).toEqual([input.toLowerCase()]);
+      },
+    );
+
+    test.each([
+      ['“', '”'],
+      ['‘', '’'],
+    ])(
+      'attaches isolated modifier footnotes before adjacent smart openers after %s%s',
+      (open, close) => {
+        for (const marker of ['ᵃ', 'ᵇ']) {
+          const first = `${open}Stop?${close}${marker}`;
+          for (const [nextOpen, nextClose] of [
+            ['“', '”'],
+            ['‘', '’'],
+          ]) {
+            const second = `${nextOpen}Next.${nextClose}`;
+            expect(ss(`${first}${second}`)).toEqual([first, second]);
+            expect(segmentCaseNeutrally(`${first}${second}`)).toEqual([first, second]);
+            expect(segmentCaseNeutrally(`${first}${second}`.toLowerCase())).toEqual([
+              first.toLowerCase(),
+              second.toLowerCase(),
+            ]);
+          }
+          const word = `${open}Stop?${close}${marker}word.`;
+          expect(ss(word)).toEqual([word]);
+          expect(segmentCaseNeutrally(word)).toEqual([`${open}Stop?${close}`, `${marker}word.`]);
+        }
+      },
+    );
+
+    test.each(['ᵃ', '2ᵃ', '𝟚ᵇ', '\u{107a5}'])(
+      'opens a smart quotation after an acronym and modifier citation %s',
+      (marker) => {
+        const first = `‘U.S.’${marker}`;
+        expect(ss(`${first}‘Next.’`)).toEqual([first, '‘Next.’']);
+        expect(segmentCaseNeutrally(`${first}‘Next.’`)).toEqual([first, '‘Next.’']);
+        expect(segmentCaseNeutrally(`${first}‘Next.’`.toLowerCase())).toEqual([
+          first.toLowerCase(),
+          '‘next.’',
+        ]);
       },
     );
 
