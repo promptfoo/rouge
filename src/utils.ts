@@ -487,6 +487,7 @@ interface ListScanState extends ListBracketState {
   cursor: number;
   caseNeutral: boolean;
   referenceThrough?: number;
+  referenceBoundary?: number;
   quote: string | undefined;
   quoteFlags?: Uint8Array;
   yearList?: boolean;
@@ -526,7 +527,7 @@ function numericQuoteFlags(input: string): Uint8Array | undefined {
     }
     const previous = input[index - 1] ?? '';
     const following = characterAt(input, index + 1);
-    const opener = index === 0 || /^[\s\p{Punctuation}<=]$/u.test(previous);
+    const opener = index === 0 || /^[\s\p{Punctuation}<=>]$/u.test(previous);
     if (opener && /^\p{Number}$/u.test(following)) {
       candidate = index;
     } else if (candidate !== undefined) {
@@ -652,11 +653,11 @@ function listQuoteCloser(
     return "''";
   }
   if (character === '"') {
-    return index === 0 || /^[\s\p{Punctuation}<=]$/u.test(input[index - 1]) ? '"' : undefined;
+    return index === 0 || /^[\s\p{Punctuation}<=>]$/u.test(input[index - 1]) ? '"' : undefined;
   }
   if (
     character === "'" &&
-    (index === 0 || /^[\s\p{Punctuation}<=]$/u.test(input[index - 1])) &&
+    (index === 0 || /^[\s\p{Punctuation}<=>]$/u.test(input[index - 1])) &&
     (quoteFlags?.[index] === 1 || !/^\p{Number}$/u.test(characterAt(input, index + 1))) &&
     !singleQuoteElisionReg.test(input.slice(index + 1, index + 32))
   ) {
@@ -859,6 +860,13 @@ function advanceListScan(input: string, end: number, state: ListScanState): void
       continue;
     }
     trackListBrackets(input, index, state);
+    if (
+      state.referenceThrough !== undefined &&
+      state.bracketStackLength === 0 &&
+      isListReferenceBoundary(input, index, state.caseNeutral)
+    ) {
+      state.referenceBoundary = index;
+    }
   }
 }
 
@@ -973,30 +981,22 @@ function nextListMarker(
   return null;
 }
 
-/** Scan disjoint reference gaps; abbreviation and decimal periods do not end their context. */
-function hasListReferenceBoundary(
-  input: string,
-  start: number,
-  end: number,
-  caseNeutral: boolean,
-): boolean {
-  for (const terminal of input.slice(start, end).matchAll(/[.!?:;\r\n]/g)) {
-    const index = start + terminal.index;
-    if (terminal[0] !== '.') {
-      return true;
-    }
-    const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
-    const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
-    if (
-      (abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix)) ||
-      acronymReg.test(gateSuffix) ||
-      (/\d/.test(input[index - 1] ?? '') && /\d/.test(input[index + 1] ?? ''))
-    ) {
-      continue;
-    }
+/** Test only unquoted, unbracketed reference punctuation from the shared source cursor. */
+function isListReferenceBoundary(input: string, index: number, caseNeutral: boolean): boolean {
+  const terminal = input[index];
+  if (!/[.!?:;\r\n]/.test(terminal)) {
+    return false;
+  }
+  if (terminal !== '.') {
     return true;
   }
-  return false;
+  const suffix = input.slice(Math.max(0, index + 1 - sentenceSuffixLength), index + 1);
+  const gateSuffix = caseNeutral ? suffix.toLowerCase() : suffix;
+  return !(
+    (abbrvReg.test(gateSuffix) && excepReg.test(gateSuffix)) ||
+    acronymReg.test(gateSuffix) ||
+    (/\d/.test(input[index - 1] ?? '') && /\d/.test(input[index + 1] ?? ''))
+  );
 }
 
 /** Reference labels continue through one prose run; strong punctuation starts a new context. */
@@ -1008,7 +1008,7 @@ function isListCrossReference(
 ): boolean {
   if (
     state.referenceThrough !== undefined &&
-    hasListReferenceBoundary(input, state.referenceThrough, marker.index, state.caseNeutral)
+    (state.referenceBoundary ?? -1) >= state.referenceThrough
   ) {
     state.referenceThrough = undefined;
   }

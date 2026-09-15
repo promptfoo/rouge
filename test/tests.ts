@@ -4232,3 +4232,81 @@ describe('Reference labels retain abbreviation and decimal context', () => {
     expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
   }, 5000);
 });
+
+describe('Attached quoted literals after a greater-than symbol', () => {
+  test.each([
+    '<p>"The options are a) Alpha and b) Beta."</p>',
+    "<p>'The dogs' options a) Alpha and b) Beta.'</p>",
+    "<p>'99 options a) Alpha and b) Beta.'</p>",
+    'x >"The options are a) Alpha and b) Beta."',
+  ])('keeps list labels inside the quoted literal in %s', (input) => {
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+  });
+
+  test('retains later ordinary lists after attached quotations', () => {
+    const first = '<p>"a) Alpha b) Beta"</p> Options:';
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(`${first} a) First b) Last.`, { caseNeutral })).toEqual([
+        first,
+        'a) First',
+        'b) Last.',
+      ]);
+      expect(rouge.sentenceSegment('x >5" a) Alpha b) Beta', { caseNeutral })).toEqual([
+        'x >5"',
+        'a) Alpha',
+        'b) Beta',
+      ]);
+      expect(
+        rouge.sentenceSegment("x >'99, a) Alpha b) Beta. He said 'go'.", { caseNeutral }),
+      ).toEqual(["x >'99,", 'a) Alpha', 'b) Beta.', "He said 'go'."]);
+    }
+  });
+});
+
+describe('Reference punctuation respects shared literal ownership', () => {
+  test.each([
+    '"Intro."',
+    "'Intro.'",
+    '“Intro.”',
+    '‘Intro.’',
+    '`Intro.`',
+    '(Intro.)',
+    '[Intro.]',
+    '{Intro.}',
+    '<Intro.>',
+  ])('retains a prose reference title %s', (title) => {
+    const input = `See sections 1) ${title}, 2) Scope, and 3) Details.`;
+    for (const caseNeutral of [false, true]) {
+      expect(rouge.sentenceSegment(input, { caseNeutral })).toEqual([input]);
+    }
+    expect(rouge.sentenceSegment(input.toLowerCase(), { caseNeutral: true })).toEqual([
+      input.toLowerCase(),
+    ]);
+  });
+
+  test.each(['"Intro."', '`Intro.`', '(Intro.)'])(
+    'recognizes a subsequent plain boundary after protected %s',
+    (title) => {
+      const input = `See sections 1) ${title}. Options: 2) Scope 3) Details.`;
+      for (const caseNeutral of [false, true]) {
+        expect(rouge.sentenceSegment(input, { caseNeutral }).slice(-2)).toEqual([
+          '2) Scope',
+          '3) Details.',
+        ]);
+      }
+    },
+  );
+
+  test('keeps repeated protected reference titles linear and order-sensitive', () => {
+    const input = `See sections 1) "Intro."${', 2) `More.`'.repeat(8000)}.`;
+    expect(rouge.sentenceSegment(input, { caseNeutral: true })).toEqual([input]);
+    expect(
+      rouge.l(
+        'See sections 1) "Intro.", 2) Scope, and 3) Details.',
+        'See sections 3) Details, 2) Scope, and 1) "Intro.".',
+      ),
+    ).toBeLessThan(1);
+  }, 5000);
+});
