@@ -143,6 +143,21 @@ describe('Core Functions', () => {
       );
     }, 10_000);
 
+    test('scores distinct long summaries through finite-window matching', () => {
+      expectBundledScriptToPass(
+        `
+          const tokens = Array.from({ length: 30001 }, (_, index) => \`token\${index}\`);
+          const candidate = tokens.join(' ');
+          const reference = [...tokens.slice(0, 15001), ...tokens.slice(15001).reverse()].join(' ');
+          if (module.exports.s(candidate, reference, { maxSkip: 1 }) !== 0.5) {
+            throw new Error('Finite-window partial score changed');
+          }
+          process.stdout.write('ok');
+        `,
+        3000,
+      );
+    }, 10_000);
+
     test('scores large finite full windows without visiting every position pair', () => {
       expectBundledScriptToPass(
         `
