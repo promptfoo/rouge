@@ -2895,7 +2895,11 @@ function segmentList(input: string, caseNeutral: boolean, depth: number): string
 
 /** Options for rule-based sentence segmentation. */
 export interface SentenceSegmentOptions {
-  /** Ignore letter casing when applying sentence-boundary heuristics (default: false). */
+  /**
+   * Ignore letter casing when applying sentence-boundary heuristics (default: false).
+   * Quotation rules still use punctuation and surrounding structure; ambiguous
+   * quoted phrases can have different boundaries from the default mode.
+   */
   caseNeutral?: boolean;
 }
 
